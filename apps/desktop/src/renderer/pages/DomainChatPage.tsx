@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import { useDomainStore, useChatStore } from '../stores'
+import { useDomainStore, useChatStore, useSettingsStore } from '../stores'
 import { ChatPanel } from '../components/ChatPanel'
 import { KBFileList } from '../components/KBFileList'
 import { KBUpdateProposal } from '../components/KBUpdateProposal'
@@ -14,7 +13,7 @@ const LockIcon = () => (
 export function DomainChatPage(): React.JSX.Element {
   const { activeDomainId, domains } = useDomainStore()
   const { kbProposals, applyProposal, dismissProposal } = useChatStore()
-  const [apiKey, setApiKey] = useState('')
+  const { apiKey, setApiKey } = useSettingsStore()
 
   const domain = domains.find((d) => d.id === activeDomainId)
   if (!domain || !activeDomainId) return <div />
@@ -34,7 +33,7 @@ export function DomainChatPage(): React.JSX.Element {
             placeholder="sk-ant-..."
           />
           <span className="flex items-center gap-1 text-xs text-text-tertiary">
-            <LockIcon /> stored in memory only
+            <LockIcon /> stored locally
           </span>
           <div className="flex-1" />
           <span className="text-sm font-medium text-text-secondary">{domain.name}</span>

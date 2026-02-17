@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useIntakeStore, useDomainStore } from '../stores'
+import { useIntakeStore, useDomainStore, useSettingsStore } from '../stores'
 import type { IntakeItem } from '../../preload/api'
 
 function StatusPill({ status }: { status: IntakeItem['status'] }): React.JSX.Element {
@@ -120,7 +120,7 @@ function IntakeItemCard({
 
 export function IntakePanel(): React.JSX.Element {
   const { items, loading, fetchPending, classifyItem, confirmItem, dismissItem } = useIntakeStore()
-  const [apiKey, setApiKey] = useState('')
+  const { apiKey, setApiKey } = useSettingsStore()
 
   useEffect(() => {
     fetchPending()

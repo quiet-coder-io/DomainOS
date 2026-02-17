@@ -5,6 +5,7 @@
   "description": "Send web content to DomainOS for domain classification and KB ingestion.",
   "permissions": [
     "activeTab",
+    "scripting",
     "storage"
   ],
   "host_permissions": [
