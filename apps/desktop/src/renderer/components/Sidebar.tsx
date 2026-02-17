@@ -11,12 +11,12 @@ export function Sidebar(): React.JSX.Element {
   }, [fetchDomains])
 
   return (
-    <aside className="flex h-full w-64 flex-col border-r border-neutral-800 bg-neutral-950">
-      <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
-        <h2 className="text-sm font-semibold text-neutral-300">Domains</h2>
+    <aside className="flex h-full w-64 flex-col border-r border-border bg-surface-0">
+      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <h2 className="text-sm font-semibold text-text-secondary">Domains</h2>
         <button
           onClick={() => setShowCreate(true)}
-          className="rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700"
+          className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-surface-3"
         >
           + New
         </button>
@@ -24,29 +24,54 @@ export function Sidebar(): React.JSX.Element {
 
       <nav className="flex-1 overflow-y-auto p-2">
         {loading && domains.length === 0 && (
-          <p className="px-2 py-4 text-center text-xs text-neutral-500">Loading...</p>
+          <div className="flex items-center justify-center px-2 py-6">
+            <div className="flex items-center gap-1.5">
+              {[0, 1, 2].map((i) => (
+                <span
+                  key={i}
+                  className="inline-block h-1.5 w-1.5 rounded-full bg-accent animate-pulse-dot"
+                  style={{ animationDelay: `${i * 0.2}s` }}
+                />
+              ))}
+            </div>
+          </div>
         )}
         {!loading && domains.length === 0 && (
-          <p className="px-2 py-4 text-center text-xs text-neutral-500">
-            No domains yet. Create one to get started.
-          </p>
+          <div className="mx-2 my-4 rounded-lg border border-dashed border-border p-4 text-center">
+            <p className="text-xs text-text-tertiary">
+              No domains yet.
+            </p>
+            <p className="mt-1 text-xs text-text-tertiary">
+              Create one to get started.
+            </p>
+          </div>
         )}
-        {domains.map((domain) => (
-          <button
-            key={domain.id}
-            onClick={() => setActiveDomain(domain.id)}
-            className={`mb-1 w-full rounded px-3 py-2 text-left text-sm transition-colors ${
-              activeDomainId === domain.id
-                ? 'bg-blue-600/20 text-blue-400'
-                : 'text-neutral-300 hover:bg-neutral-800'
-            }`}
-          >
-            <div className="font-medium">{domain.name}</div>
-            {domain.description && (
-              <div className="mt-0.5 truncate text-xs text-neutral-500">{domain.description}</div>
-            )}
-          </button>
-        ))}
+        {domains.map((domain) => {
+          const isActive = activeDomainId === domain.id
+          return (
+            <button
+              key={domain.id}
+              onClick={() => setActiveDomain(domain.id)}
+              className={`mb-1 flex w-full items-start gap-2 rounded px-3 py-2 text-left text-sm ${
+                isActive
+                  ? 'bg-accent-muted text-accent-text'
+                  : 'text-text-secondary hover:bg-surface-2'
+              }`}
+            >
+              <span
+                className={`mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
+                  isActive ? 'bg-accent' : 'bg-text-tertiary'
+                }`}
+              />
+              <div className="min-w-0">
+                <div className="font-medium">{domain.name}</div>
+                {domain.description && (
+                  <div className="mt-0.5 truncate text-xs text-text-tertiary">{domain.description}</div>
+                )}
+              </div>
+            </button>
+          )
+        })}
       </nav>
 
       {showCreate && <CreateDomainDialog onClose={() => setShowCreate(false)} />}

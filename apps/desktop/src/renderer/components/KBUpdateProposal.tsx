@@ -7,25 +7,27 @@ interface Props {
   onDismiss(index: number): void
 }
 
+const actionStyles = {
+  create: { pill: 'bg-success/15 text-success', label: 'CREATE' },
+  update: { pill: 'bg-warning/15 text-warning', label: 'UPDATE' },
+  delete: { pill: 'bg-danger/15 text-danger', label: 'DELETE' },
+}
+
 export function KBUpdateProposal({ proposal, index, onAccept, onDismiss }: Props): React.JSX.Element {
-  const actionColors = {
-    create: 'text-green-400',
-    update: 'text-yellow-400',
-    delete: 'text-red-400',
-  }
+  const style = actionStyles[proposal.action]
 
   return (
-    <div className="mb-2 rounded border border-neutral-700 bg-neutral-800 p-3">
+    <div className="mb-2 rounded border border-border bg-surface-2 p-3 animate-fade-in">
       <div className="mb-1 flex items-center gap-2 text-xs">
-        <span className={`font-medium ${actionColors[proposal.action]}`}>
-          {proposal.action.toUpperCase()}
+        <span className={`rounded-full px-2 py-0.5 text-[0.65rem] font-medium ${style.pill}`}>
+          {style.label}
         </span>
-        <span className="text-neutral-300">{proposal.file}</span>
+        <span className="text-text-primary">{proposal.file}</span>
       </div>
-      <p className="mb-2 text-xs text-neutral-400">{proposal.reasoning}</p>
+      <p className="mb-2 text-xs text-text-tertiary">{proposal.reasoning}</p>
 
       {proposal.content && (
-        <pre className="mb-2 max-h-32 overflow-y-auto rounded bg-neutral-900 p-2 text-xs text-neutral-300">
+        <pre className="mb-2 max-h-32 overflow-y-auto rounded border border-border-subtle bg-surface-0 p-2 font-mono text-xs text-text-secondary">
           {proposal.content.slice(0, 500)}
           {proposal.content.length > 500 ? '...' : ''}
         </pre>
@@ -34,13 +36,13 @@ export function KBUpdateProposal({ proposal, index, onAccept, onDismiss }: Props
       <div className="flex gap-2">
         <button
           onClick={() => onAccept(index)}
-          className="rounded bg-green-600/20 px-2 py-1 text-xs text-green-400 hover:bg-green-600/30"
+          className="rounded border border-success/30 px-2 py-1 text-xs text-success hover:bg-success/10"
         >
           Accept
         </button>
         <button
           onClick={() => onDismiss(index)}
-          className="rounded bg-neutral-700 px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-600"
+          className="rounded px-2 py-1 text-xs text-text-tertiary hover:text-text-secondary"
         >
           Dismiss
         </button>

@@ -7,6 +7,12 @@ interface Props {
   apiKey: string
 }
 
+const SendIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M2.5 8H13.5M13.5 8L9 3.5M13.5 8L9 12.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+)
+
 export function ChatPanel({ domainId, apiKey }: Props): React.JSX.Element {
   const { messages, isStreaming, streamingContent, sendMessage } = useChatStore()
   const [input, setInput] = useState('')
@@ -36,9 +42,11 @@ export function ChatPanel({ domainId, apiKey }: Props): React.JSX.Element {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4">
         {messages.length === 0 && !isStreaming && (
-          <p className="py-12 text-center text-sm text-neutral-500">
-            Send a message to start chatting with this domain's AI assistant.
-          </p>
+          <div className="flex h-full items-center justify-center">
+            <p className="text-sm text-text-tertiary">
+              Send a message to start chatting with this domain's AI assistant.
+            </p>
+          </div>
         )}
         {messages.map((msg, i) => (
           <MessageBubble key={i} role={msg.role} content={msg.content} />
@@ -47,9 +55,15 @@ export function ChatPanel({ domainId, apiKey }: Props): React.JSX.Element {
           <MessageBubble role="assistant" content={streamingContent} />
         )}
         {isStreaming && !streamingContent && (
-          <div className="mb-3 flex justify-start">
-            <div className="rounded-lg bg-neutral-800 px-4 py-2.5 text-sm text-neutral-400">
-              Thinking...
+          <div className="mb-3 flex justify-start animate-fade-in">
+            <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm bg-surface-2 border border-border-subtle px-4 py-3">
+              {[0, 1, 2].map((i) => (
+                <span
+                  key={i}
+                  className="inline-block h-1.5 w-1.5 rounded-full bg-accent animate-pulse-dot"
+                  style={{ animationDelay: `${i * 0.2}s` }}
+                />
+              ))}
             </div>
           </div>
         )}
@@ -57,13 +71,13 @@ export function ChatPanel({ domainId, apiKey }: Props): React.JSX.Element {
       </div>
 
       {/* Input */}
-      <div className="border-t border-neutral-800 p-4">
+      <div className="border-t border-border-subtle p-4">
         <div className="flex gap-2">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="flex-1 resize-none rounded border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-neutral-100 placeholder-neutral-500 focus:border-blue-500 focus:outline-none"
+            className="flex-1 resize-none rounded border border-border bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder-text-tertiary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
             rows={2}
             placeholder="Type a message... (Enter to send, Shift+Enter for newline)"
             disabled={isStreaming}
@@ -71,8 +85,9 @@ export function ChatPanel({ domainId, apiKey }: Props): React.JSX.Element {
           <button
             onClick={handleSend}
             disabled={isStreaming || !input.trim()}
-            className="self-end rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+            className="flex items-center gap-1.5 self-end rounded bg-accent px-4 py-2 text-sm text-white hover:bg-accent-hover disabled:opacity-50"
           >
+            <SendIcon />
             Send
           </button>
         </div>
