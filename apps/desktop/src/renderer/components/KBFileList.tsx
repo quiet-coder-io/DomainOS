@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useKBStore } from '../stores'
 
 interface Props {
@@ -14,10 +14,35 @@ const DocIcon = () => (
 
 export function KBFileList({ domainId }: Props): React.JSX.Element {
   const { files, loading, lastSyncResult, scanAndSync, fetchFiles } = useKBStore()
+  const [listHeight, setListHeight] = useState(256)
+  const dragging = useRef(false)
+  const startY = useRef(0)
+  const startH = useRef(0)
 
   useEffect(() => {
     fetchFiles(domainId)
   }, [domainId, fetchFiles])
+
+  const onMouseMove = useCallback((e: MouseEvent) => {
+    if (!dragging.current) return
+    const delta = e.clientY - startY.current
+    setListHeight(Math.max(100, startH.current + delta))
+  }, [])
+
+  const onMouseUp = useCallback(() => {
+    dragging.current = false
+    document.removeEventListener('mousemove', onMouseMove)
+    document.removeEventListener('mouseup', onMouseUp)
+  }, [onMouseMove])
+
+  const onHandleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    dragging.current = true
+    startY.current = e.clientY
+    startH.current = listHeight
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [listHeight, onMouseMove, onMouseUp])
 
   function formatSize(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`
@@ -60,26 +85,36 @@ export function KBFileList({ domainId }: Props): React.JSX.Element {
       )}
 
       {files.length > 0 && (
-        <div className="max-h-64 overflow-y-auto overflow-x-hidden">
-          <div>
-            {files.map((file) => {
-              const { dir, name } = splitPath(file.relativePath)
-              return (
-                <div key={file.id} className="flex items-start gap-1.5 border-b border-border-subtle/50 py-1.5">
-                  <span className="mt-0.5 text-text-tertiary"><DocIcon /></span>
-                  <div className="min-w-0 flex-1">
-                    {dir && (
-                      <div className="truncate font-mono text-[0.65rem] text-text-primary">{dir}</div>
-                    )}
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="truncate text-text-tertiary">{name}</span>
-                      <span className="shrink-0 text-[0.65rem] text-text-tertiary">{formatSize(file.sizeBytes)}</span>
+        <div>
+          <div
+            className="overflow-y-auto overflow-x-hidden"
+            style={{ height: listHeight }}
+          >
+            <div>
+              {files.map((file) => {
+                const { dir, name } = splitPath(file.relativePath)
+                return (
+                  <div key={file.id} className="flex items-start gap-1.5 border-b border-border-subtle/50 py-1.5">
+                    <span className="mt-0.5 text-text-tertiary"><DocIcon /></span>
+                    <div className="min-w-0 flex-1">
+                      {dir && (
+                        <div className="truncate font-mono text-[0.65rem] text-text-primary">{dir}</div>
+                      )}
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="truncate text-text-tertiary">{name}</span>
+                        <span className="shrink-0 text-[0.65rem] text-text-tertiary">{formatSize(file.sizeBytes)}</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )
-            })}
+                )
+              })}
+            </div>
           </div>
+          {/* Drag handle */}
+          <div
+            onMouseDown={onHandleMouseDown}
+            className="mx-auto h-1 cursor-row-resize rounded-full border-t border-border hover:bg-accent/30 transition-colors"
+          />
         </div>
       )}
     </div>

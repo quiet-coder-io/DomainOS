@@ -8,6 +8,7 @@ interface DomainState {
 
   fetchDomains(): Promise<void>
   createDomain(input: { name: string; description?: string; kbPath: string }): Promise<Domain | null>
+  updateDomain(id: string, input: { name?: string; description?: string; kbPath?: string }): Promise<boolean>
   setActiveDomain(id: string | null): void
   deleteDomain(id: string): Promise<void>
 }
@@ -40,6 +41,16 @@ export const useDomainStore = create<DomainState>((set, get) => ({
       return result.value
     }
     return null
+  },
+
+  async updateDomain(id, input) {
+    const result = await window.domainOS.domain.update(id, input)
+    if (result.ok) {
+      await get().fetchDomains()
+      return true
+    }
+    console.error('updateDomain failed:', result.error)
+    return false
   },
 
   setActiveDomain(id) {
