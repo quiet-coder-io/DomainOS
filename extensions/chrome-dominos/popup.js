@@ -32,24 +32,7 @@ async function extractContent() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
   if (!tab?.id) return null
 
-  // Try Gmail content script extraction first
-  if (tab.url && tab.url.includes('mail.google.com')) {
-    try {
-      const response = await chrome.tabs.sendMessage(tab.id, { action: 'extractEmail' })
-      if (response && response.title) {
-        return {
-          title: response.title,
-          content: response.content || '',
-          sourceUrl: tab.url,
-          extractionMode: 'full',
-        }
-      }
-    } catch {
-      // Content script not ready or not Gmail — fall through
-    }
-  }
-
-  // Fallback: page title + selected text
+  // Extract page title + selected text (or full body text)
   try {
     const [result] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
