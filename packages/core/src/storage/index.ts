@@ -1,6 +1,6 @@
 /**
- * Storage — local-first persistence layer.
- * SQLite for structured data, filesystem for documents.
+ * Storage — SQLite database, migrations, queries.
  */
 
-export {}
+export { openDatabase } from './database.js'
+export { runMigrations } from './migrations.js'

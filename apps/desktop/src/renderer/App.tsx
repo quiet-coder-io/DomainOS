@@ -1,10 +1,14 @@
+import { Sidebar } from './components'
+import { DomainListPage, DomainChatPage } from './pages'
+import { useDomainStore } from './stores'
+
 export function App(): React.JSX.Element {
+  const activeDomainId = useDomainStore((s) => s.activeDomainId)
+
   return (
-    <div className="flex h-screen items-center justify-center bg-neutral-950 text-neutral-100">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold tracking-tight">DomainOS</h1>
-        <p className="mt-2 text-neutral-400">Local-first domain management</p>
-      </div>
+    <div className="flex h-screen bg-neutral-950 text-neutral-100">
+      <Sidebar />
+      <main className="flex-1">{activeDomainId ? <DomainChatPage /> : <DomainListPage />}</main>
     </div>
   )
 }

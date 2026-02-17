@@ -1,5 +1,7 @@
 /**
- * State management — domain state, UI state, and derived stores.
+ * State management — Zustand stores for domain, chat, and KB state.
  */
 
-export {}
+export { useDomainStore } from './domain-store'
+export { useChatStore } from './chat-store'
+export { useKBStore } from './kb-store'

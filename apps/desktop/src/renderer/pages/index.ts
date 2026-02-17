@@ -1,5 +1,6 @@
 /**
- * Page-level components — each maps to a top-level route/view.
+ * Page-level components — each maps to a top-level view.
  */
 
-export {}
+export { DomainListPage } from './DomainListPage'
+export { DomainChatPage } from './DomainChatPage'

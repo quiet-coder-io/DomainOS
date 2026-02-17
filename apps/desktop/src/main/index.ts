@@ -1,6 +1,8 @@
 import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'node:path'
 import { is } from '@electron-toolkit/utils'
+import { initDatabase, closeDatabase } from './database'
+import { registerIPCHandlers } from './ipc-handlers'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -8,7 +10,7 @@ function createWindow(): void {
     height: 800,
     show: false,
     webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
+      preload: join(__dirname, '../preload/index.mjs'),
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
@@ -32,6 +34,8 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  const db = initDatabase()
+  registerIPCHandlers(db)
   createWindow()
 
   app.on('activate', () => {
@@ -41,4 +45,8 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('before-quit', () => {
+  closeDatabase()
 })

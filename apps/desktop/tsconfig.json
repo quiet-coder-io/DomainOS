@@ -2,10 +2,7 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "composite": true,
-    "jsx": "react-jsx",
-    "paths": {
-      "@/*": ["./src/renderer/*"]
-    }
+    "jsx": "react-jsx"
   },
   "include": ["src"],
   "references": [

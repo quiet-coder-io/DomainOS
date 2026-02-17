@@ -1,6 +1,7 @@
 /**
  * Protocols — reusable instruction sets that define agent behavior.
- * Protocols are composable and can be attached to domains.
  */
 
-export {}
+export { ProtocolRepository } from './repository.js'
+export { CreateProtocolInputSchema, UpdateProtocolInputSchema, ProtocolSchema } from './schemas.js'
+export type { Protocol, CreateProtocolInput, UpdateProtocolInput } from './schemas.js'
