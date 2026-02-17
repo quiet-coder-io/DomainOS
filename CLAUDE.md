@@ -61,6 +61,20 @@ This loop validates the core value prop: domain-scoped AI that reads and writes 
 - Cross-domain features
 - Protocol marketplace/sharing
 - Auto-sync or real-time file watching
+- Browser ingestion pipeline (see Post-v0.1 Roadmap)
+
+## Post-v0.1 Roadmap
+
+### Browser-to-App Ingestion Pipeline
+Inspired by the CAPCG Gmail Extension Pipeline (v3.8). A Chrome Extension with a "Send to DomainOS" button that extracts content from web pages (starting with Gmail) and routes it to the desktop app for domain classification and KB ingestion.
+
+**Architecture:** Chrome Extension → localhost HTTP listener (Electron main process) → domain classifier → KB update proposal. Unlike CAPCG's approach (separate relay server + temp files + CLI launch), DomainOS can handle this natively — the Electron main process already runs Node.js and can accept localhost requests directly.
+
+**Design considerations:**
+- Localhost HTTP listener in main process (token-authenticated, localhost-only)
+- Intake classifier in `@domain-os/core/agents` alongside the chat agent
+- Domain routing UI in renderer (user confirms classification before ingestion)
+- Structured extraction with excerpt/full modes and content-length guards
 
 ## Key Files Reference
 
