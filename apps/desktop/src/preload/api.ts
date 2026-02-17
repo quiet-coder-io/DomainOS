@@ -41,6 +41,18 @@ export interface DomainOSAPI {
   dialog: {
     openFolder(): Promise<IPCResult<string | null>>
   }
+
+  intake: {
+    listPending(): Promise<IPCResult<IntakeItem[]>>
+    get(id: string): Promise<IPCResult<IntakeItem>>
+    classify(id: string, apiKey: string): Promise<IPCResult<{ item: IntakeItem; classification: ClassifyResult }>>
+    confirm(id: string, domainId: string): Promise<IPCResult<IntakeItem>>
+    dismiss(id: string): Promise<IPCResult<IntakeItem>>
+    getToken(): Promise<IPCResult<string>>
+    getPort(): Promise<IPCResult<number>>
+    onNewItem(callback: (itemId: string) => void): void
+    offNewItem(): void
+  }
 }
 
 // Simplified types for IPC boundary (no class instances, just plain data)
@@ -79,4 +91,25 @@ export interface KBUpdateProposal {
   action: 'create' | 'update' | 'delete'
   reasoning: string
   content: string
+}
+
+export interface IntakeItem {
+  id: string
+  sourceUrl: string
+  title: string
+  content: string
+  extractionMode: string
+  contentSizeBytes: number
+  suggestedDomainId: string | null
+  confidence: number | null
+  status: 'pending' | 'classified' | 'ingested' | 'dismissed'
+  createdAt: string
+  resolvedAt: string | null
+}
+
+export interface ClassifyResult {
+  domainId: string
+  domainName: string
+  confidence: number
+  reasoning: string
 }

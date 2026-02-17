@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 360px;
+      font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      background: #1e1e2e;
+      color: #cdd6f4;
+      font-size: 13px;
+      padding: 20px;
+    }
+    h1 { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
+    .field { margin-bottom: 14px; }
+    label {
+      display: block;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #6c7086;
+      margin-bottom: 4px;
+    }
+    input {
+      width: 100%;
+      padding: 8px 10px;
+      background: #313244;
+      border: 1px solid #45475a;
+      border-radius: 6px;
+      color: #cdd6f4;
+      font-size: 13px;
+      font-family: 'SF Mono', ui-monospace, monospace;
+    }
+    input:focus { outline: none; border-color: #89b4fa; }
+    .hint { font-size: 11px; color: #6c7086; margin-top: 4px; }
+    .btn-row { display: flex; gap: 8px; margin-top: 16px; }
+    button {
+      flex: 1;
+      padding: 8px 12px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .btn-save { background: #89b4fa; color: #1e1e2e; }
+    .btn-save:hover { background: #74c7ec; }
+    .btn-test { background: #313244; color: #cdd6f4; }
+    .btn-test:hover { background: #45475a; }
+    .status {
+      margin-top: 10px;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      display: none;
+    }
+    .status.success { display: block; background: rgba(166,227,161,0.15); color: #a6e3a1; }
+    .status.error { display: block; background: rgba(243,139,168,0.15); color: #f38ba8; }
+    .status.info { display: block; background: rgba(137,180,250,0.15); color: #89b4fa; }
+  </style>
+</head>
+<body>
+  <h1>DomainOS Settings</h1>
+
+  <div class="field">
+    <label>Auth Token</label>
+    <input id="token" type="password" placeholder="Paste token from DomainOS app">
+    <div class="hint">Copy from the DomainOS desktop app sidebar.</div>
+  </div>
+
+  <div class="field">
+    <label>Port</label>
+    <input id="port" type="number" value="19532">
+    <div class="hint">Default: 19532. Only change if custom.</div>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn-save" id="save-btn">Save</button>
+    <button class="btn-test" id="test-btn">Test Connection</button>
+  </div>
+
+  <div id="status" class="status"></div>
+
+  <script src="options.js"></script>
+</body>
+</html>

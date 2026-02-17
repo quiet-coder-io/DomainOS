@@ -7,11 +7,13 @@ import {
   DomainRepository,
   KBRepository,
   ProtocolRepository,
+  IntakeRepository,
   scanKBDirectory,
   buildKBContext,
   buildSystemPrompt,
   AnthropicProvider,
   parseKBUpdates,
+  classifyContent,
 } from '@domain-os/core'
 import type {
   CreateDomainInput,
@@ -19,6 +21,7 @@ import type {
   ChatMessage,
   KBUpdateProposal,
 } from '@domain-os/core'
+import { getIntakeToken } from './intake-token'
 
 const TOKEN_BUDGET = 32_000
 
@@ -26,6 +29,7 @@ export function registerIPCHandlers(db: Database.Database): void {
   const domainRepo = new DomainRepository(db)
   const kbRepo = new KBRepository(db)
   const protocolRepo = new ProtocolRepository(db)
+  const intakeRepo = new IntakeRepository(db)
 
   // --- Domain CRUD ---
 
@@ -152,5 +156,124 @@ export function registerIPCHandlers(db: Database.Database): void {
       return { ok: true, value: null }
     }
     return { ok: true, value: result.filePaths[0] }
+  })
+
+  // --- Intake ---
+
+  ipcMain.handle('intake:list-pending', () => {
+    return intakeRepo.listPending()
+  })
+
+  ipcMain.handle('intake:get', (_event, id: string) => {
+    return intakeRepo.getById(id)
+  })
+
+  ipcMain.handle(
+    'intake:classify',
+    async (_event, id: string, apiKey: string) => {
+      try {
+        const item = intakeRepo.getById(id)
+        if (!item.ok) return item
+
+        const domains = domainRepo.list()
+        if (!domains.ok) return domains
+
+        if (domains.value.length === 0) {
+          return { ok: false, error: 'No domains available for classification' }
+        }
+
+        const provider = new AnthropicProvider({ apiKey })
+        const classification = await classifyContent(
+          provider,
+          domains.value.map((d) => ({ id: d.id, name: d.name, description: d.description })),
+          item.value.title,
+          item.value.content,
+        )
+
+        if (!classification.ok) return { ok: false, error: classification.error.message }
+
+        const updated = intakeRepo.updateClassification(
+          id,
+          classification.value.domainId,
+          classification.value.confidence,
+        )
+
+        if (!updated.ok) return { ok: false, error: updated.error.message }
+
+        return {
+          ok: true,
+          value: {
+            item: updated.value,
+            classification: classification.value,
+          },
+        }
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    },
+  )
+
+  ipcMain.handle(
+    'intake:confirm',
+    async (_event, id: string, domainId: string) => {
+      try {
+        const item = intakeRepo.getById(id)
+        if (!item.ok) return { ok: false, error: item.error.message }
+
+        const domain = domainRepo.getById(domainId)
+        if (!domain.ok) return { ok: false, error: domain.error.message }
+
+        // Write .md file to KB folder
+        const slug = item.value.title
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-|-$/g, '')
+          .slice(0, 60)
+        const dateStr = new Date().toISOString().slice(0, 10)
+        const filename = `intake-${dateStr}-${slug}.md`
+        const filePath = join(domain.value.kbPath, filename)
+
+        const mdContent = [
+          `# ${item.value.title}`,
+          '',
+          item.value.sourceUrl ? `**Source:** ${item.value.sourceUrl}` : '',
+          `**Ingested:** ${dateStr}`,
+          '',
+          '---',
+          '',
+          item.value.content,
+        ]
+          .filter((line) => line !== '')
+          .join('\n')
+
+        await writeFile(filePath, mdContent, 'utf-8')
+
+        // Re-scan KB
+        const scanned = await scanKBDirectory(domain.value.kbPath)
+        if (scanned.ok) {
+          kbRepo.sync(domainId, scanned.value)
+        }
+
+        // Mark as ingested
+        const updated = intakeRepo.updateStatus(id, 'ingested')
+        if (!updated.ok) return { ok: false, error: updated.error.message }
+
+        return { ok: true, value: updated.value }
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    },
+  )
+
+  ipcMain.handle('intake:dismiss', (_event, id: string) => {
+    return intakeRepo.updateStatus(id, 'dismissed')
+  })
+
+  ipcMain.handle('intake:get-token', () => {
+    return { ok: true, value: getIntakeToken() }
+  })
+
+  ipcMain.handle('intake:get-port', () => {
+    return { ok: true, value: 19532 }
   })
 }

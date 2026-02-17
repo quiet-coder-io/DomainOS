@@ -73,6 +73,33 @@ const migrations: Migration[] = [
       )
     },
   },
+  {
+    version: 2,
+    description: 'Intake items — browser ingestion pipeline',
+    up(db) {
+      runSQL(
+        db,
+        `
+        CREATE TABLE IF NOT EXISTS intake_items (
+          id TEXT PRIMARY KEY,
+          source_url TEXT NOT NULL DEFAULT '',
+          title TEXT NOT NULL,
+          content TEXT NOT NULL,
+          extraction_mode TEXT NOT NULL DEFAULT 'full',
+          content_size_bytes INTEGER NOT NULL,
+          suggested_domain_id TEXT,
+          confidence REAL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          created_at TEXT NOT NULL,
+          resolved_at TEXT,
+          FOREIGN KEY (suggested_domain_id) REFERENCES domains(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_intake_items_status ON intake_items(status);
+      `,
+      )
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

@@ -41,6 +41,22 @@ const api: DomainOSAPI = {
   dialog: {
     openFolder: () => ipcRenderer.invoke('dialog:open-folder'),
   },
+
+  intake: {
+    listPending: () => ipcRenderer.invoke('intake:list-pending'),
+    get: (id: string) => ipcRenderer.invoke('intake:get', id),
+    classify: (id: string, apiKey: string) => ipcRenderer.invoke('intake:classify', id, apiKey),
+    confirm: (id: string, domainId: string) => ipcRenderer.invoke('intake:confirm', id, domainId),
+    dismiss: (id: string) => ipcRenderer.invoke('intake:dismiss', id),
+    getToken: () => ipcRenderer.invoke('intake:get-token'),
+    getPort: () => ipcRenderer.invoke('intake:get-port'),
+    onNewItem(callback: (itemId: string) => void) {
+      ipcRenderer.on('intake:new-item', (_event, itemId: string) => callback(itemId))
+    },
+    offNewItem() {
+      ipcRenderer.removeAllListeners('intake:new-item')
+    },
+  },
 }
 
 contextBridge.exposeInMainWorld('domainOS', api)

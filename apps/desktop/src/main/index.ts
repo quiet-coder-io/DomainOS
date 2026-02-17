@@ -3,9 +3,13 @@ import { join } from 'node:path'
 import { is } from '@electron-toolkit/utils'
 import { initDatabase, closeDatabase } from './database'
 import { registerIPCHandlers } from './ipc-handlers'
+import { generateIntakeToken } from './intake-token'
+import { startIntakeServer, stopIntakeServer } from './intake-server'
 
-function createWindow(): void {
-  const mainWindow = new BrowserWindow({
+let mainWindow: BrowserWindow | null = null
+
+function createWindow(): BrowserWindow {
+  const win = new BrowserWindow({
     width: 1200,
     height: 800,
     show: false,
@@ -17,29 +21,40 @@ function createWindow(): void {
     },
   })
 
-  mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
+  win.on('ready-to-show', () => {
+    win.show()
   })
 
-  mainWindow.webContents.setWindowOpenHandler((details) => {
+  win.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+    win.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    win.loadFile(join(__dirname, '../renderer/index.html'))
   }
+
+  return win
 }
 
 app.whenReady().then(() => {
   const db = initDatabase()
   registerIPCHandlers(db)
-  createWindow()
+
+  generateIntakeToken()
+
+  mainWindow = createWindow()
+
+  startIntakeServer(db, (item) => {
+    mainWindow?.webContents.send('intake:new-item', item.id)
+  })
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) {
+      mainWindow = createWindow()
+    }
   })
 })
 
@@ -48,5 +63,6 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  stopIntakeServer()
   closeDatabase()
 })

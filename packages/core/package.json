@@ -28,6 +28,10 @@
     "./storage": {
       "types": "./dist/storage/index.d.ts",
       "import": "./dist/storage/index.js"
+    },
+    "./intake": {
+      "types": "./dist/intake/index.d.ts",
+      "import": "./dist/intake/index.js"
     }
   },
   "files": [

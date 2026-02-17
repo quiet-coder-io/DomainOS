@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <h1>DomainOS Intake</h1>
+
+    <div id="status" class="status"></div>
+
+    <div id="content-preview">
+      <div class="field">
+        <label>Title</label>
+        <div id="title" class="value">-</div>
+      </div>
+      <div class="field">
+        <label>Content Size</label>
+        <div id="size" class="value">-</div>
+      </div>
+      <div class="field">
+        <label>Source</label>
+        <div id="source" class="value truncate">-</div>
+      </div>
+    </div>
+
+    <button id="send-btn" class="btn primary" disabled>Send to DomainOS</button>
+
+    <div id="not-configured" class="notice" style="display: none;">
+      <p>No auth token configured.</p>
+      <a href="#" id="open-options">Open Settings</a>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

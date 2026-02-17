@@ -9,6 +9,7 @@ export type ErrorCode =
   | 'IO_ERROR'
   | 'LLM_ERROR'
   | 'PARSE_ERROR'
+  | 'AUTH_ERROR'
 
 export class DomainOSError extends Error {
   readonly code: ErrorCode
@@ -41,5 +42,9 @@ export class DomainOSError extends Error {
 
   static parse(message: string): DomainOSError {
     return new DomainOSError('PARSE_ERROR', message)
+  }
+
+  static auth(message: string): DomainOSError {
+    return new DomainOSError('AUTH_ERROR', message)
   }
 }
