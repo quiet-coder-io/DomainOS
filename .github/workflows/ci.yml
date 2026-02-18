@@ -34,6 +34,8 @@ jobs:
       - run: node -v && npm -v
       - name: Install
         run: npm ci
+      - name: Build core
+        run: npm run build --workspace=@domain-os/core
       - name: Typecheck
         run: npm run typecheck
       - name: Test
