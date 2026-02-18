@@ -27,6 +27,7 @@ const api: DomainOSAPI = {
 
   chat: {
     send: (payload) => ipcRenderer.invoke('chat:send', payload),
+    extractKbUpdates: (payload) => ipcRenderer.invoke('chat:extract-kb-updates', payload),
     onStreamChunk(callback: (chunk: string) => void) {
       ipcRenderer.on('chat:stream-chunk', (_event, chunk: string) => callback(chunk))
     },

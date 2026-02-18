@@ -9,3 +9,5 @@ export { DomainOSError } from './errors.js'
 export type { ErrorCode } from './errors.js'
 
 export { UUIDSchema, TimestampSchema, FilePathSchema } from './schemas.js'
+
+export { fnv1aHash } from './hash.js'

@@ -1,5 +1,20 @@
 import { create } from 'zustand'
-import type { KBUpdateProposal } from '../../preload/api'
+import type { KBUpdateProposal, RejectedProposal } from '../../preload/api'
+import { fnv1aHash } from '../common/hash'
+
+// --- Store-layer wrappers with IDs and source attribution ---
+
+interface StoredProposal extends KBUpdateProposal {
+  localId: string
+  source: 'chat-send' | 'extract'
+  sourceMessageIndex?: number
+  isEdited?: boolean
+}
+
+interface StoredRejectedProposal extends RejectedProposal {
+  source: 'chat-send' | 'extract'
+  sourceMessageIndex?: number
+}
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
@@ -9,23 +24,70 @@ interface ChatMessage {
   decisions?: Array<{ decisionId: string; decision: string }>
 }
 
+interface ExtractionResult {
+  proposalCount: number
+  messageLabel: string
+}
+
 interface ChatState {
   /** Messages for the currently active domain. */
   messages: ChatMessage[]
   isStreaming: boolean
   streamingContent: string
-  kbProposals: KBUpdateProposal[]
+  kbProposals: StoredProposal[]
+  rejectedProposals: StoredRejectedProposal[]
 
   /** Per-domain message storage (in-memory, lost on app restart). */
   messagesByDomain: Record<string, ChatMessage[]>
-  proposalsByDomain: Record<string, KBUpdateProposal[]>
+  proposalsByDomain: Record<string, StoredProposal[]>
+  rejectedProposalsByDomain: Record<string, StoredRejectedProposal[]>
   activeDomainId: string | null
+
+  /** Extraction state */
+  isExtracting: boolean
+  lastExtractAt: Record<string, number>
+  extractionError: string | null
+  extractionResult: ExtractionResult | null
 
   switchDomain(domainId: string, domainName: string): void
   sendMessage(content: string, domainId: string, apiKey: string): Promise<void>
-  applyProposal(domainId: string, index: number): Promise<void>
-  dismissProposal(index: number): void
+  applyProposal(domainId: string, id: string): Promise<void>
+  dismissProposal(id: string): void
+  editProposal(id: string, newContent: string): void
+  dismissRejectedProposal(id: string): void
   clearMessages(): void
+  extractKbUpdates(domainId: string, content: string, messageIndex?: number): Promise<void>
+  clearExtractionError(): void
+  clearExtractionResult(): void
+}
+
+function buildProposalId(p: KBUpdateProposal): string {
+  return fnv1aHash(`${p.file}|${p.action}|${p.tier}|${p.mode}|${p.reasoning}|${p.content.slice(0, 100)}`)
+}
+
+function toStoredProposal(
+  p: KBUpdateProposal,
+  source: 'chat-send' | 'extract',
+  messageIndex?: number,
+): StoredProposal {
+  return {
+    ...p,
+    localId: buildProposalId(p),
+    source,
+    sourceMessageIndex: messageIndex,
+  }
+}
+
+function toStoredRejected(
+  r: RejectedProposal,
+  source: 'chat-send' | 'extract',
+  messageIndex?: number,
+): StoredRejectedProposal {
+  return {
+    ...r,
+    source,
+    sourceMessageIndex: messageIndex,
+  }
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -33,9 +95,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isStreaming: false,
   streamingContent: '',
   kbProposals: [],
+  rejectedProposals: [],
   messagesByDomain: {},
   proposalsByDomain: {},
+  rejectedProposalsByDomain: {},
   activeDomainId: null,
+  isExtracting: false,
+  lastExtractAt: {},
+  extractionError: null,
+  extractionResult: null,
 
   switchDomain(domainId, domainName) {
     const state = get()
@@ -51,18 +119,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ...state.proposalsByDomain,
         [state.activeDomainId]: state.kbProposals,
       }
+      updates.rejectedProposalsByDomain = {
+        ...state.rejectedProposalsByDomain,
+        [state.activeDomainId]: state.rejectedProposals,
+      }
     }
 
     // Restore target domain's state (or start fresh with divider)
     const savedMessages = (updates.messagesByDomain ?? state.messagesByDomain)[domainId]
     const savedProposals = (updates.proposalsByDomain ?? state.proposalsByDomain)[domainId]
+    const savedRejected = (updates.rejectedProposalsByDomain ?? state.rejectedProposalsByDomain)[domainId]
 
     set({
       ...updates,
       activeDomainId: domainId,
       messages: savedMessages ?? [{ role: 'system' as const, content: domainName }],
       kbProposals: savedProposals ?? [],
+      rejectedProposals: savedRejected ?? [],
       streamingContent: '',
+      extractionError: null,
+      extractionResult: null,
     })
   },
 
@@ -102,14 +178,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
           decisions: result.value.decisions,
         },
       ]
-      const newProposals = [...get().kbProposals, ...result.value.proposals]
+      const messageIndex = newMessages.length - 1
+      const incomingProposals = result.value.proposals.map((p) => toStoredProposal(p, 'chat-send', messageIndex))
+      const incomingRejected = (result.value.rejectedProposals ?? []).map((r) => toStoredRejected(r, 'chat-send', messageIndex))
+
+      const newProposals = [...get().kbProposals, ...incomingProposals]
+      const newRejected = [...get().rejectedProposals, ...incomingRejected]
+
       set({
         messages: newMessages,
         isStreaming: false,
         streamingContent: '',
         kbProposals: newProposals,
+        rejectedProposals: newRejected,
         messagesByDomain: { ...get().messagesByDomain, [domainId]: newMessages },
         proposalsByDomain: { ...get().proposalsByDomain, [domainId]: newProposals },
+        rejectedProposalsByDomain: { ...get().rejectedProposalsByDomain, [domainId]: newRejected },
       })
     } else {
       let errorContent = result.error ?? 'Unknown error occurred'
@@ -135,25 +219,49 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  async applyProposal(domainId, index) {
-    const proposal = get().kbProposals[index]
+  async applyProposal(domainId, id) {
+    const proposal = get().kbProposals.find((p) => p.localId === id)
     if (!proposal) return
+
+    // Apply guardrail: reject delete without confirm, reject patch mode
+    if (proposal.action === 'delete' && !proposal.confirm) return
+    if (proposal.mode === 'patch') return
 
     await window.domainOS.kbUpdate.apply(domainId, proposal)
 
-    const newProposals = get().kbProposals.filter((_, i) => i !== index)
+    const newProposals = get().kbProposals.filter((p) => p.localId !== id)
     set({
       kbProposals: newProposals,
       proposalsByDomain: { ...get().proposalsByDomain, [domainId]: newProposals },
     })
   },
 
-  dismissProposal(index) {
+  dismissProposal(id) {
     const domainId = get().activeDomainId
-    const newProposals = get().kbProposals.filter((_, i) => i !== index)
+    const newProposals = get().kbProposals.filter((p) => p.localId !== id)
     set({
       kbProposals: newProposals,
       ...(domainId ? { proposalsByDomain: { ...get().proposalsByDomain, [domainId]: newProposals } } : {}),
+    })
+  },
+
+  editProposal(id, newContent) {
+    const domainId = get().activeDomainId
+    const newProposals = get().kbProposals.map((p) =>
+      p.localId === id ? { ...p, content: newContent, isEdited: true } : p,
+    )
+    set({
+      kbProposals: newProposals,
+      ...(domainId ? { proposalsByDomain: { ...get().proposalsByDomain, [domainId]: newProposals } } : {}),
+    })
+  },
+
+  dismissRejectedProposal(id) {
+    const domainId = get().activeDomainId
+    const newRejected = get().rejectedProposals.filter((r) => r.id !== id)
+    set({
+      rejectedProposals: newRejected,
+      ...(domainId ? { rejectedProposalsByDomain: { ...get().rejectedProposalsByDomain, [domainId]: newRejected } } : {}),
     })
   },
 
@@ -163,10 +271,79 @@ export const useChatStore = create<ChatState>((set, get) => ({
       messages: [],
       streamingContent: '',
       kbProposals: [],
+      rejectedProposals: [],
+      extractionError: null,
+      extractionResult: null,
       ...(domainId ? {
         messagesByDomain: { ...get().messagesByDomain, [domainId]: [] },
         proposalsByDomain: { ...get().proposalsByDomain, [domainId]: [] },
+        rejectedProposalsByDomain: { ...get().rejectedProposalsByDomain, [domainId]: [] },
       } : {}),
     })
+  },
+
+  async extractKbUpdates(domainId, content, messageIndex) {
+    const state = get()
+
+    // Rate limit: 2 seconds per domain
+    const now = Date.now()
+    const lastAt = state.lastExtractAt[domainId] ?? 0
+    if (now - lastAt < 2000) return
+
+    set({
+      isExtracting: true,
+      extractionError: null,
+      extractionResult: null,
+      lastExtractAt: { ...state.lastExtractAt, [domainId]: now },
+    })
+
+    try {
+      const result = await window.domainOS.chat.extractKbUpdates({ domainId, content })
+
+      if (result.ok && result.value) {
+        const existingIds = new Set(get().kbProposals.map((p) => p.localId))
+        const existingRejectedIds = new Set(get().rejectedProposals.map((r) => r.id))
+
+        const incomingProposals = result.value.proposals
+          .map((p) => toStoredProposal(p, 'extract', messageIndex))
+          .filter((p) => !existingIds.has(p.localId))
+
+        const incomingRejected = (result.value.rejectedProposals ?? [])
+          .map((r) => toStoredRejected(r, 'extract', messageIndex))
+          .filter((r) => !existingRejectedIds.has(r.id))
+
+        const newProposals = [...get().kbProposals, ...incomingProposals]
+        const newRejected = [...get().rejectedProposals, ...incomingRejected]
+
+        const messageLabel = messageIndex != null ? `message #${messageIndex}` : 'last 10 messages'
+
+        set({
+          isExtracting: false,
+          kbProposals: newProposals,
+          rejectedProposals: newRejected,
+          proposalsByDomain: { ...get().proposalsByDomain, [domainId]: newProposals },
+          rejectedProposalsByDomain: { ...get().rejectedProposalsByDomain, [domainId]: newRejected },
+          extractionResult: { proposalCount: incomingProposals.length, messageLabel },
+        })
+      } else {
+        set({
+          isExtracting: false,
+          extractionError: result.error ?? 'Unknown error',
+        })
+      }
+    } catch (err) {
+      set({
+        isExtracting: false,
+        extractionError: err instanceof Error ? err.message : 'KB extraction failed',
+      })
+    }
+  },
+
+  clearExtractionError() {
+    set({ extractionError: null })
+  },
+
+  clearExtractionResult() {
+    set({ extractionResult: null })
   },
 }))

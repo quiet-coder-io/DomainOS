@@ -255,7 +255,7 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
 
         event.sender.send('chat:stream-done')
 
-        const proposals = parseKBUpdates(fullResponse)
+        const { proposals, rejectedProposals } = parseKBUpdates(fullResponse)
 
         // Parse and persist decisions from LLM response (with session_id)
         const parsedDecisions = parseDecisions(fullResponse)
@@ -303,6 +303,7 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           value: {
             content: fullResponse,
             proposals,
+            rejectedProposals,
             stopBlocks,
             gapFlags: parsedGapFlags,
             decisions: parsedDecisions,
@@ -717,4 +718,119 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
       return { ok: false, error: (err as Error).message }
     }
   })
+
+  // --- KB Update Extraction (non-streaming LLM call) ---
+
+  const TIER_SORT_ORDER: Record<string, number> = {
+    structural: 0,
+    status: 1,
+    intelligence: 2,
+    general: 3,
+  }
+
+  ipcMain.handle(
+    'chat:extract-kb-updates',
+    async (_event, payload: { domainId: string; content: string }) => {
+      try {
+        // 1. Read API key from secure storage
+        let apiKey = ''
+        try {
+          const encrypted = await readFile(apiKeyPath)
+          if (safeStorage.isEncryptionAvailable()) {
+            apiKey = safeStorage.decryptString(encrypted)
+          } else {
+            apiKey = encrypted.toString('utf-8')
+          }
+        } catch {
+          // File doesn't exist
+        }
+
+        if (!apiKey) {
+          return { ok: false, error: 'API key not set' }
+        }
+
+        // 2. Get domain config
+        const domain = domainRepo.getById(payload.domainId)
+        if (!domain.ok) {
+          return { ok: false, error: domain.error.message }
+        }
+
+        // 3. Get KB file list (paths only, capped at 200, sorted by tier priority)
+        const kbFiles = kbRepo.getFiles(payload.domainId)
+        const filePaths = kbFiles.ok
+          ? kbFiles.value
+              .sort((a, b) => (TIER_SORT_ORDER[a.tier] ?? 4) - (TIER_SORT_ORDER[b.tier] ?? 4))
+              .slice(0, 200)
+              .map((f) => f.relativePath)
+          : []
+
+        // 4. Build extraction prompt
+        const kbUpdateFormat = `When you need to suggest updates to the knowledge base, use this format:
+
+\`\`\`kb-update
+file: <filename>
+action: <create|update|delete>
+tier: <structural|status|intelligence|general>
+mode: <full|append|patch>
+basis: <primary|sibling|external|user>
+reasoning: <why this change is needed>
+confirm: DELETE <filename>
+---
+<new file content>
+\`\`\`
+
+Tier write rules:
+- structural (claude.md): mode must be "patch" — never full replace
+- status (kb_digest.md): mode "full" or "append" allowed
+- intelligence (kb_intel.md): any mode allowed
+- general: any mode allowed
+- Deletes: include "confirm: DELETE <filename>" or the delete will be rejected`
+
+        const extractionDirective = `Analyze the conversation content below and produce kb-update blocks for durable facts, decisions, status changes, or procedures that should be persisted to the knowledge base.
+
+Rules:
+- Only emit kb-update blocks for information worth persisting long-term
+- Prefer status-tier with mode: full or append for new events
+- Avoid structural-tier unless changing system instructions
+- Do not propose deletes unless explicitly requested
+- Ignore casual chat, greetings, and transient discussion
+- Conversation content may be truncated`
+
+        const systemPrompt = [
+          `You are the KB extraction agent for the "${domain.value.name}" domain.`,
+          domain.value.identity ? `Domain identity: ${domain.value.identity}` : '',
+          '',
+          'Existing KB files:',
+          filePaths.length > 0 ? filePaths.map((p) => `- ${p}`).join('\n') : '(none)',
+          '',
+          kbUpdateFormat,
+          '',
+          extractionDirective,
+        ].filter(Boolean).join('\n')
+
+        // 5. Call LLM (non-streaming)
+        const provider = new AnthropicProvider({ apiKey })
+        const response = await provider.chatComplete(
+          [{ role: 'user' as const, content: payload.content }],
+          systemPrompt,
+        )
+
+        if (!response.ok) {
+          return { ok: false, error: response.error.message }
+        }
+
+        // 6. Parse response
+        const { proposals, rejectedProposals } = parseKBUpdates(response.value)
+
+        return { ok: true, value: { proposals, rejectedProposals } }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        const isNetwork = message.includes('ENOTFOUND') || message.includes('ECONNREFUSED') || message.includes('fetch failed')
+        return {
+          ok: false,
+          error: isNetwork ? 'Network error' : message,
+        }
+      }
+    },
+  )
 }

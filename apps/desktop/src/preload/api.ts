@@ -31,9 +31,17 @@ export interface DomainOSAPI {
     }): Promise<IPCResult<{
       content: string
       proposals: KBUpdateProposal[]
+      rejectedProposals: RejectedProposal[]
       stopBlocks?: Array<{ reason: string; actionNeeded: string }>
       gapFlags?: Array<{ category: string; description: string }>
       decisions?: Array<{ decisionId: string; decision: string }>
+    }>>
+    extractKbUpdates(payload: {
+      domainId: string
+      content: string
+    }): Promise<IPCResult<{
+      proposals: KBUpdateProposal[]
+      rejectedProposals: RejectedProposal[]
     }>>
     onStreamChunk(callback: (chunk: string) => void): void
     offStreamChunk(): void
@@ -161,6 +169,18 @@ export interface KBUpdateProposal {
   reasoning: string
   content: string
   confirm?: string
+}
+
+export interface RejectedProposal {
+  id: string
+  file: string
+  action: string
+  reasoning: string
+  rejectionReason: string
+  suggestedFix?: string
+  tier?: string
+  mode?: string
+  rawExcerpt?: string
 }
 
 export interface IntakeItem {

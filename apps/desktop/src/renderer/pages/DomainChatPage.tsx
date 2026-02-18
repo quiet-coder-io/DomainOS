@@ -3,6 +3,7 @@ import { useDomainStore, useChatStore, useSettingsStore } from '../stores'
 import { ChatPanel } from '../components/ChatPanel'
 import { KBFileList } from '../components/KBFileList'
 import { KBUpdateProposal } from '../components/KBUpdateProposal'
+import { RejectedProposal } from '../components/RejectedProposal'
 import { ProtocolEditor } from '../components/ProtocolEditor'
 import { SessionIndicator } from '../components/SessionIndicator'
 import { GapFlagPanel } from '../components/GapFlagPanel'
@@ -18,7 +19,16 @@ const LockIcon = () => (
 
 export function DomainChatPage(): React.JSX.Element {
   const { activeDomainId, domains } = useDomainStore()
-  const { messages, kbProposals, applyProposal, dismissProposal, switchDomain } = useChatStore()
+  const {
+    messages,
+    kbProposals,
+    rejectedProposals,
+    applyProposal,
+    dismissProposal,
+    editProposal,
+    dismissRejectedProposal,
+    switchDomain,
+  } = useChatStore()
   const prevDomainIdRef = useRef<string | null>(null)
   const { apiKey, loading: apiKeyLoading, setApiKey, loadApiKey } = useSettingsStore()
 
@@ -75,13 +85,26 @@ export function DomainChatPage(): React.JSX.Element {
         {kbProposals.length > 0 && (
           <div className="mt-4">
             <h3 className="mb-2 text-sm font-semibold text-text-secondary">KB Update Proposals</h3>
-            {kbProposals.map((proposal, i) => (
+            {kbProposals.map((proposal) => (
               <KBUpdateProposal
-                key={i}
+                key={proposal.localId}
                 proposal={proposal}
-                index={i}
-                onAccept={(idx) => applyProposal(activeDomainId, idx)}
+                onAccept={(id) => applyProposal(activeDomainId, id)}
                 onDismiss={dismissProposal}
+                onEdit={editProposal}
+              />
+            ))}
+          </div>
+        )}
+
+        {rejectedProposals.length > 0 && (
+          <div className="mt-4">
+            <h3 className="mb-2 text-sm font-semibold text-warning">Rejected Proposals</h3>
+            {rejectedProposals.map((proposal) => (
+              <RejectedProposal
+                key={proposal.id}
+                proposal={proposal}
+                onDismiss={dismissRejectedProposal}
               />
             ))}
           </div>

@@ -1,6 +1,7 @@
 interface Props {
   role: 'user' | 'assistant'
   content: string
+  onExtractKb?: () => void
 }
 
 /** Minimal inline markdown renderer — handles code blocks, inline code, bold, lists, paragraphs */
@@ -68,11 +69,17 @@ function renderInline(text: string): React.ReactNode {
   })
 }
 
-export function MessageBubble({ role, content }: Props): React.JSX.Element {
+const ExtractIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M3 7h8M7 3v8M4.5 1.5h5M4.5 12.5h5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+  </svg>
+)
+
+export function MessageBubble({ role, content, onExtractKb }: Props): React.JSX.Element {
   const isUser = role === 'user'
 
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-3 animate-fade-in`}>
+    <div className={`group relative flex ${isUser ? 'justify-end' : 'justify-start'} mb-3 animate-fade-in`}>
       <div
         className={`max-w-[80%] px-4 py-2.5 text-sm leading-relaxed ${
           isUser
@@ -86,6 +93,17 @@ export function MessageBubble({ role, content }: Props): React.JSX.Element {
           <div className="break-words">{renderMarkdown(content)}</div>
         )}
       </div>
+      {/* Per-message "Update KB" button — hover-visible on assistant messages */}
+      {!isUser && onExtractKb && (
+        <button
+          onClick={onExtractKb}
+          className="absolute -bottom-1 right-0 flex items-center gap-1 rounded border border-border bg-surface-0 px-1.5 py-0.5 text-[0.6rem] text-text-tertiary opacity-0 transition-opacity hover:bg-surface-2 hover:text-text-secondary group-hover:opacity-100"
+          title="Extract KB updates from this message"
+        >
+          <ExtractIcon />
+          Update KB
+        </button>
+      )}
     </div>
   )
 }

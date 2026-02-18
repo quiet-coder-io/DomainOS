@@ -21,8 +21,8 @@ export type {
   PromptManifestFile,
   PromptManifestExcludedFile,
 } from './prompt-builder.js'
-export { parseKBUpdates } from './kb-update-parser.js'
-export type { KBUpdateProposal, KBUpdateMode, KBUpdateBasis } from './kb-update-parser.js'
+export { parseKBUpdates, parseKBUpdatesCompat, REJECTION_REASONS } from './kb-update-parser.js'
+export type { KBUpdateProposal, KBUpdateMode, KBUpdateBasis, RejectedProposal, ParseKBUpdatesResult } from './kb-update-parser.js'
 export { parseDecisions } from './decision-parser.js'
 export type { ParsedDecision } from './decision-parser.js'
 export { parseGapFlags } from './gap-parser.js'
