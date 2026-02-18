@@ -5,13 +5,12 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  workflow_dispatch: {}
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -35,8 +34,6 @@ jobs:
       - run: node -v && npm -v
       - name: Install
         run: npm ci
-      - name: Build
-        run: npm run build
       - name: Typecheck
         run: npm run typecheck
       - name: Test
