@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useDomainStore, useChatStore, useSettingsStore } from '../stores'
 import { ChatPanel } from '../components/ChatPanel'
 import { KBFileList } from '../components/KBFileList'
@@ -18,12 +18,26 @@ const LockIcon = () => (
 
 export function DomainChatPage(): React.JSX.Element {
   const { activeDomainId, domains } = useDomainStore()
-  const { kbProposals, applyProposal, dismissProposal } = useChatStore()
+  const { messages, kbProposals, applyProposal, dismissProposal } = useChatStore()
+  const prevDomainIdRef = useRef<string | null>(null)
   const { apiKey, loading: apiKeyLoading, setApiKey, loadApiKey } = useSettingsStore()
 
   useEffect(() => {
     loadApiKey()
   }, [loadApiKey])
+
+  // Insert a divider when switching domains (skip initial mount)
+  useEffect(() => {
+    if (!activeDomainId) return
+    const prev = prevDomainIdRef.current
+    prevDomainIdRef.current = activeDomainId
+    if (prev && prev !== activeDomainId) {
+      const name = domains.find((d) => d.id === activeDomainId)?.name ?? 'Unknown'
+      useChatStore.setState((s) => ({
+        messages: [...s.messages, { role: 'system' as const, content: name }],
+      }))
+    }
+  }, [activeDomainId, domains])
 
   const domain = domains.find((d) => d.id === activeDomainId)
   if (!domain || !activeDomainId) return <div />

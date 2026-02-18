@@ -51,14 +51,22 @@ export function ChatPanel({ domainId, apiKey }: Props): React.JSX.Element {
             </p>
           </div>
         )}
-        {messages.map((msg, i) => (
-          <div key={i}>
-            <MessageBubble role={msg.role} content={msg.content} />
-            {msg.role === 'assistant' && msg.stopBlocks?.length ? <StopAlert stopBlocks={msg.stopBlocks} /> : null}
-            {msg.role === 'assistant' && msg.gapFlags?.length ? <GapFlagAlert gapFlags={msg.gapFlags} /> : null}
-            {msg.role === 'assistant' && msg.decisions?.length ? <DecisionCard decisions={msg.decisions} /> : null}
-          </div>
-        ))}
+        {messages.map((msg, i) =>
+          msg.role === 'system' ? (
+            <div key={i} className="my-4 flex items-center gap-3">
+              <div className="flex-1 border-t border-red-500/40" />
+              <span className="text-xs font-medium text-red-400">Switched to {msg.content}</span>
+              <div className="flex-1 border-t border-red-500/40" />
+            </div>
+          ) : (
+            <div key={i}>
+              <MessageBubble role={msg.role} content={msg.content} />
+              {msg.role === 'assistant' && msg.stopBlocks?.length ? <StopAlert stopBlocks={msg.stopBlocks} /> : null}
+              {msg.role === 'assistant' && msg.gapFlags?.length ? <GapFlagAlert gapFlags={msg.gapFlags} /> : null}
+              {msg.role === 'assistant' && msg.decisions?.length ? <DecisionCard decisions={msg.decisions} /> : null}
+            </div>
+          )
+        )}
         {isStreaming && streamingContent && (
           <MessageBubble role="assistant" content={streamingContent} />
         )}

@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { KBUpdateProposal } from '../../preload/api'
 
 interface ChatMessage {
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'system'
   content: string
   stopBlocks?: Array<{ reason: string; actionNeeded: string }>
   gapFlags?: Array<{ category: string; description: string }>
@@ -44,7 +44,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     const result = await window.domainOS.chat.send({
       domainId,
-      messages: currentMessages,
+      messages: currentMessages.filter((m) => m.role !== 'system') as Array<{ role: 'user' | 'assistant'; content: string }>,
       apiKey,
     })
 
