@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { useDomainStore, useIntakeStore } from '../stores'
 import { CreateDomainDialog } from './CreateDomainDialog'
 import { EditDomainDialog } from './EditDomainDialog'
@@ -14,6 +14,10 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps): React.JSX.E
   const { domains, activeDomainId, loading, fetchDomains, setActiveDomain, deleteDomain } = useDomainStore()
   const { items: intakeItems, fetchPending } = useIntakeStore()
   const [showCreate, setShowCreate] = useState(false)
+  const [createMode, setCreateMode] = useState<'add' | 'create'>('add')
+  const [showNewMenu, setShowNewMenu] = useState(false)
+  const newMenuRef = useRef<HTMLDivElement>(null)
+  const newButtonRef = useRef<HTMLButtonElement>(null)
   const [contextMenu, setContextMenu] = useState<{ domainId: string; x: number; y: number } | null>(null)
   const [editingDomainId, setEditingDomainId] = useState<string | null>(null)
 
@@ -45,6 +49,29 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps): React.JSX.E
     scrollTopRef.current = navRef.current?.scrollTop ?? 0
     setCollapsed(true)
   }, [])
+
+  // Close "+ New" dropdown on click-outside or Escape
+  useEffect(() => {
+    if (!showNewMenu) return
+    function handleMouseDown(e: MouseEvent): void {
+      if (newMenuRef.current && !newMenuRef.current.contains(e.target as Node) &&
+          newButtonRef.current && !newButtonRef.current.contains(e.target as Node)) {
+        setShowNewMenu(false)
+      }
+    }
+    function handleKeyDown(e: KeyboardEvent): void {
+      if (e.key === 'Escape') {
+        setShowNewMenu(false)
+        newButtonRef.current?.focus()
+      }
+    }
+    document.addEventListener('mousedown', handleMouseDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [showNewMenu])
 
   useEffect(() => {
     fetchDomains()
@@ -171,12 +198,43 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps): React.JSX.E
           {activeView === 'domains' && (
             <div className="flex items-center justify-between border-b border-border px-4 py-3">
               <h2 className="text-sm font-semibold text-text-secondary">Domains</h2>
-              <button
-                onClick={() => setShowCreate(true)}
-                className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-surface-3"
-              >
-                + New
-              </button>
+              <div className="relative">
+                <button
+                  ref={newButtonRef}
+                  onClick={() => setShowNewMenu((prev) => !prev)}
+                  className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-surface-3"
+                >
+                  + New
+                </button>
+                {showNewMenu && (
+                  <div
+                    ref={newMenuRef}
+                    className="absolute right-0 top-full z-50 mt-1 min-w-[180px] rounded border border-border bg-surface-1 py-1 shadow-lg"
+                  >
+                    <button
+                      autoFocus
+                      onClick={() => {
+                        setCreateMode('add')
+                        setShowNewMenu(false)
+                        setShowCreate(true)
+                      }}
+                      className="w-full px-3 py-2 text-left text-xs text-text-secondary hover:bg-surface-2"
+                    >
+                      Add existing KB
+                    </button>
+                    <button
+                      onClick={() => {
+                        setCreateMode('create')
+                        setShowNewMenu(false)
+                        setShowCreate(true)
+                      }}
+                      className="w-full px-3 py-2 text-left text-xs text-text-secondary hover:bg-surface-2"
+                    >
+                      Create new domain
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -258,7 +316,7 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps): React.JSX.E
         </>
       )}
 
-      {showCreate && <CreateDomainDialog onClose={() => setShowCreate(false)} />}
+      {showCreate && <CreateDomainDialog mode={createMode} onClose={() => setShowCreate(false)} />}
 
       {contextMenu && (
         <DomainContextMenu

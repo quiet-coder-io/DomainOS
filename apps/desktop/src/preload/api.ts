@@ -17,6 +17,11 @@ export interface DomainOSAPI {
   kb: {
     scan(domainId: string): Promise<IPCResult<KBSyncResult>>
     files(domainId: string): Promise<IPCResult<KBFile[]>>
+    scaffold(input: { dirPath: string; domainName: string }): Promise<IPCResult<{
+      files: Array<{ filename: string; status: 'created' | 'skipped' }>
+      createdCount: number
+      skippedCount: number
+    }>>
     watchStart(domainId: string): Promise<IPCResult<void>>
     watchStop(domainId: string): Promise<IPCResult<void>>
     onFilesChanged(callback: (domainId: string) => void): void

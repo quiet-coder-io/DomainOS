@@ -15,6 +15,8 @@ const api: DomainOSAPI = {
   kb: {
     scan: (domainId) => ipcRenderer.invoke('kb:scan', domainId),
     files: (domainId) => ipcRenderer.invoke('kb:files', domainId),
+    scaffold: (input: { dirPath: string; domainName: string }) =>
+      ipcRenderer.invoke('kb:scaffold', input),
     watchStart: (domainId) => ipcRenderer.invoke('kb:watch-start', domainId),
     watchStop: (domainId) => ipcRenderer.invoke('kb:watch-stop', domainId),
     onFilesChanged(callback: (domainId: string) => void) {

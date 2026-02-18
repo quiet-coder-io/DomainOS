@@ -3,10 +3,11 @@ import { useDomainStore } from '../stores'
 import { inputClass, primaryButtonClass, secondaryButtonClass } from './ui'
 
 interface Props {
+  mode: 'add' | 'create'
   onClose(): void
 }
 
-export function CreateDomainDialog({ onClose }: Props): React.JSX.Element {
+export function CreateDomainDialog({ mode, onClose }: Props): React.JSX.Element {
   const { createDomain, setActiveDomain } = useDomainStore()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -14,6 +15,8 @@ export function CreateDomainDialog({ onClose }: Props): React.JSX.Element {
   const [identity, setIdentity] = useState('')
   const [escalationTriggers, setEscalationTriggers] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [scaffoldFeedback, setScaffoldFeedback] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   async function handlePickFolder(): Promise<void> {
     const result = await window.domainOS.dialog.openFolder()
@@ -27,6 +30,33 @@ export function CreateDomainDialog({ onClose }: Props): React.JSX.Element {
     if (!name.trim() || !kbPath.trim()) return
 
     setSubmitting(true)
+    setError(null)
+    setScaffoldFeedback(null)
+
+    // In "create" mode, scaffold KB files first
+    if (mode === 'create') {
+      const scaffoldResult = await window.domainOS.kb.scaffold({
+        dirPath: kbPath.trim(),
+        domainName: name.trim(),
+      })
+      if (!scaffoldResult.ok) {
+        setError(scaffoldResult.error ?? 'Failed to scaffold KB files')
+        setSubmitting(false)
+        return
+      }
+
+      const created = scaffoldResult.value!.files.filter((f) => f.status === 'created').map((f) => f.filename)
+      const skipped = scaffoldResult.value!.files.filter((f) => f.status === 'skipped').map((f) => f.filename)
+      if (scaffoldResult.value!.skippedCount === 3) {
+        setScaffoldFeedback('All KB files already exist; nothing was overwritten.')
+      } else {
+        const parts: string[] = []
+        if (created.length) parts.push(`created ${created.join(', ')}`)
+        if (skipped.length) parts.push(`skipped ${skipped.join(', ')}`)
+        setScaffoldFeedback(`Scaffolded KB: ${parts.join('; ')}`)
+      }
+    }
+
     const domain = await createDomain({
       name: name.trim(),
       description: description.trim(),
@@ -34,13 +64,23 @@ export function CreateDomainDialog({ onClose }: Props): React.JSX.Element {
       identity: identity.trim(),
       escalationTriggers: escalationTriggers.trim(),
     })
-    setSubmitting(false)
 
     if (domain) {
+      // Trigger initial KB scan so files are in DB before KBFileList mounts
+      await window.domainOS.kb.scan(domain.id)
       setActiveDomain(domain.id)
       onClose()
+    } else {
+      setError('Failed to create domain')
     }
+
+    setSubmitting(false)
   }
+
+  const title = mode === 'create' ? 'Create New Domain' : 'Add Existing KB'
+  const submitLabel = mode === 'create'
+    ? (submitting ? 'Creating...' : 'Create')
+    : (submitting ? 'Adding...' : 'Add')
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
@@ -48,7 +88,7 @@ export function CreateDomainDialog({ onClose }: Props): React.JSX.Element {
         onSubmit={handleSubmit}
         className="w-full max-w-lg rounded-lg border border-border bg-surface-1 p-6 max-h-[90vh] overflow-y-auto"
       >
-        <h3 className="mb-4 text-lg font-semibold text-text-primary">Create Domain</h3>
+        <h3 className="mb-4 text-lg font-semibold text-text-primary">{title}</h3>
 
         <label className="mb-3 block">
           <span className="mb-1 block text-sm text-text-secondary">Name</span>
@@ -96,7 +136,9 @@ export function CreateDomainDialog({ onClose }: Props): React.JSX.Element {
         </label>
 
         <label className="mb-4 block">
-          <span className="mb-1 block text-sm text-text-secondary">Knowledge Base Folder</span>
+          <span className="mb-1 block text-sm text-text-secondary">
+            {mode === 'create' ? 'Target Folder (KB files will be created here)' : 'Knowledge Base Folder'}
+          </span>
           <div className="flex gap-2">
             <input
               type="text"
@@ -114,7 +156,20 @@ export function CreateDomainDialog({ onClose }: Props): React.JSX.Element {
               Browse
             </button>
           </div>
+          {mode === 'create' && (
+            <p className="mt-1 text-xs text-text-tertiary">
+              Three KB files (claude.md, kb_digest.md, kb_intel.md) will be created here. Existing files won&apos;t be overwritten.
+            </p>
+          )}
         </label>
+
+        {error && (
+          <p className="mb-3 rounded bg-red-500/10 px-3 py-2 text-xs text-red-400">{error}</p>
+        )}
+
+        {scaffoldFeedback && (
+          <p className="mb-3 rounded bg-green-500/10 px-3 py-2 text-xs text-green-400">{scaffoldFeedback}</p>
+        )}
 
         <div className="flex justify-end gap-2">
           <button
@@ -129,7 +184,7 @@ export function CreateDomainDialog({ onClose }: Props): React.JSX.Element {
             disabled={submitting || !name.trim() || !kbPath.trim()}
             className={primaryButtonClass}
           >
-            {submitting ? 'Creating...' : 'Create'}
+            {submitLabel}
           </button>
         </div>
       </form>

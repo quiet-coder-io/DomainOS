@@ -14,6 +14,7 @@ import {
   DecisionRepository,
   SessionRepository,
   scanKBDirectory,
+  scaffoldKBFiles,
   buildKBContext,
   buildSiblingContext,
   buildSystemPrompt,
@@ -90,6 +91,14 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
 
   ipcMain.handle('kb:files', (_event, domainId: string) => {
     return kbRepo.getFiles(domainId)
+  })
+
+  ipcMain.handle('kb:scaffold', async (_event, input: { dirPath: string; domainName: string }) => {
+    if (typeof input?.dirPath !== 'string' || !input.dirPath.trim() ||
+        typeof input?.domainName !== 'string' || !input.domainName.trim()) {
+      return { ok: false, error: { code: 'VALIDATION_ERROR', message: 'dirPath and domainName are required' } }
+    }
+    return scaffoldKBFiles({ dirPath: input.dirPath.trim(), domainName: input.domainName.trim() })
   })
 
   // --- Chat (streaming) ---
