@@ -27,7 +27,7 @@ DomainOS is designed with a local-first security posture. Your data never leaves
 
 - **`contextIsolation: true`** — renderer cannot access Node.js APIs directly
 - **`nodeIntegration: false`** — no `require()` in renderer
-- **`sandbox: true`** — preload scripts run in a sandboxed environment; only `contextBridge` and `ipcRenderer` are used
+- **`sandbox: false`** (preload only) — required because electron-vite emits ESM preload bundles, which are incompatible with Electron's sandbox. The preload only uses `contextBridge` + `ipcRenderer`; `contextIsolation` provides the main security boundary.
 - **Content Security Policy** — restricts script sources to `'self'`
 - **External links** — opened in default browser, not in-app
 
