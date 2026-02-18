@@ -4,9 +4,25 @@ interface Props {
   onExtractKb?: () => void
 }
 
-/** Minimal inline markdown renderer — handles code blocks, inline code, bold, lists, paragraphs */
+// --- Table helpers ---
+
+const isRowLike = (l: string) => {
+  const t = l.trim()
+  return t.startsWith('|') && t.endsWith('|')
+}
+
+const parseTableRow = (line: string) =>
+  line.trim().slice(1, -1).split('|').map((c) => c.trim())
+
+const isSeparatorRow = (line: string, expectedCols: number) => {
+  const cells = parseTableRow(line)
+  if (cells.length !== expectedCols) return false
+  return cells.every((c) => /^:?-{3,}:?$/.test(c))
+}
+
+/** Minimal inline markdown renderer — handles code blocks, tables, inline code, bold, lists, paragraphs */
 function renderMarkdown(text: string): React.JSX.Element {
-  // Split on code blocks first
+  // Split on code blocks first — tables inside fences are never seen by paragraph loop
   const parts = text.split(/(```[\s\S]*?```)/g)
 
   const elements: React.JSX.Element[] = []
@@ -27,21 +43,74 @@ function renderMarkdown(text: string): React.JSX.Element {
       for (const para of paragraphs) {
         if (!para.trim()) continue
 
-        // Check if this is a list
         const lines = para.split('\n')
-        const isList = lines.every((l) => /^[\s]*[-*]\s/.test(l) || !l.trim())
 
-        if (isList) {
-          const items = lines.filter((l) => /^[\s]*[-*]\s/.test(l))
+        // Table detection: header + separator + body rows, column count must match
+        const nonEmpty = lines.filter((l) => l.trim().length > 0)
+        const isTable =
+          nonEmpty.length >= 2 &&
+          isRowLike(nonEmpty[0]) &&
+          isRowLike(nonEmpty[1]) &&
+          (() => {
+            const headers = parseTableRow(nonEmpty[0])
+            const headerCols = headers.length
+            const hasAnyHeaderText = headers.some((h) => h.length > 0)
+            return headerCols >= 2 && hasAnyHeaderText &&
+              isSeparatorRow(nonEmpty[1], headerCols) &&
+              nonEmpty.slice(2).every(isRowLike)
+          })()
+
+        if (isTable) {
+          const headers = parseTableRow(nonEmpty[0])
+          const bodyRows = nonEmpty.slice(2).map(parseTableRow)
+          const colCount = headers.length
+          const normalize = (row: string[]) => {
+            if (row.length === colCount) return row
+            if (row.length < colCount) return row.concat(Array(colCount - row.length).fill(''))
+            return row.slice(0, colCount)
+          }
           elements.push(
-            <ul key={key++} className="my-1 list-disc pl-4 space-y-0.5">
-              {items.map((item, i) => (
-                <li key={i}>{renderInline(item.replace(/^[\s]*[-*]\s/, ''))}</li>
-              ))}
-            </ul>
+            <div key={key++} className="my-2 max-w-full overflow-x-auto">
+              <table className="w-full border-collapse text-xs">
+                <thead>
+                  <tr>
+                    {headers.map((h, i) => (
+                      <th key={i} className="border border-border-subtle bg-surface-0 px-2 py-1 text-left font-semibold align-top">
+                        {renderInline(h)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {bodyRows.map((row, ri) => (
+                    <tr key={ri}>
+                      {normalize(row).map((cell, ci) => (
+                        <td key={ci} className="border border-border-subtle px-2 py-1 align-top">
+                          {renderInline(cell)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )
         } else {
-          elements.push(<p key={key++} className="my-1">{renderInline(para)}</p>)
+          // Check if this is a list
+          const isList = lines.every((l) => /^[\s]*[-*]\s/.test(l) || !l.trim())
+
+          if (isList) {
+            const items = lines.filter((l) => /^[\s]*[-*]\s/.test(l))
+            elements.push(
+              <ul key={key++} className="my-1 list-disc pl-4 space-y-0.5">
+                {items.map((item, i) => (
+                  <li key={i}>{renderInline(item.replace(/^[\s]*[-*]\s/, ''))}</li>
+                ))}
+              </ul>
+            )
+          } else {
+            elements.push(<p key={key++} className="my-1">{renderInline(para)}</p>)
+          }
         }
       }
     }
