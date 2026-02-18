@@ -21,6 +21,15 @@ release/
 *.db
 *.db-journal
 
+# Secrets & certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*credentials*
+id_rsa*
+
 # TypeScript build info
 *.tsbuildinfo
 

@@ -3,6 +3,8 @@
  * Supports the structured envelope format with tier, mode, and basis fields.
  */
 
+import { isAbsolute } from 'node:path'
+import { win32, posix } from 'node:path'
 import { classifyTier } from '../kb/tiers.js'
 import type { KBTier } from '../kb/tiers.js'
 
@@ -50,6 +52,20 @@ export function parseKBUpdates(text: string): KBUpdateProposal[] {
     if (!VALID_ACTIONS.has(action)) continue
 
     const file = fileMatch[1].trim()
+
+    // Reject path traversal, absolute paths, and null bytes
+    const normalized = posix.normalize(file.replace(/\\/g, '/'))
+    if (
+      normalized === '..' ||
+      normalized.startsWith('../') ||
+      normalized.includes('/../') ||
+      normalized.startsWith('/') ||
+      isAbsolute(file) ||
+      win32.isAbsolute(file) ||
+      file.includes('\0')
+    ) {
+      continue
+    }
 
     // Optional fields with defaults
     const tierMatch = header.match(/^tier:\s*(.+)$/m)

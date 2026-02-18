@@ -11,8 +11,33 @@ const MAX_BODY_BYTES = MAX_INTAKE_CONTENT_BYTES + 1024
 
 let server: Server | null = null
 
+// Rate limiter — per-IP, sliding window
+const rateLimitMap = new Map<string, number[]>()
+const RATE_LIMIT = 30
+const RATE_WINDOW_MS = 60_000
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now()
+  let timestamps = rateLimitMap.get(ip)
+  if (!timestamps) {
+    timestamps = []
+    rateLimitMap.set(ip, timestamps)
+  }
+  while (timestamps.length > 0 && timestamps[0] < now - RATE_WINDOW_MS) {
+    timestamps.shift()
+  }
+  if (timestamps.length === 0) {
+    rateLimitMap.delete(ip)
+    return false
+  }
+  if (timestamps.length >= RATE_LIMIT) return true
+  timestamps.push(now)
+  return false
+}
+
 function setCORSHeaders(res: ServerResponse): void {
-  res.setHeader('Access-Control-Allow-Origin', '*')
+  // No Access-Control-Allow-Origin — browser same-origin policy blocks web pages.
+  // Chrome extensions bypass CORS via host_permissions in manifest.json.
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
 }
@@ -69,9 +94,16 @@ export function startIntakeServer(
 
     const url = new URL(req.url ?? '/', `http://${HOST}:${PORT}`)
 
-    // GET /api/ping — health check (no auth)
+    // GET /api/ping — health check (no auth, no rate limit)
     if (req.method === 'GET' && url.pathname === '/api/ping') {
       sendJSON(res, 200, { ok: true })
+      return
+    }
+
+    // Rate limit all endpoints except /api/ping
+    const clientIP = req.socket.remoteAddress ?? '127.0.0.1'
+    if (isRateLimited(clientIP)) {
+      sendJSON(res, 429, { error: 'Too many requests' })
       return
     }
 
@@ -104,6 +136,12 @@ export function startIntakeServer(
       const token = extractBearerToken(req)
       if (!token || !validateIntakeToken(token)) {
         sendJSON(res, 401, { error: 'Invalid or missing auth token' })
+        return
+      }
+
+      const contentType = req.headers['content-type'] ?? ''
+      if (!contentType.includes('application/json')) {
+        sendJSON(res, 415, { error: 'Content-Type must be application/json' })
         return
       }
 
@@ -142,6 +180,9 @@ export function startIntakeServer(
     // 404 for everything else
     sendJSON(res, 404, { error: 'Not found' })
   })
+
+  server.headersTimeout = 10_000
+  server.requestTimeout = 30_000
 
   tryListen(1)
 }

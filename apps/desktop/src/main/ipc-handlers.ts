@@ -1,8 +1,8 @@
 import { ipcMain, dialog, safeStorage, app } from 'electron'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type Database from 'better-sqlite3'
-import { writeFile, readFile, unlink } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { writeFile, readFile, unlink, realpath, stat } from 'node:fs/promises'
+import { join, resolve, sep, extname } from 'node:path'
 import {
   DomainRepository,
   DomainRelationshipRepository,
@@ -313,7 +313,42 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
         const domain = domainRepo.getById(domainId)
         if (!domain.ok) return { ok: false, error: domain.error.message }
 
-        const filePath = join(domain.value.kbPath, proposal.file)
+        // --- Path traversal guard ---
+        if (proposal.file.includes('\0')) {
+          return { ok: false, error: 'Invalid file path: null bytes not allowed' }
+        }
+
+        const ALLOWED_EXTENSIONS = new Set(['.md', '.mdx', '.json', '.txt', '.yaml', '.yml'])
+        const ext = extname(proposal.file).toLowerCase()
+        if (ext && !ALLOWED_EXTENSIONS.has(ext)) {
+          return { ok: false, error: `File extension not allowed: ${ext}` }
+        }
+
+        const filePath = resolve(domain.value.kbPath, proposal.file)
+        const kbRoot = resolve(domain.value.kbPath)
+
+        // Syntactic boundary check
+        if (!filePath.startsWith(kbRoot + sep) && filePath !== kbRoot) {
+          return { ok: false, error: 'Path traversal rejected: file path escapes KB directory' }
+        }
+
+        // Symlink escape check: realpath the nearest existing ancestor
+        let checkDir = resolve(filePath, '..')
+        while (checkDir !== kbRoot && checkDir.startsWith(kbRoot + sep)) {
+          try {
+            await stat(checkDir)
+            // Directory exists — resolve its real path
+            const realDir = await realpath(checkDir)
+            const realKbRoot = await realpath(kbRoot)
+            if (!realDir.startsWith(realKbRoot + sep) && realDir !== realKbRoot) {
+              return { ok: false, error: 'Path traversal rejected: symlink escapes KB directory' }
+            }
+            break
+          } catch {
+            // Directory doesn't exist yet — walk up
+            checkDir = resolve(checkDir, '..')
+          }
+        }
 
         if (proposal.action === 'delete') {
           await unlink(filePath)
