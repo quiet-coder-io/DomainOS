@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useDomainStore } from '../stores'
 import type { Domain } from '../../preload/api'
 import { SiblingSelector } from './SiblingSelector'
+import { inputClass, primaryButtonClass, secondaryButtonClass } from './ui'
 
 interface Props {
   domain: Domain
@@ -42,9 +43,6 @@ export function EditDomainDialog({ domain, onClose }: Props): React.JSX.Element 
       onClose()
     }
   }
-
-  const inputClass =
-    'w-full rounded border border-border bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder-text-tertiary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30'
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
@@ -126,14 +124,14 @@ export function EditDomainDialog({ domain, onClose }: Props): React.JSX.Element 
           <button
             type="button"
             onClick={onClose}
-            className="rounded px-4 py-2 text-sm text-text-tertiary hover:text-text-secondary"
+            className={secondaryButtonClass}
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={submitting || !name.trim() || !kbPath.trim()}
-            className="rounded bg-accent px-4 py-2 text-sm text-white hover:bg-accent-hover disabled:opacity-50"
+            className={primaryButtonClass}
           >
             {submitting ? 'Saving...' : 'Save'}
           </button>

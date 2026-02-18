@@ -31,7 +31,7 @@ export function DomainChatPage(): React.JSX.Element {
   return (
     <div className="flex h-full">
       {/* Main chat area */}
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/* API Key bar */}
         <div className="flex items-center gap-2 border-b border-border-subtle px-4 py-2">
           <span className="text-xs text-text-tertiary">API Key:</span>

@@ -7,7 +7,7 @@ interface KBState {
   lastSyncResult: KBSyncResult | null
   watchingDomainId: string | null
 
-  scanAndSync(domainId: string): Promise<void>
+  scanAndSync(domainId: string): Promise<KBSyncResult | null>
   fetchFiles(domainId: string): Promise<void>
   startWatching(domainId: string): void
   stopWatching(): void
@@ -32,6 +32,7 @@ export const useKBStore = create<KBState>((set, get) => ({
     } else {
       set({ loading: false })
     }
+    return result.ok ? (result.value ?? null) : null
   },
 
   async fetchFiles(domainId) {

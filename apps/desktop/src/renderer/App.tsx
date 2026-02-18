@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Sidebar, IntakePanel } from './components'
+import { Sidebar, IntakePanel, OnboardingFlow } from './components'
 import { DomainListPage, DomainChatPage } from './pages'
 import { useDomainStore, useIntakeStore } from './stores'
 
@@ -7,6 +7,8 @@ type ActiveView = 'domains' | 'intake'
 
 export function App(): React.JSX.Element {
   const activeDomainId = useDomainStore((s) => s.activeDomainId)
+  const domains = useDomainStore((s) => s.domains)
+  const domainsLoading = useDomainStore((s) => s.loading)
   const fetchPending = useIntakeStore((s) => s.fetchPending)
   const [activeView, setActiveView] = useState<ActiveView>('domains')
 
@@ -21,9 +23,15 @@ export function App(): React.JSX.Element {
   }, [fetchPending])
 
   const renderMainContent = () => {
-    if (activeView === 'intake') {
-      return <IntakePanel />
+    if (activeView === 'intake') return <IntakePanel />
+    if (domainsLoading) {
+      return (
+        <div className="flex h-full items-center justify-center">
+          <p className="text-sm text-text-tertiary">Loading...</p>
+        </div>
+      )
     }
+    if (domains.length === 0) return <OnboardingFlow />
     return activeDomainId ? <DomainChatPage /> : <DomainListPage />
   }
 
