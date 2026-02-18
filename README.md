@@ -7,6 +7,10 @@
 
 **A local-first desktop app for managing multiple professional domains with AI assistance.**
 
+<p align="center">
+  <img src="docs/screenshot.png" alt="DomainOS — Domain-scoped AI assistant with knowledge base, gap flags, decisions, and audit log" width="960" />
+</p>
+
 ---
 
 ## The Problem
