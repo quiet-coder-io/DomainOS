@@ -41,25 +41,77 @@ DomainOS is a desktop application that keeps all your data on your machine while
 
 ## Architecture
 
+```mermaid
+graph TB
+    subgraph Browser["Chrome Browser"]
+        EXT["Chrome Extension<br/><i>Send to DomainOS</i>"]
+    end
+
+    subgraph Electron["Desktop App (Electron)"]
+        subgraph Renderer["Renderer Process — React 19 + Tailwind CSS 4"]
+            CHAT["Chat Panel"]
+            SIDEBAR["Sidebar Panels<br/><small>Gap Flags · Decisions · Audit Log</small>"]
+            INTAKE["Intake Panel"]
+            SETTINGS["Domain Settings<br/><small>Protocols · Siblings · KB</small>"]
+        end
+
+        IPC["IPC Bridge (contextBridge)"]
+
+        subgraph Main["Main Process — Node.js"]
+            subgraph Core["@domain-os/core"]
+                DOMAINS[Domains]
+                KB[Knowledge Base]
+                PROTOCOLS[Protocols]
+                AGENTS[Agents]
+                SESSIONS[Sessions]
+                AUDIT[Audit Trail]
+                GAPFLAGS[Gap Flags]
+                DECISIONS[Decisions]
+            end
+            INTAKESVR["Intake Server<br/><small>localhost · token auth</small>"]
+        end
+
+        subgraph Storage["Local Storage"]
+            SQLITE[(SQLite)]
+            FS["Filesystem<br/><small>KB files</small>"]
+            KEYCHAIN["OS Keychain<br/><small>API keys</small>"]
+        end
+    end
+
+    LLM["LLM API<br/><small>BYOK</small>"]
+
+    EXT -- "localhost" --> INTAKESVR
+    Renderer -- "IPC" --> IPC --> Main
+    AGENTS -- "BYOK" --> LLM
+    Core --> SQLITE
+    Core --> FS
+    Core --> KEYCHAIN
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Renderer (React 19 + Tailwind CSS 4)                   │
-│  ┌──────────┐ ┌──────────┐ ┌───────────┐ ┌───────────┐ │
-│  │ Chat     │ │ Sidebar  │ │ Intake    │ │ Domain    │ │
-│  │ Panel    │ │ Panels   │ │ Panel     │ │ Settings  │ │
-│  └──────────┘ └──────────┘ └───────────┘ └───────────┘ │
-├─────────────────────── IPC ─────────────────────────────┤
-│  Main Process (Node.js)                                 │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │  @domain-os/core                                 │   │
-│  │  ┌────────┐ ┌────┐ ┌──────────┐ ┌────────────┐  │   │
-│  │  │Domains │ │ KB │ │Protocols │ │  Agents    │  │   │
-│  │  ├────────┤ ├────┤ ├──────────┤ ├────────────┤  │   │
-│  │  │Sessions│ │Aud │ │Gap Flags │ │ Decisions  │  │   │
-│  │  └────────┘ └────┘ └──────────┘ └────────────┘  │   │
-│  └──────────────────────────────────────────────────┘   │
-│  SQLite │ Filesystem │ OS Keychain │ Intake Server      │
-└─────────────────────────────────────────────────────────┘
+
+### Chat Workflow
+
+```mermaid
+flowchart LR
+    A["User sends<br/>message"] --> B["Build prompt<br/><small>KB digest + protocols<br/>+ domain identity</small>"]
+    B --> C["LLM generates<br/>response"]
+    C --> D{Response<br/>contains?}
+    D -- "Stop block" --> E["🛑 Stop Alert<br/><small>Human approval required</small>"]
+    D -- "Gap flag" --> F["⚠️ Gap Flag<br/><small>KB gap detected</small>"]
+    D -- "Decision" --> G["📋 Decision Card<br/><small>Logged with rationale</small>"]
+    D -- "KB proposal" --> H["📝 KB Update<br/><small>User reviews & approves</small>"]
+    D -- "Content" --> I["💬 Chat response"]
+    H -- "Approved" --> J["Update KB files"]
+```
+
+### Browser Intake Pipeline
+
+```mermaid
+flowchart LR
+    A["Web page<br/><small>Gmail, articles, etc.</small>"] --> B["Chrome Extension<br/><small>Extract content</small>"]
+    B -- "localhost + token" --> C["Intake Server"]
+    C --> D["AI Classifier<br/><small>Match to domain</small>"]
+    D --> E["User confirms<br/>classification"]
+    E --> F["Ingest to<br/>domain KB"]
 ```
 
 ## Tech Stack
