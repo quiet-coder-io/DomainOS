@@ -22,7 +22,7 @@ export function IntakeTokenDisplay(): React.JSX.Element {
   if (!token) return <></>
 
   return (
-    <div className="border-t border-border px-3 py-2">
+    <div className="flex-shrink-0 border-t border-border px-3 py-2">
       <div className="flex items-center gap-1.5">
         <span className="text-[10px] text-text-tertiary">Token:</span>
         <span className="flex-1 truncate font-mono text-[10px] text-text-secondary">
