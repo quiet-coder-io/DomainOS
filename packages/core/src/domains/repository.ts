@@ -11,6 +11,8 @@ interface DomainRow {
   name: string
   description: string
   kb_path: string
+  identity: string
+  escalation_triggers: string
   created_at: string
   updated_at: string
 }
@@ -21,6 +23,8 @@ function rowToDomain(row: DomainRow): Domain {
     name: row.name,
     description: row.description,
     kbPath: row.kb_path,
+    identity: row.identity ?? '',
+    escalationTriggers: row.escalation_triggers ?? '',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -41,15 +45,26 @@ export class DomainRepository {
     try {
       this.db
         .prepare(
-          'INSERT INTO domains (id, name, description, kb_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+          'INSERT INTO domains (id, name, description, kb_path, identity, escalation_triggers, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         )
-        .run(id, parsed.data.name, parsed.data.description, parsed.data.kbPath, now, now)
+        .run(
+          id,
+          parsed.data.name,
+          parsed.data.description,
+          parsed.data.kbPath,
+          parsed.data.identity,
+          parsed.data.escalationTriggers,
+          now,
+          now,
+        )
 
       return Ok({
         id,
         name: parsed.data.name,
         description: parsed.data.description,
         kbPath: parsed.data.kbPath,
+        identity: parsed.data.identity,
+        escalationTriggers: parsed.data.escalationTriggers,
         createdAt: now,
         updatedAt: now,
       })
@@ -97,9 +112,9 @@ export class DomainRepository {
     try {
       this.db
         .prepare(
-          'UPDATE domains SET name = ?, description = ?, kb_path = ?, updated_at = ? WHERE id = ?',
+          'UPDATE domains SET name = ?, description = ?, kb_path = ?, identity = ?, escalation_triggers = ?, updated_at = ? WHERE id = ?',
         )
-        .run(updated.name, updated.description, updated.kbPath, now, id)
+        .run(updated.name, updated.description, updated.kbPath, updated.identity, updated.escalationTriggers, now, id)
 
       return Ok(updated)
     } catch (e) {

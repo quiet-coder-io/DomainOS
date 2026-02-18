@@ -1,17 +1,27 @@
 import { create } from 'zustand'
 
-const STORAGE_KEY = 'domainOS:apiKey'
-
 interface SettingsState {
   apiKey: string
+  loading: boolean
+  loadApiKey(): Promise<void>
   setApiKey(key: string): void
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
-  apiKey: localStorage.getItem(STORAGE_KEY) ?? '',
+  apiKey: '',
+  loading: true,
+
+  async loadApiKey() {
+    const result = await window.domainOS.settings.getApiKey()
+    if (result.ok && result.value) {
+      set({ apiKey: result.value, loading: false })
+    } else {
+      set({ loading: false })
+    }
+  },
 
   setApiKey(key: string) {
-    localStorage.setItem(STORAGE_KEY, key)
     set({ apiKey: key })
+    window.domainOS.settings.setApiKey(key)
   },
 }))

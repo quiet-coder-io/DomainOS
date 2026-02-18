@@ -17,6 +17,12 @@ describe('openDatabase', () => {
     expect(tableNames).toContain('chat_messages')
     expect(tableNames).toContain('schema_version')
     expect(tableNames).toContain('intake_items')
+    expect(tableNames).toContain('shared_protocols')
+    expect(tableNames).toContain('audit_log')
+    expect(tableNames).toContain('decisions')
+    expect(tableNames).toContain('domain_relationships')
+    expect(tableNames).toContain('gap_flags')
+    expect(tableNames).toContain('sessions')
 
     db.close()
   })
@@ -49,7 +55,7 @@ describe('openDatabase', () => {
       .prepare('SELECT MAX(version) as version FROM schema_version')
       .get() as { version: number }
 
-    expect(version.version).toBe(2)
+    expect(version.version).toBe(6)
     db.close()
   })
 })

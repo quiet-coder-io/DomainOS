@@ -7,7 +7,7 @@ import {
   CreateIntakeItemInputSchema,
   MAX_INTAKE_CONTENT_BYTES,
 } from './schemas.js'
-import type { IntakeItem, CreateIntakeItemInput, IntakeStatus } from './schemas.js'
+import type { IntakeItem, CreateIntakeItemInput, IntakeStatus, IntakeSourceType } from './schemas.js'
 
 interface IntakeItemRow {
   id: string
@@ -19,11 +19,20 @@ interface IntakeItemRow {
   suggested_domain_id: string | null
   confidence: number | null
   status: string
+  source_type: string
+  external_id: string
+  metadata: string
   created_at: string
   resolved_at: string | null
 }
 
 function rowToIntakeItem(row: IntakeItemRow): IntakeItem {
+  let metadata: Record<string, unknown> = {}
+  try {
+    metadata = JSON.parse(row.metadata || '{}')
+  } catch {
+    metadata = {}
+  }
   return {
     id: row.id,
     sourceUrl: row.source_url,
@@ -34,6 +43,9 @@ function rowToIntakeItem(row: IntakeItemRow): IntakeItem {
     suggestedDomainId: row.suggested_domain_id,
     confidence: row.confidence,
     status: row.status as IntakeItem['status'],
+    sourceType: row.source_type as IntakeItem['sourceType'],
+    externalId: row.external_id,
+    metadata,
     createdAt: row.created_at,
     resolvedAt: row.resolved_at,
   }
@@ -60,13 +72,15 @@ export class IntakeRepository {
     const now = new Date().toISOString()
     const id = uuidv4()
 
+    const metadataJson = JSON.stringify(parsed.data.metadata)
+
     try {
       this.db
         .prepare(
-          `INSERT INTO intake_items (id, source_url, title, content, extraction_mode, content_size_bytes, status, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`,
+          `INSERT INTO intake_items (id, source_url, title, content, extraction_mode, content_size_bytes, source_type, external_id, metadata, status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
         )
-        .run(id, parsed.data.sourceUrl, parsed.data.title, parsed.data.content, parsed.data.extractionMode, contentBytes, now)
+        .run(id, parsed.data.sourceUrl, parsed.data.title, parsed.data.content, parsed.data.extractionMode, contentBytes, parsed.data.sourceType, parsed.data.externalId, metadataJson, now)
 
       return Ok({
         id,
@@ -78,6 +92,9 @@ export class IntakeRepository {
         suggestedDomainId: null,
         confidence: null,
         status: 'pending' as const,
+        sourceType: parsed.data.sourceType,
+        externalId: parsed.data.externalId,
+        metadata: parsed.data.metadata,
         createdAt: now,
         resolvedAt: null,
       })
@@ -149,6 +166,31 @@ export class IntakeRepository {
         status,
         resolvedAt,
       })
+    } catch (e) {
+      return Err(DomainOSError.db((e as Error).message))
+    }
+  }
+
+  findByExternalId(sourceType: IntakeSourceType, externalId: string): Result<IntakeItem | null, DomainOSError> {
+    if (!externalId) return Ok(null)
+
+    try {
+      const row = this.db
+        .prepare('SELECT * FROM intake_items WHERE source_type = ? AND external_id = ?')
+        .get(sourceType, externalId) as IntakeItemRow | undefined
+
+      return Ok(row ? rowToIntakeItem(row) : null)
+    } catch (e) {
+      return Err(DomainOSError.db((e as Error).message))
+    }
+  }
+
+  listBySourceType(sourceType: IntakeSourceType, limit = 50): Result<IntakeItem[], DomainOSError> {
+    try {
+      const rows = this.db
+        .prepare('SELECT * FROM intake_items WHERE source_type = ? ORDER BY created_at DESC LIMIT ?')
+        .all(sourceType, limit) as IntakeItemRow[]
+      return Ok(rows.map(rowToIntakeItem))
     } catch (e) {
       return Err(DomainOSError.db((e as Error).message))
     }

@@ -5,6 +5,9 @@
 import { z } from 'zod'
 import { UUIDSchema, TimestampSchema } from '../common/index.js'
 
+export const KBTierSchema = z.enum(['structural', 'status', 'intelligence', 'general'])
+export const KBTierSourceSchema = z.enum(['inferred', 'manual'])
+
 export const KBFileSchema = z.object({
   id: UUIDSchema,
   domainId: UUIDSchema,
@@ -12,6 +15,8 @@ export const KBFileSchema = z.object({
   contentHash: z.string().min(1),
   sizeBytes: z.number().int().nonnegative(),
   lastSyncedAt: TimestampSchema,
+  tier: KBTierSchema.default('general'),
+  tierSource: KBTierSourceSchema.default('inferred'),
 })
 
 export type KBFile = z.infer<typeof KBFileSchema>
@@ -25,13 +30,17 @@ export const KBScannedFileSchema = z.object({
 
 export type KBScannedFile = z.infer<typeof KBScannedFileSchema>
 
+export const KBContextFileSchema = z.object({
+  path: z.string(),
+  content: z.string(),
+  tier: KBTierSchema.optional(),
+  stalenessLabel: z.string().optional(),
+})
+
+export type KBContextFile = z.infer<typeof KBContextFileSchema>
+
 export const KBContextSchema = z.object({
-  files: z.array(
-    z.object({
-      path: z.string(),
-      content: z.string(),
-    }),
-  ),
+  files: z.array(KBContextFileSchema),
   totalChars: z.number().int().nonnegative(),
   truncated: z.boolean(),
 })

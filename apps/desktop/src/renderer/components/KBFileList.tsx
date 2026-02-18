@@ -19,9 +19,12 @@ export function KBFileList({ domainId }: Props): React.JSX.Element {
   const startY = useRef(0)
   const startH = useRef(0)
 
+  const startWatching = useKBStore((s) => s.startWatching)
+
   useEffect(() => {
     fetchFiles(domainId)
-  }, [domainId, fetchFiles])
+    startWatching(domainId)
+  }, [domainId, fetchFiles, startWatching])
 
   const onMouseMove = useCallback((e: MouseEvent) => {
     if (!dragging.current) return

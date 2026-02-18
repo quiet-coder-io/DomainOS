@@ -7,6 +7,7 @@ export { IntakeRepository } from './repository.js'
 export {
   CreateIntakeItemInputSchema,
   IntakeItemSchema,
+  IntakeSourceTypeSchema,
   ClassifyResultSchema,
   MAX_INTAKE_CONTENT_BYTES,
 } from './schemas.js'
@@ -14,6 +15,7 @@ export type {
   IntakeItem,
   CreateIntakeItemInput,
   IntakeStatus,
+  IntakeSourceType,
   ClassifyResult,
 } from './schemas.js'
 export { classifyContent } from './classifier.js'

@@ -1,7 +1,9 @@
+import { useEffect } from 'react'
 import { useDomainStore, useChatStore, useSettingsStore } from '../stores'
 import { ChatPanel } from '../components/ChatPanel'
 import { KBFileList } from '../components/KBFileList'
 import { KBUpdateProposal } from '../components/KBUpdateProposal'
+import { ProtocolEditor } from '../components/ProtocolEditor'
 
 const LockIcon = () => (
   <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg" className="inline-block">
@@ -13,7 +15,11 @@ const LockIcon = () => (
 export function DomainChatPage(): React.JSX.Element {
   const { activeDomainId, domains } = useDomainStore()
   const { kbProposals, applyProposal, dismissProposal } = useChatStore()
-  const { apiKey, setApiKey } = useSettingsStore()
+  const { apiKey, loading: apiKeyLoading, setApiKey, loadApiKey } = useSettingsStore()
+
+  useEffect(() => {
+    loadApiKey()
+  }, [loadApiKey])
 
   const domain = domains.find((d) => d.id === activeDomainId)
   if (!domain || !activeDomainId) return <div />
@@ -33,7 +39,7 @@ export function DomainChatPage(): React.JSX.Element {
             placeholder="sk-ant-..."
           />
           <span className="flex items-center gap-1 text-xs text-text-tertiary">
-            <LockIcon /> stored locally
+            <LockIcon /> encrypted
           </span>
           <div className="flex-1" />
           <span className="text-sm font-medium text-text-secondary">{domain.name}</span>
@@ -45,6 +51,8 @@ export function DomainChatPage(): React.JSX.Element {
       {/* Right sidebar — KB files + proposals */}
       <div className="w-72 overflow-y-auto border-l border-border-subtle bg-surface-0 p-4">
         <KBFileList domainId={activeDomainId} />
+
+        <ProtocolEditor domainId={activeDomainId} />
 
         {kbProposals.length > 0 && (
           <div className="mt-4">

@@ -7,8 +7,8 @@ interface DomainState {
   loading: boolean
 
   fetchDomains(): Promise<void>
-  createDomain(input: { name: string; description?: string; kbPath: string }): Promise<Domain | null>
-  updateDomain(id: string, input: { name?: string; description?: string; kbPath?: string }): Promise<boolean>
+  createDomain(input: { name: string; description?: string; kbPath: string; identity?: string; escalationTriggers?: string }): Promise<Domain | null>
+  updateDomain(id: string, input: { name?: string; description?: string; kbPath?: string; identity?: string; escalationTriggers?: string }): Promise<boolean>
   setActiveDomain(id: string | null): void
   deleteDomain(id: string): Promise<void>
 }

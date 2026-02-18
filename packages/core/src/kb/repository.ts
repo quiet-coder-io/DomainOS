@@ -8,6 +8,7 @@ import { Ok, Err } from '../common/index.js'
 import type { Result } from '../common/index.js'
 import { DomainOSError } from '../common/index.js'
 import type { KBFile, KBScannedFile, KBSyncResult } from './schemas.js'
+import { classifyTier } from './tiers.js'
 
 interface KBFileRow {
   id: string
@@ -16,6 +17,8 @@ interface KBFileRow {
   content_hash: string
   size_bytes: number
   last_synced_at: string
+  tier: string
+  tier_source: string
 }
 
 export class KBRepository {
@@ -33,8 +36,8 @@ export class KBRepository {
       let deleted = 0
 
       const existing = this.db
-        .prepare('SELECT id, relative_path, content_hash FROM kb_files WHERE domain_id = ?')
-        .all(domainId) as Array<{ id: string; relative_path: string; content_hash: string }>
+        .prepare('SELECT id, relative_path, content_hash, tier_source FROM kb_files WHERE domain_id = ?')
+        .all(domainId) as Array<{ id: string; relative_path: string; content_hash: string; tier_source: string }>
 
       const existingByPath = new Map(existing.map((row) => [row.relative_path, row]))
       const scannedPaths = new Set(scannedFiles.map((f) => f.relativePath))
@@ -44,18 +47,29 @@ export class KBRepository {
         for (const scanned of scannedFiles) {
           const dbRow = existingByPath.get(scanned.relativePath)
           if (!dbRow) {
+            const tier = classifyTier(scanned.relativePath)
             this.db
               .prepare(
-                'INSERT INTO kb_files (id, domain_id, relative_path, content_hash, size_bytes, last_synced_at) VALUES (?, ?, ?, ?, ?, ?)',
+                'INSERT INTO kb_files (id, domain_id, relative_path, content_hash, size_bytes, last_synced_at, tier, tier_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
               )
-              .run(uuidv4(), domainId, scanned.relativePath, scanned.hash, scanned.sizeBytes, now)
+              .run(uuidv4(), domainId, scanned.relativePath, scanned.hash, scanned.sizeBytes, now, tier, 'inferred')
             added++
           } else if (dbRow.content_hash !== scanned.hash) {
-            this.db
-              .prepare(
-                'UPDATE kb_files SET content_hash = ?, size_bytes = ?, last_synced_at = ? WHERE id = ?',
-              )
-              .run(scanned.hash, scanned.sizeBytes, now, dbRow.id)
+            // Re-classify tier on update only if tier_source is 'inferred'
+            if (dbRow.tier_source === 'inferred') {
+              const tier = classifyTier(scanned.relativePath)
+              this.db
+                .prepare(
+                  'UPDATE kb_files SET content_hash = ?, size_bytes = ?, last_synced_at = ?, tier = ? WHERE id = ?',
+                )
+                .run(scanned.hash, scanned.sizeBytes, now, tier, dbRow.id)
+            } else {
+              this.db
+                .prepare(
+                  'UPDATE kb_files SET content_hash = ?, size_bytes = ?, last_synced_at = ? WHERE id = ?',
+                )
+                .run(scanned.hash, scanned.sizeBytes, now, dbRow.id)
+            }
             updated++
           }
         }
@@ -90,6 +104,8 @@ export class KBRepository {
         contentHash: row.content_hash,
         sizeBytes: row.size_bytes,
         lastSyncedAt: row.last_synced_at,
+        tier: row.tier as KBFile['tier'],
+        tierSource: row.tier_source as KBFile['tierSource'],
       }))
 
       return Ok(files)

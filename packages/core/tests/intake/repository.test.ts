@@ -149,4 +149,140 @@ describe('IntakeRepository', () => {
       expect(result.value.resolvedAt).not.toBeNull()
     }
   })
+
+  it('creates with sourceType and externalId', () => {
+    const result = repo.create({
+      title: 'Gmail message',
+      content: 'Email body',
+      sourceType: 'gmail',
+      externalId: 'msg-abc-123',
+      metadata: { from: 'sender@example.com', subject: 'Test', threadId: 'thread-1' },
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.sourceType).toBe('gmail')
+      expect(result.value.externalId).toBe('msg-abc-123')
+      expect(result.value.metadata).toEqual({
+        from: 'sender@example.com',
+        subject: 'Test',
+        threadId: 'thread-1',
+      })
+    }
+  })
+
+  it('defaults sourceType to web', () => {
+    const result = repo.create({ title: 'Web Page', content: 'Page content' })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.sourceType).toBe('web')
+      expect(result.value.externalId).toBe('')
+      expect(result.value.metadata).toEqual({})
+    }
+  })
+
+  it('finds item by externalId', () => {
+    repo.create({
+      title: 'Task item',
+      content: 'Task body',
+      sourceType: 'gtasks',
+      externalId: 'task-xyz-789',
+      metadata: { taskListId: 'list-1', due: '2026-03-01' },
+    })
+
+    const found = repo.findByExternalId('gtasks', 'task-xyz-789')
+    expect(found.ok).toBe(true)
+    if (found.ok) {
+      expect(found.value).not.toBeNull()
+      expect(found.value!.title).toBe('Task item')
+      expect(found.value!.sourceType).toBe('gtasks')
+    }
+  })
+
+  it('returns null for non-existent externalId', () => {
+    const found = repo.findByExternalId('gmail', 'does-not-exist')
+    expect(found.ok).toBe(true)
+    if (found.ok) {
+      expect(found.value).toBeNull()
+    }
+  })
+
+  it('returns null for empty externalId', () => {
+    const found = repo.findByExternalId('gmail', '')
+    expect(found.ok).toBe(true)
+    if (found.ok) {
+      expect(found.value).toBeNull()
+    }
+  })
+
+  it('enforces unique external_id per source_type', () => {
+    const first = repo.create({
+      title: 'First',
+      content: 'Content',
+      sourceType: 'gmail',
+      externalId: 'msg-duplicate',
+    })
+    expect(first.ok).toBe(true)
+
+    const second = repo.create({
+      title: 'Second',
+      content: 'Content',
+      sourceType: 'gmail',
+      externalId: 'msg-duplicate',
+    })
+    expect(second.ok).toBe(false)
+  })
+
+  it('allows same externalId for different sourceTypes', () => {
+    const gmail = repo.create({
+      title: 'Gmail',
+      content: 'Content',
+      sourceType: 'gmail',
+      externalId: 'same-id',
+    })
+    const gtasks = repo.create({
+      title: 'Task',
+      content: 'Content',
+      sourceType: 'gtasks',
+      externalId: 'same-id',
+    })
+    expect(gmail.ok).toBe(true)
+    expect(gtasks.ok).toBe(true)
+  })
+
+  it('lists items by sourceType', () => {
+    repo.create({ title: 'Web 1', content: 'Content', sourceType: 'web' })
+    repo.create({ title: 'Gmail 1', content: 'Content', sourceType: 'gmail', externalId: 'g1' })
+    repo.create({ title: 'Gmail 2', content: 'Content', sourceType: 'gmail', externalId: 'g2' })
+
+    const gmailItems = repo.listBySourceType('gmail')
+    expect(gmailItems.ok).toBe(true)
+    if (gmailItems.ok) {
+      expect(gmailItems.value).toHaveLength(2)
+      expect(gmailItems.value.every((i) => i.sourceType === 'gmail')).toBe(true)
+    }
+  })
+
+  it('roundtrips metadata JSON correctly', () => {
+    const meta = {
+      from: 'user@test.com',
+      to: ['a@b.com', 'c@d.com'],
+      labels: ['INBOX', 'IMPORTANT'],
+      date: '2026-02-17T10:00:00Z',
+      nested: { key: 'value' },
+    }
+    const created = repo.create({
+      title: 'Rich metadata',
+      content: 'Content',
+      sourceType: 'gmail',
+      externalId: 'meta-test',
+      metadata: meta,
+    })
+    if (!created.ok) throw new Error('setup failed')
+
+    const fetched = repo.getById(created.value.id)
+    expect(fetched.ok).toBe(true)
+    if (fetched.ok) {
+      expect(fetched.value.metadata).toEqual(meta)
+    }
+  })
 })

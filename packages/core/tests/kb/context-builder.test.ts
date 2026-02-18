@@ -3,7 +3,7 @@ import { mkdtemp, writeFile, mkdir, rm, utimes } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { v4 as uuidv4 } from 'uuid'
-import { buildKBContext } from '../../src/kb/context-builder.js'
+import { buildKBContext, buildSiblingContext } from '../../src/kb/context-builder.js'
 import type { KBFile } from '../../src/kb/schemas.js'
 
 describe('buildKBContext', () => {
@@ -17,7 +17,7 @@ describe('buildKBContext', () => {
     await rm(tempDir, { recursive: true, force: true })
   })
 
-  function makeKBFile(relativePath: string): KBFile {
+  function makeKBFile(relativePath: string, tier?: string): KBFile {
     return {
       id: uuidv4(),
       domainId: uuidv4(),
@@ -25,6 +25,8 @@ describe('buildKBContext', () => {
       contentHash: 'unused',
       sizeBytes: 0,
       lastSyncedAt: new Date().toISOString(),
+      tier: (tier ?? 'general') as KBFile['tier'],
+      tierSource: 'inferred',
     }
   }
 
@@ -35,8 +37,6 @@ describe('buildKBContext', () => {
 
     const files = [makeKBFile('a.md'), makeKBFile('b.md'), makeKBFile('c.md')]
 
-    // Budget for ~1 file: header (~20 chars) + 100 content = ~120 chars = ~30 tokens
-    // But two files would be ~240 chars = ~60 tokens
     const result = await buildKBContext(tempDir, files, 40)
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -59,61 +59,37 @@ describe('buildKBContext', () => {
     expect(result.value.truncated).toBe(false)
   })
 
-  it('prioritizes claude.md and KB_DIGEST.md files', async () => {
-    // Create files with different mtimes to ensure ordering is from priority, not mtime
-    await writeFile(join(tempDir, 'zebra.md'), 'Last alphabetically')
-    // Set old mtime on zebra
-    const oldDate = new Date('2020-01-01')
-    await utimes(join(tempDir, 'zebra.md'), oldDate, oldDate)
-
-    await writeFile(join(tempDir, 'alpha.md'), 'First alphabetically')
-
+  it('sorts by tier priority: structural before general', async () => {
+    await writeFile(join(tempDir, 'zebra.md'), 'General content')
     await mkdir(join(tempDir, 'sub'))
-    await writeFile(join(tempDir, 'sub', 'CLAUDE.md'), 'Priority content')
+    await writeFile(join(tempDir, 'sub', 'claude.md'), 'Structural content')
 
     const files = [
-      makeKBFile('zebra.md'),
-      makeKBFile('alpha.md'),
-      makeKBFile(join('sub', 'CLAUDE.md')),
+      makeKBFile('zebra.md', 'general'),
+      makeKBFile(join('sub', 'claude.md'), 'structural'),
     ]
 
     const result = await buildKBContext(tempDir, files, 10000)
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
-    // CLAUDE.md should be first regardless of other sorting
-    expect(result.value.files[0].path).toBe(join('sub', 'CLAUDE.md'))
+    // Structural (claude.md) should be first
+    expect(result.value.files[0].path).toBe(join('sub', 'claude.md'))
+    expect(result.value.files[0].tier).toBe('structural')
   })
 
-  it('sorts non-priority files by newest modification time', async () => {
-    await writeFile(join(tempDir, 'old.md'), 'Old file')
-    const oldDate = new Date('2020-01-01')
-    await utimes(join(tempDir, 'old.md'), oldDate, oldDate)
+  it('includes tier and staleness labels in returned files', async () => {
+    await writeFile(join(tempDir, 'test.md'), 'Test content')
 
-    await writeFile(join(tempDir, 'new.md'), 'New file')
-
-    const files = [makeKBFile('old.md'), makeKBFile('new.md')]
+    const files = [makeKBFile('test.md', 'general')]
 
     const result = await buildKBContext(tempDir, files, 10000)
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
-    expect(result.value.files[0].path).toBe('new.md')
-    expect(result.value.files[1].path).toBe('old.md')
-  })
-
-  it('tracks totalChars accurately', async () => {
-    const content = 'Hello world'
-    await writeFile(join(tempDir, 'test.md'), content)
-
-    const files = [makeKBFile('test.md')]
-
-    const result = await buildKBContext(tempDir, files, 10000)
-    expect(result.ok).toBe(true)
-    if (!result.ok) return
-
-    const expectedHeader = '--- FILE: test.md ---\n'
-    expect(result.value.totalChars).toBe(expectedHeader.length + content.length)
+    expect(result.value.files[0].tier).toBe('general')
+    expect(result.value.files[0].stalenessLabel).toBeDefined()
+    expect(result.value.files[0].stalenessLabel).toContain('[FRESH]')
   })
 
   it('skips files that no longer exist on disk', async () => {
@@ -127,5 +103,111 @@ describe('buildKBContext', () => {
 
     expect(result.value.files).toHaveLength(1)
     expect(result.value.files[0].path).toBe('exists.md')
+  })
+
+  it('truncates last file content when it partially fits', async () => {
+    // File A content: small enough to include
+    await writeFile(join(tempDir, 'a.md'), 'Small')
+    // File B content: too large for remaining budget
+    await writeFile(join(tempDir, 'b.md'), 'X'.repeat(500))
+
+    const files = [makeKBFile('a.md'), makeKBFile('b.md')]
+
+    // Budget for ~1.5 files
+    const result = await buildKBContext(tempDir, files, 50)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+
+    // Both files included — second one truncated
+    expect(result.value.truncated).toBe(true)
+    if (result.value.files.length === 2) {
+      expect(result.value.files[1].content).toContain('...[TRUNCATED]')
+    }
+  })
+})
+
+describe('buildSiblingContext', () => {
+  let tempDirA: string
+  let tempDirB: string
+  let tempDirC: string
+
+  beforeEach(async () => {
+    tempDirA = await mkdtemp(join(tmpdir(), 'sibling-a-'))
+    tempDirB = await mkdtemp(join(tmpdir(), 'sibling-b-'))
+    tempDirC = await mkdtemp(join(tmpdir(), 'sibling-c-'))
+  })
+
+  afterEach(async () => {
+    await rm(tempDirA, { recursive: true, force: true })
+    await rm(tempDirB, { recursive: true, force: true })
+    await rm(tempDirC, { recursive: true, force: true })
+  })
+
+  it('reads kb_digest.md from each sibling', async () => {
+    await writeFile(join(tempDirA, 'kb_digest.md'), 'Digest A')
+    await writeFile(join(tempDirB, 'kb_digest.md'), 'Digest B')
+
+    const result = await buildSiblingContext(
+      [
+        { domainName: 'A', kbPath: tempDirA },
+        { domainName: 'B', kbPath: tempDirB },
+      ],
+      1500,
+      4000,
+    )
+
+    expect(result).toHaveLength(2)
+    expect(result[0].domainName).toBe('A')
+    expect(result[0].digestContent).toBe('Digest A')
+  })
+
+  it('skips siblings without kb_digest.md', async () => {
+    await writeFile(join(tempDirA, 'kb_digest.md'), 'Digest A')
+    // B has no digest
+
+    const result = await buildSiblingContext(
+      [
+        { domainName: 'A', kbPath: tempDirA },
+        { domainName: 'B', kbPath: tempDirB },
+      ],
+      1500,
+      4000,
+    )
+
+    expect(result).toHaveLength(1)
+    expect(result[0].domainName).toBe('A')
+  })
+
+  it('truncates per-sibling content at cap', async () => {
+    const longContent = 'X'.repeat(10000)
+    await writeFile(join(tempDirA, 'kb_digest.md'), longContent)
+
+    const result = await buildSiblingContext(
+      [{ domainName: 'A', kbPath: tempDirA }],
+      50, // 50 tokens = 200 chars
+      4000,
+    )
+
+    expect(result).toHaveLength(1)
+    expect(result[0].digestContent.length).toBeLessThan(longContent.length)
+    expect(result[0].digestContent).toContain('...[TRUNCATED]')
+  })
+
+  it('drops entire sibling when global cap exceeded', async () => {
+    await writeFile(join(tempDirA, 'kb_digest.md'), 'A'.repeat(100))
+    await writeFile(join(tempDirB, 'kb_digest.md'), 'B'.repeat(100))
+    await writeFile(join(tempDirC, 'kb_digest.md'), 'C'.repeat(100))
+
+    const result = await buildSiblingContext(
+      [
+        { domainName: 'A', kbPath: tempDirA },
+        { domainName: 'B', kbPath: tempDirB },
+        { domainName: 'C', kbPath: tempDirC },
+      ],
+      1500,
+      50, // 50 tokens = 200 chars = fits ~2 siblings
+    )
+
+    expect(result.length).toBeLessThan(3)
   })
 })

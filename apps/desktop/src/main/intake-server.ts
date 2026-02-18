@@ -48,6 +48,9 @@ function extractBearerToken(req: IncomingMessage): string | null {
   return auth.slice(7)
 }
 
+const MAX_RETRIES = 3
+const RETRY_DELAY_MS = 2000
+
 export function startIntakeServer(
   db: Database.Database,
   onNewItem: (item: IntakeItem) => void,
@@ -72,6 +75,30 @@ export function startIntakeServer(
       return
     }
 
+    // GET /api/intake/check — dedup check for external sources
+    if (req.method === 'GET' && url.pathname === '/api/intake/check') {
+      const token = extractBearerToken(req)
+      if (!token || !validateIntakeToken(token)) {
+        sendJSON(res, 401, { error: 'Invalid or missing auth token' })
+        return
+      }
+
+      const sourceType = url.searchParams.get('sourceType') ?? ''
+      const externalId = url.searchParams.get('externalId') ?? ''
+
+      if (!sourceType || !externalId) {
+        sendJSON(res, 400, { error: 'sourceType and externalId required' })
+        return
+      }
+
+      const found = repo.findByExternalId(
+        sourceType as 'web' | 'gmail' | 'gtasks' | 'manual',
+        externalId,
+      )
+      sendJSON(res, 200, { exists: found.ok && found.value !== null })
+      return
+    }
+
     // POST /api/intake — create intake item
     if (req.method === 'POST' && url.pathname === '/api/intake') {
       const token = extractBearerToken(req)
@@ -89,6 +116,9 @@ export function startIntakeServer(
           title: parsed.title ?? '',
           content: parsed.content ?? '',
           extractionMode: parsed.extractionMode ?? parsed.extraction_mode ?? 'full',
+          sourceType: parsed.sourceType ?? parsed.source_type ?? 'web',
+          externalId: parsed.externalId ?? parsed.external_id ?? '',
+          metadata: parsed.metadata ?? {},
         })
 
         if (!result.ok) {
@@ -111,6 +141,27 @@ export function startIntakeServer(
 
     // 404 for everything else
     sendJSON(res, 404, { error: 'Not found' })
+  })
+
+  tryListen(1)
+}
+
+function tryListen(attempt: number): void {
+  if (!server) return
+
+  server.once('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`[intake-server] Port ${PORT} is in use (attempt ${attempt}/${MAX_RETRIES})`)
+      if (attempt < MAX_RETRIES) {
+        setTimeout(() => tryListen(attempt + 1), RETRY_DELAY_MS)
+      } else {
+        console.error(`[intake-server] Failed to bind after ${MAX_RETRIES} attempts. Intake server disabled.`)
+        server = null
+      }
+    } else {
+      console.error(`[intake-server] Server error: ${err.message}`)
+      server = null
+    }
   })
 
   server.listen(PORT, HOST, () => {

@@ -19,6 +19,22 @@ describe('DomainRepository', () => {
       expect(result.value.name).toBe('Test')
       expect(result.value.kbPath).toBe('/tmp/kb')
       expect(result.value.id).toBeDefined()
+      expect(result.value.identity).toBe('')
+      expect(result.value.escalationTriggers).toBe('')
+    }
+  })
+
+  it('creates a domain with identity and escalation triggers', () => {
+    const result = repo.create({
+      name: 'RE',
+      kbPath: '/tmp/kb',
+      identity: 'You are a real estate expert.',
+      escalationTriggers: 'Stop if amount exceeds $50k.',
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.identity).toBe('You are a real estate expert.')
+      expect(result.value.escalationTriggers).toBe('Stop if amount exceeds $50k.')
     }
   })
 
@@ -61,6 +77,28 @@ describe('DomainRepository', () => {
     if (result.ok) {
       expect(result.value.name).toBe('New')
       expect(result.value.kbPath).toBe('/tmp/old')
+    }
+  })
+
+  it('updates identity field', () => {
+    const created = repo.create({ name: 'Test', kbPath: '/tmp/kb' })
+    if (!created.ok) throw new Error('setup failed')
+
+    const result = repo.update(created.value.id, { identity: 'Updated identity' })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.identity).toBe('Updated identity')
+    }
+  })
+
+  it('updates escalation triggers', () => {
+    const created = repo.create({ name: 'Test', kbPath: '/tmp/kb' })
+    if (!created.ok) throw new Error('setup failed')
+
+    const result = repo.update(created.value.id, { escalationTriggers: 'New triggers' })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.escalationTriggers).toBe('New triggers')
     }
   })
 

@@ -5,6 +5,7 @@ import { initDatabase, closeDatabase } from './database'
 import { registerIPCHandlers } from './ipc-handlers'
 import { generateIntakeToken } from './intake-token'
 import { startIntakeServer, stopIntakeServer } from './intake-server'
+import { stopAllKBWatchers } from './kb-watcher'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -41,11 +42,12 @@ function createWindow(): BrowserWindow {
 
 app.whenReady().then(() => {
   const db = initDatabase()
-  registerIPCHandlers(db)
 
   generateIntakeToken()
 
   mainWindow = createWindow()
+
+  registerIPCHandlers(db, mainWindow)
 
   startIntakeServer(db, (item) => {
     mainWindow?.webContents.send('intake:new-item', item.id)
@@ -63,6 +65,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  stopAllKBWatchers()
   stopIntakeServer()
   closeDatabase()
 })

@@ -12,6 +12,8 @@ export function EditDomainDialog({ domain, onClose }: Props): React.JSX.Element 
   const [name, setName] = useState(domain.name)
   const [description, setDescription] = useState(domain.description)
   const [kbPath, setKbPath] = useState(domain.kbPath)
+  const [identity, setIdentity] = useState(domain.identity ?? '')
+  const [escalationTriggers, setEscalationTriggers] = useState(domain.escalationTriggers ?? '')
   const [submitting, setSubmitting] = useState(false)
 
   async function handlePickFolder(): Promise<void> {
@@ -30,6 +32,8 @@ export function EditDomainDialog({ domain, onClose }: Props): React.JSX.Element 
       name: name.trim(),
       description: description.trim(),
       kbPath: kbPath.trim(),
+      identity: identity.trim(),
+      escalationTriggers: escalationTriggers.trim(),
     })
     setSubmitting(false)
 
@@ -45,7 +49,7 @@ export function EditDomainDialog({ domain, onClose }: Props): React.JSX.Element 
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-md rounded-lg border border-border bg-surface-1 p-6"
+        className="w-full max-w-lg rounded-lg border border-border bg-surface-1 p-6 max-h-[90vh] overflow-y-auto"
       >
         <h3 className="mb-4 text-lg font-semibold text-text-primary">Edit Domain</h3>
 
@@ -69,6 +73,28 @@ export function EditDomainDialog({ domain, onClose }: Props): React.JSX.Element 
             className={inputClass}
             rows={2}
             placeholder="What is this domain about?"
+          />
+        </label>
+
+        <label className="mb-3 block">
+          <span className="mb-1 block text-sm text-text-secondary">Agent Identity</span>
+          <textarea
+            value={identity}
+            onChange={(e) => setIdentity(e.target.value)}
+            className={inputClass}
+            rows={4}
+            placeholder="Role, expertise, tone, and strategic thinking for this domain's agent..."
+          />
+        </label>
+
+        <label className="mb-3 block">
+          <span className="mb-1 block text-sm text-text-secondary">Escalation Triggers</span>
+          <textarea
+            value={escalationTriggers}
+            onChange={(e) => setEscalationTriggers(e.target.value)}
+            className={inputClass}
+            rows={3}
+            placeholder="Conditions that should trigger a STOP or escalation..."
           />
         </label>
 
