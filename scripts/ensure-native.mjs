@@ -74,11 +74,33 @@ if (target === 'node') {
 } else if (target === 'electron') {
   // If binary loads in system Node → it's compiled for system Node → wrong for Electron
   if (loadedInSystemNode) {
-    console.log('[ensure-native] System Node ABI detected — rebuilding for Electron...')
     const electronVersion = getElectronVersion()
-    const args = ['electron-rebuild', '-f', '-w', 'better-sqlite3', '--module-dir', repoRoot]
-    if (electronVersion) args.push('-v', electronVersion)
-    execFileSync(npx, args, { cwd: repoRoot, stdio: 'inherit' })
+    if (!electronVersion) {
+      console.error('[ensure-native] Cannot find Electron version — is electron installed?')
+      process.exit(1)
+    }
+    console.log(`[ensure-native] System Node ABI detected — rebuilding for Electron ${electronVersion}...`)
+    // Use node-gyp directly with Electron headers. electron-rebuild silently
+    // produces system-Node binaries when system Node ABI > Electron's ABI.
+    const sqliteDir = resolve(repoRoot, 'node_modules/better-sqlite3')
+    execFileSync(npx, [
+      'node-gyp', 'rebuild',
+      `--directory=${sqliteDir}`,
+      '--runtime=electron',
+      `--target=${electronVersion}`,
+      '--dist-url=https://electronjs.org/headers',
+    ], { cwd: repoRoot, stdio: 'inherit' })
+
+    // Verify the rebuild actually changed the ABI.
+    // Must use a child process — require cache still holds the old binary.
+    const verifyScript = `try { const D = require('better-sqlite3'); new D(':memory:').close(); process.exit(1); } catch { process.exit(0); }`
+    try {
+      execFileSync(process.execPath, ['-e', verifyScript], { cwd: repoRoot, stdio: 'ignore' })
+      console.log('[ensure-native] better-sqlite3 rebuilt for Electron ✓')
+    } catch {
+      console.error('[ensure-native] ERROR: binary still loads in system Node after rebuild — ABI unchanged')
+      process.exit(1)
+    }
   } else if (isAbiMismatch(loadError)) {
     // Fails with ABI error under system Node → likely already Electron ABI
     console.log('[ensure-native] better-sqlite3 OK for Electron (ABI differs from system Node)')
