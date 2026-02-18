@@ -54,23 +54,25 @@ export class KBRepository {
               )
               .run(uuidv4(), domainId, scanned.relativePath, scanned.hash, scanned.sizeBytes, now, tier, 'inferred')
             added++
-          } else if (dbRow.content_hash !== scanned.hash) {
-            // Re-classify tier on update only if tier_source is 'inferred'
-            if (dbRow.tier_source === 'inferred') {
-              const tier = classifyTier(scanned.relativePath)
-              this.db
-                .prepare(
-                  'UPDATE kb_files SET content_hash = ?, size_bytes = ?, last_synced_at = ?, tier = ? WHERE id = ?',
-                )
-                .run(scanned.hash, scanned.sizeBytes, now, tier, dbRow.id)
-            } else {
-              this.db
-                .prepare(
-                  'UPDATE kb_files SET content_hash = ?, size_bytes = ?, last_synced_at = ? WHERE id = ?',
-                )
-                .run(scanned.hash, scanned.sizeBytes, now, dbRow.id)
+          } else {
+            // Always reclassify inferred tiers (classification rules may have changed)
+            const tier = dbRow.tier_source === 'inferred' ? classifyTier(scanned.relativePath) : undefined
+            if (dbRow.content_hash !== scanned.hash || tier) {
+              if (tier) {
+                this.db
+                  .prepare(
+                    'UPDATE kb_files SET content_hash = ?, size_bytes = ?, last_synced_at = ?, tier = ? WHERE id = ?',
+                  )
+                  .run(scanned.hash, scanned.sizeBytes, now, tier, dbRow.id)
+              } else {
+                this.db
+                  .prepare(
+                    'UPDATE kb_files SET content_hash = ?, size_bytes = ?, last_synced_at = ? WHERE id = ?',
+                  )
+                  .run(scanned.hash, scanned.sizeBytes, now, dbRow.id)
+              }
+              if (dbRow.content_hash !== scanned.hash) updated++
             }
-            updated++
           }
         }
 

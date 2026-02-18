@@ -61,21 +61,38 @@ describe('buildKBContext', () => {
 
   it('sorts by tier priority: structural before general', async () => {
     await writeFile(join(tempDir, 'zebra.md'), 'General content')
-    await mkdir(join(tempDir, 'sub'))
-    await writeFile(join(tempDir, 'sub', 'claude.md'), 'Structural content')
+    await writeFile(join(tempDir, 'claude.md'), 'Structural content')
 
     const files = [
       makeKBFile('zebra.md', 'general'),
-      makeKBFile(join('sub', 'claude.md'), 'structural'),
+      makeKBFile('claude.md', 'structural'),
     ]
 
     const result = await buildKBContext(tempDir, files, 10000)
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
-    // Structural (claude.md) should be first
-    expect(result.value.files[0].path).toBe(join('sub', 'claude.md'))
+    // Structural (root claude.md) should be first
+    expect(result.value.files[0].path).toBe('claude.md')
     expect(result.value.files[0].tier).toBe('structural')
+  })
+
+  it('reclassifies nested claude.md as general even if DB says structural', async () => {
+    await writeFile(join(tempDir, 'notes.md'), 'General content')
+    await mkdir(join(tempDir, 'sub'))
+    await writeFile(join(tempDir, 'sub', 'claude.md'), 'Nested structural')
+
+    const files = [
+      makeKBFile('notes.md', 'general'),
+      makeKBFile(join('sub', 'claude.md'), 'structural'), // stale DB tier
+    ]
+
+    const result = await buildKBContext(tempDir, files, 10000)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+
+    const nested = result.value.files.find((f) => f.path === join('sub', 'claude.md'))
+    expect(nested?.tier).toBe('general')
   })
 
   it('includes tier and staleness labels in returned files', async () => {

@@ -55,7 +55,9 @@ export async function buildKBContext(
       try {
         const absPath = join(kbPath, file.relativePath)
         const fileStat = await stat(absPath)
-        const tier = file.tier ? (file.tier as KBTier) : classifyTier(file.relativePath)
+        const tier = file.tierSource === 'manual' && file.tier
+          ? (file.tier as KBTier)
+          : classifyTier(file.relativePath)
         const staleness = calculateStaleness(fileStat.mtimeMs, undefined, tier)
         filesWithMeta.push({ file, mtimeMs: fileStat.mtimeMs, tier, staleness })
       } catch {
