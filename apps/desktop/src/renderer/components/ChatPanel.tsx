@@ -17,7 +17,7 @@ const SendIcon = () => (
 )
 
 export function ChatPanel({ domainId, apiKey }: Props): React.JSX.Element {
-  const { messages, isStreaming, streamingContent, sendMessage } = useChatStore()
+  const { messages, isStreaming, streamingContent, sendMessage, clearMessages } = useChatStore()
   const [input, setInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -89,6 +89,14 @@ export function ChatPanel({ domainId, apiKey }: Props): React.JSX.Element {
       {/* Input */}
       <div className="border-t border-border-subtle p-4">
         <div className="flex gap-2">
+          <button
+            onClick={clearMessages}
+            disabled={isStreaming || messages.filter((m) => m.role !== 'system').length === 0}
+            className="self-end rounded border border-border px-2 py-2 text-xs text-text-tertiary hover:bg-surface-2 hover:text-text-secondary disabled:opacity-30"
+            title="Clear chat history"
+          >
+            Clear
+          </button>
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
