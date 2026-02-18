@@ -90,6 +90,17 @@ Inspired by the CAPCG Gmail Extension Pipeline (v3.8). A Chrome Extension with a
 | `apps/desktop/src/preload/` | contextBridge API surface |
 | `apps/desktop/src/renderer/` | React UI, pages, components, stores |
 
+## Native Modules
+
+`better-sqlite3` is a native addon compiled for either system Node (tests) or Electron (dev). Lifecycle hooks handle this automatically:
+
+- `npm install` → defaults to system Node ABI (`postinstall`)
+- `npm test` → ensures system Node ABI (`pretest`)
+- `npm run dev` → ensures Electron ABI (`predev`, from root or desktop workspace)
+- First `npm run dev` after install rebuilds for Electron (~5s with prebuilds)
+- CI: set `ENSURE_NATIVE_SKIP=1` if binary is pre-cached in correct ABI
+- Always prefer running `npm run dev` from repo root
+
 ## Conventions
 
 - **ESM everywhere** — `"type": "module"`, use `.js` extensions in imports within core

@@ -11,6 +11,9 @@
     "node": ">=22.0.0"
   },
   "scripts": {
+    "postinstall": "node scripts/ensure-native.mjs node",
+    "pretest": "node scripts/ensure-native.mjs node",
+    "predev": "node scripts/ensure-native.mjs electron",
     "dev": "npm run dev --workspace=@domain-os/desktop",
     "build": "npm run build --workspace=@domain-os/core && npm run build --workspace=@domain-os/integrations && npm run build --workspace=@domain-os/desktop",
     "test": "npm test --workspaces --if-present",
