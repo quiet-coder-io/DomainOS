@@ -10,11 +10,18 @@ interface ChatMessage {
 }
 
 interface ChatState {
+  /** Messages for the currently active domain. */
   messages: ChatMessage[]
   isStreaming: boolean
   streamingContent: string
   kbProposals: KBUpdateProposal[]
 
+  /** Per-domain message storage (in-memory, lost on app restart). */
+  messagesByDomain: Record<string, ChatMessage[]>
+  proposalsByDomain: Record<string, KBUpdateProposal[]>
+  activeDomainId: string | null
+
+  switchDomain(domainId: string, domainName: string): void
   sendMessage(content: string, domainId: string, apiKey: string): Promise<void>
   applyProposal(domainId: string, index: number): Promise<void>
   dismissProposal(index: number): void
@@ -26,6 +33,38 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isStreaming: false,
   streamingContent: '',
   kbProposals: [],
+  messagesByDomain: {},
+  proposalsByDomain: {},
+  activeDomainId: null,
+
+  switchDomain(domainId, domainName) {
+    const state = get()
+    const updates: Partial<ChatState> = {}
+
+    // Save current domain's state
+    if (state.activeDomainId) {
+      updates.messagesByDomain = {
+        ...state.messagesByDomain,
+        [state.activeDomainId]: state.messages,
+      }
+      updates.proposalsByDomain = {
+        ...state.proposalsByDomain,
+        [state.activeDomainId]: state.kbProposals,
+      }
+    }
+
+    // Restore target domain's state (or start fresh with divider)
+    const savedMessages = (updates.messagesByDomain ?? state.messagesByDomain)[domainId]
+    const savedProposals = (updates.proposalsByDomain ?? state.proposalsByDomain)[domainId]
+
+    set({
+      ...updates,
+      activeDomainId: domainId,
+      messages: savedMessages ?? [{ role: 'system' as const, content: domainName }],
+      kbProposals: savedProposals ?? [],
+      streamingContent: '',
+    })
+  },
 
   async sendMessage(content, domainId, apiKey) {
     const userMessage: ChatMessage = { role: 'user', content }
@@ -53,20 +92,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
     window.domainOS.chat.offStreamDone()
 
     if (result.ok && result.value) {
+      const newMessages = [
+        ...currentMessages,
+        {
+          role: 'assistant' as const,
+          content: result.value.content,
+          stopBlocks: result.value.stopBlocks,
+          gapFlags: result.value.gapFlags,
+          decisions: result.value.decisions,
+        },
+      ]
+      const newProposals = [...get().kbProposals, ...result.value.proposals]
       set({
-        messages: [
-          ...currentMessages,
-          {
-            role: 'assistant',
-            content: result.value.content,
-            stopBlocks: result.value.stopBlocks,
-            gapFlags: result.value.gapFlags,
-            decisions: result.value.decisions,
-          },
-        ],
+        messages: newMessages,
         isStreaming: false,
         streamingContent: '',
-        kbProposals: [...get().kbProposals, ...result.value.proposals],
+        kbProposals: newProposals,
+        messagesByDomain: { ...get().messagesByDomain, [domainId]: newMessages },
+        proposalsByDomain: { ...get().proposalsByDomain, [domainId]: newProposals },
       })
     } else {
       let errorContent = result.error ?? 'Unknown error occurred'
@@ -79,13 +122,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const msgMatch = errorContent.match(/"message"\s*:\s*"([^"]+)"/)
         if (msgMatch) errorContent = msgMatch[1]
       }
+      const newMessages = [
+        ...currentMessages,
+        { role: 'assistant' as const, content: `Error: ${errorContent}` },
+      ]
       set({
-        messages: [
-          ...currentMessages,
-          { role: 'assistant', content: `Error: ${errorContent}` },
-        ],
+        messages: newMessages,
         isStreaming: false,
         streamingContent: '',
+        messagesByDomain: { ...get().messagesByDomain, [domainId]: newMessages },
       })
     }
   },
@@ -96,18 +141,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     await window.domainOS.kbUpdate.apply(domainId, proposal)
 
-    set((s) => ({
-      kbProposals: s.kbProposals.filter((_, i) => i !== index),
-    }))
+    const newProposals = get().kbProposals.filter((_, i) => i !== index)
+    set({
+      kbProposals: newProposals,
+      proposalsByDomain: { ...get().proposalsByDomain, [domainId]: newProposals },
+    })
   },
 
   dismissProposal(index) {
-    set((s) => ({
-      kbProposals: s.kbProposals.filter((_, i) => i !== index),
-    }))
+    const domainId = get().activeDomainId
+    const newProposals = get().kbProposals.filter((_, i) => i !== index)
+    set({
+      kbProposals: newProposals,
+      ...(domainId ? { proposalsByDomain: { ...get().proposalsByDomain, [domainId]: newProposals } } : {}),
+    })
   },
 
   clearMessages() {
-    set({ messages: [], streamingContent: '', kbProposals: [] })
+    const domainId = get().activeDomainId
+    set({
+      messages: [],
+      streamingContent: '',
+      kbProposals: [],
+      ...(domainId ? {
+        messagesByDomain: { ...get().messagesByDomain, [domainId]: [] },
+        proposalsByDomain: { ...get().proposalsByDomain, [domainId]: [] },
+      } : {}),
+    })
   },
 }))

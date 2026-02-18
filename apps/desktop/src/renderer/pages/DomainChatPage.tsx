@@ -18,7 +18,7 @@ const LockIcon = () => (
 
 export function DomainChatPage(): React.JSX.Element {
   const { activeDomainId, domains } = useDomainStore()
-  const { messages, kbProposals, applyProposal, dismissProposal } = useChatStore()
+  const { messages, kbProposals, applyProposal, dismissProposal, switchDomain } = useChatStore()
   const prevDomainIdRef = useRef<string | null>(null)
   const { apiKey, loading: apiKeyLoading, setApiKey, loadApiKey } = useSettingsStore()
 
@@ -26,18 +26,16 @@ export function DomainChatPage(): React.JSX.Element {
     loadApiKey()
   }, [loadApiKey])
 
-  // Insert a divider when switching domains (skip initial mount)
+  // Switch domain context: save current messages, restore target domain's messages
   useEffect(() => {
     if (!activeDomainId) return
     const prev = prevDomainIdRef.current
     prevDomainIdRef.current = activeDomainId
-    if (prev && prev !== activeDomainId) {
+    if (prev !== activeDomainId) {
       const name = domains.find((d) => d.id === activeDomainId)?.name ?? 'Unknown'
-      useChatStore.setState((s) => ({
-        messages: [...s.messages, { role: 'system' as const, content: name }],
-      }))
+      switchDomain(activeDomainId, name)
     }
-  }, [activeDomainId, domains])
+  }, [activeDomainId, domains, switchDomain])
 
   const domain = domains.find((d) => d.id === activeDomainId)
   if (!domain || !activeDomainId) return <div />
