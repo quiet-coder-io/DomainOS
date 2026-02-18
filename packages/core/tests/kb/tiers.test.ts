@@ -10,8 +10,13 @@ describe('classifyTier', () => {
     expect(classifyTier('CLAUDE.md')).toBe('structural')
   })
 
-  it('classifies nested claude.md as structural', () => {
-    expect(classifyTier('sub/claude.md')).toBe('structural')
+  it('classifies nested claude.md as general (only root gets named tier)', () => {
+    expect(classifyTier('sub/claude.md')).toBe('general')
+    expect(classifyTier('refinance quotes/CLAUDE.md')).toBe('general')
+  })
+
+  it('classifies nested kb_digest.md as general', () => {
+    expect(classifyTier('subfolder/kb_digest.md')).toBe('general')
   })
 
   it('classifies kb_digest.md as status', () => {

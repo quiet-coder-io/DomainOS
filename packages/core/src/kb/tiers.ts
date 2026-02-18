@@ -4,7 +4,7 @@
  * prompt ordering, staleness thresholds, and write mode rules.
  */
 
-import { basename } from 'node:path'
+import { basename, dirname } from 'node:path'
 
 export type KBTier = 'structural' | 'status' | 'intelligence' | 'general'
 export type KBTierSource = 'inferred' | 'manual'
@@ -26,8 +26,13 @@ const TIER_MAP: Record<string, KBTier> = {
 /**
  * Classify a KB file into a tier based on its filename.
  * Case-insensitive match on the basename.
+ * Only root-level files get named tiers (structural/status/intelligence);
+ * nested files with the same name are classified as general to avoid
+ * stale subdirectory files outranking the canonical root KB files.
  */
 export function classifyTier(relativePath: string): KBTier {
+  const dir = dirname(relativePath)
+  if (dir !== '.') return 'general'
   const name = basename(relativePath).toLowerCase()
   return TIER_MAP[name] ?? 'general'
 }
