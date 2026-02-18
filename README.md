@@ -15,11 +15,21 @@
 
 ## The Problem
 
-Professionals who manage multiple areas of responsibility (real estate portfolios, businesses, investment accounts, etc.) face a recurring challenge: each domain has its own knowledge base, contacts, deadlines, and decision patterns — but no single tool brings them together without shipping your data to someone else's cloud.
+If you manage multiple professional domains — real estate portfolios, businesses, investment accounts, legal matters — you already know the pain:
+
+- **Context is scattered.** Each domain has its own documents, deadlines, contacts, and decision history spread across folders, emails, spreadsheets, and your memory.
+- **AI tools don't understand your world.** General-purpose chatbots start from zero every conversation. They don't know your portfolio, your contracts, or what you decided last month and why.
+- **Cloud tools want your data.** Most AI-powered tools require uploading sensitive business documents, financial records, and API keys to someone else's servers. For professionals handling confidential information, that's a non-starter.
+- **No safety rails.** When AI makes decisions about your business, there's no audit trail, no escalation when stakes are high, and no way to catch knowledge gaps before they become costly mistakes.
 
 ## The Solution
 
-DomainOS is a desktop application that keeps all your data on your machine while giving each domain its own AI-powered assistant. Your documents stay in your filesystem. Your database stays in SQLite. Your API keys stay in your OS keychain.
+DomainOS gives each area of your professional life its own AI-powered operating system — with a persistent knowledge base, behavioral protocols, and governance guardrails — while keeping everything on your machine.
+
+- **Your data stays local.** Documents in your filesystem. Database in SQLite. API keys in your OS keychain. Nothing leaves your computer unless you send a chat message to your LLM provider.
+- **Your AI remembers.** Each domain maintains its own knowledge base that the AI reads, references, and proposes updates to over time. It builds context across conversations, not just within one.
+- **Your AI knows when to stop.** Configurable escalation triggers cause the AI to halt and surface a red alert when it encounters high-stakes situations that need human judgment — before acting, not after.
+- **Your AI is auditable.** Every KB change, decision, and session is logged. Gap flags surface what your knowledge base is missing. Decision cards track rationale and let you reject choices you disagree with.
 
 ## Features
 
