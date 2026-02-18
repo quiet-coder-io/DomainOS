@@ -4,6 +4,9 @@ import type { KBUpdateProposal } from '../../preload/api'
 interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+  stopBlocks?: Array<{ reason: string; actionNeeded: string }>
+  gapFlags?: Array<{ category: string; description: string }>
+  decisions?: Array<{ decisionId: string; decision: string }>
 }
 
 interface ChatState {
@@ -51,7 +54,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     if (result.ok && result.value) {
       set({
-        messages: [...currentMessages, { role: 'assistant', content: result.value.content }],
+        messages: [
+          ...currentMessages,
+          {
+            role: 'assistant',
+            content: result.value.content,
+            stopBlocks: result.value.stopBlocks,
+            gapFlags: result.value.gapFlags,
+            decisions: result.value.decisions,
+          },
+        ],
         isStreaming: false,
         streamingContent: '',
         kbProposals: [...get().kbProposals, ...result.value.proposals],

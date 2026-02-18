@@ -1,6 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { useChatStore } from '../stores'
 import { MessageBubble } from './MessageBubble'
+import { StopAlert } from './StopAlert'
+import { GapFlagAlert } from './GapFlagAlert'
+import { DecisionCard } from './DecisionCard'
 
 interface Props {
   domainId: string
@@ -38,7 +41,7 @@ export function ChatPanel({ domainId, apiKey }: Props): React.JSX.Element {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex min-h-0 h-full flex-col">
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4">
         {messages.length === 0 && !isStreaming && (
@@ -49,7 +52,12 @@ export function ChatPanel({ domainId, apiKey }: Props): React.JSX.Element {
           </div>
         )}
         {messages.map((msg, i) => (
-          <MessageBubble key={i} role={msg.role} content={msg.content} />
+          <div key={i}>
+            <MessageBubble role={msg.role} content={msg.content} />
+            {msg.role === 'assistant' && msg.stopBlocks?.length ? <StopAlert stopBlocks={msg.stopBlocks} /> : null}
+            {msg.role === 'assistant' && msg.gapFlags?.length ? <GapFlagAlert gapFlags={msg.gapFlags} /> : null}
+            {msg.role === 'assistant' && msg.decisions?.length ? <DecisionCard decisions={msg.decisions} /> : null}
+          </div>
         ))}
         {isStreaming && streamingContent && (
           <MessageBubble role="assistant" content={streamingContent} />

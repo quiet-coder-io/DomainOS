@@ -37,6 +37,7 @@
 body {
   font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  background: oklch(0.13 0.005 260);
 }
 
 /* ─── Scrollbar styling (Chromium / Electron) ───────────────────────── */

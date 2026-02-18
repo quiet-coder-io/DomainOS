@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useDomainStore } from '../stores'
 import type { Domain } from '../../preload/api'
+import { SiblingSelector } from './SiblingSelector'
 
 interface Props {
   domain: Domain
@@ -97,6 +98,8 @@ export function EditDomainDialog({ domain, onClose }: Props): React.JSX.Element 
             placeholder="Conditions that should trigger a STOP or escalation..."
           />
         </label>
+
+        <SiblingSelector domainId={domain.id} />
 
         <label className="mb-4 block">
           <span className="mb-1 block text-sm text-text-secondary">Knowledge Base Folder</span>

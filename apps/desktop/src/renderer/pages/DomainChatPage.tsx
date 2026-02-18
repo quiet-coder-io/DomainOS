@@ -4,6 +4,10 @@ import { ChatPanel } from '../components/ChatPanel'
 import { KBFileList } from '../components/KBFileList'
 import { KBUpdateProposal } from '../components/KBUpdateProposal'
 import { ProtocolEditor } from '../components/ProtocolEditor'
+import { SessionIndicator } from '../components/SessionIndicator'
+import { GapFlagPanel } from '../components/GapFlagPanel'
+import { DecisionLogPanel } from '../components/DecisionLogPanel'
+import { AuditLogPanel } from '../components/AuditLogPanel'
 
 const LockIcon = () => (
   <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg" className="inline-block">
@@ -27,7 +31,7 @@ export function DomainChatPage(): React.JSX.Element {
   return (
     <div className="flex h-full">
       {/* Main chat area */}
-      <div className="flex flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col">
         {/* API Key bar */}
         <div className="flex items-center gap-2 border-b border-border-subtle px-4 py-2">
           <span className="text-xs text-text-tertiary">API Key:</span>
@@ -48,8 +52,10 @@ export function DomainChatPage(): React.JSX.Element {
         <ChatPanel domainId={activeDomainId} apiKey={apiKey} />
       </div>
 
-      {/* Right sidebar — KB files + proposals */}
+      {/* Right sidebar — KB files + proposals + panels */}
       <div className="w-72 overflow-y-auto border-l border-border-subtle bg-surface-0 p-4">
+        <SessionIndicator domainId={activeDomainId} />
+
         <KBFileList domainId={activeDomainId} />
 
         <ProtocolEditor domainId={activeDomainId} />
@@ -68,6 +74,10 @@ export function DomainChatPage(): React.JSX.Element {
             ))}
           </div>
         )}
+
+        <GapFlagPanel domainId={activeDomainId} />
+        <DecisionLogPanel domainId={activeDomainId} />
+        <AuditLogPanel domainId={activeDomainId} />
       </div>
     </div>
   )
