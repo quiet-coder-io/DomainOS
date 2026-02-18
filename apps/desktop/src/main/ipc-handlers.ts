@@ -218,6 +218,17 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
         const lastUserMsg = payload.messages.filter((m) => m.role === 'user').at(-1)
         const isWrapUp = lastUserMsg && /\b(wrap\s*up|wrap\s*-\s*up|end\s*session|session\s*summary|final\s*summary)\b/i.test(lastUserMsg.content)
 
+        // Format current date with day-of-week, time, and timezone for LLM temporal grounding
+        const currentDate = new Intl.DateTimeFormat('en-US', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+          timeZoneName: 'short',
+        }).format(new Date())
+
         const promptResult = buildSystemPrompt({
           domain: {
             name: domain.value.name,
@@ -230,6 +241,7 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           sharedProtocols: sharedProtoList,
           siblingContext,
           sessionContext,
+          currentDate,
         })
         const systemPrompt = promptResult.prompt
 

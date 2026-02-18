@@ -49,6 +49,7 @@ export interface PromptContext {
   sharedProtocols?: PromptProtocol[]
   siblingContext?: PromptSiblingContext
   sessionContext?: PromptSessionContext
+  currentDate?: string
   debug?: boolean
 }
 
@@ -95,6 +96,11 @@ export function buildSystemPrompt(context: PromptContext): PromptResult {
   function addSection(name: string, content: string): void {
     sections.push(content)
     manifestSections.push({ name, tokenEstimate: estimateTokens(content.length) })
+  }
+
+  // === CURRENT DATE ===
+  if (context.currentDate) {
+    addSection('Current Date', `=== CURRENT DATE ===\n${context.currentDate}`)
   }
 
   // === AGENT IDENTITY ===

@@ -90,6 +90,28 @@ describe('buildSystemPrompt', () => {
     expect(prompt).not.toContain('=== AGENT IDENTITY ===')
   })
 
+  it('emits CURRENT DATE as the first section when provided', () => {
+    const context: PromptContext = {
+      ...baseContext,
+      domain: { ...baseContext.domain, identity: 'You are a test agent.' },
+      currentDate: 'Wednesday, February 18, 2026 at 1:15 PM PST',
+    }
+    const { prompt, manifest } = buildSystemPrompt(context)
+    expect(prompt).toContain('=== CURRENT DATE ===')
+    expect(prompt).toContain('Wednesday, February 18, 2026 at 1:15 PM PST')
+    // Current Date should come before Agent Identity
+    const dateIdx = prompt.indexOf('=== CURRENT DATE ===')
+    const identityIdx = prompt.indexOf('=== AGENT IDENTITY ===')
+    expect(dateIdx).toBeLessThan(identityIdx)
+    // Manifest should include the section
+    expect(manifest.sections[0].name).toBe('Current Date')
+  })
+
+  it('omits CURRENT DATE section when not provided', () => {
+    const { prompt } = buildSystemPrompt(baseContext)
+    expect(prompt).not.toContain('=== CURRENT DATE ===')
+  })
+
   it('emits ESCALATION TRIGGERS section when set', () => {
     const context: PromptContext = {
       ...baseContext,
@@ -196,12 +218,14 @@ describe('buildSystemPrompt', () => {
         scope: 'working',
         startupReport: 'All systems operational.',
       },
+      currentDate: 'Wednesday, February 18, 2026 at 1:15 PM PST',
     }
 
     const { prompt, manifest } = buildSystemPrompt(fullContext)
 
     // Verify section ordering
     const sectionOrder = [
+      '=== CURRENT DATE ===',
       '=== AGENT IDENTITY ===',
       '=== DOMAIN: Test Domain ===',
       '=== KNOWLEDGE BASE ===',
@@ -221,7 +245,7 @@ describe('buildSystemPrompt', () => {
     }
 
     // Verify manifest completeness
-    expect(manifest.sections.length).toBe(9)
+    expect(manifest.sections.length).toBe(10)
     expect(manifest.filesIncluded.length).toBe(2)
     expect(manifest.totalTokenEstimate).toBeGreaterThan(0)
   })
