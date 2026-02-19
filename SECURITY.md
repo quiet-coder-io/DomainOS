@@ -10,18 +10,21 @@ DomainOS is designed with a local-first security posture. Your data never leaves
 |------|---------|----------|
 | Domain configs | SQLite | `~/.domain-os/data.db` |
 | Knowledge base files | Filesystem | User-specified directories |
-| API keys | Electron `safeStorage` | Encrypted file in app userData, encryption key backed by OS keychain |
+| API keys (per-provider) | Electron `safeStorage` | Encrypted files in app userData (`api-key-anthropic.enc`, `api-key-openai.enc`), encryption key backed by OS keychain. Ollama requires no key. |
 | App settings | SQLite | `~/.domain-os/data.db` |
 | Chat history | SQLite | `~/.domain-os/data.db` |
 
 ## Bring Your Own Key (BYOK)
 
-- Users provide their own LLM API keys (OpenAI, Anthropic, etc.)
-- Keys are encrypted via Electron's `safeStorage` API — the encryption key is managed by the OS keychain (macOS Keychain / Windows DPAPI / Linux Secret Service)
-- The encrypted data is stored in a file within the Electron userData directory
+DomainOS supports three LLM providers: **Anthropic**, **OpenAI**, and **Ollama** (local).
+
+- Users provide their own API keys per provider (Anthropic and OpenAI). Ollama runs locally and requires no key.
+- Keys are stored in separate encrypted files (`api-key-anthropic.enc`, `api-key-openai.enc`) using Electron's `safeStorage` API — the encryption key is managed by the OS keychain (macOS Keychain / Windows DPAPI / Linux Secret Service)
 - **Note:** On Linux systems without a supported keyring, `safeStorage` may fall back to plaintext storage. DomainOS logs a warning at startup if this is detected.
-- Keys are decrypted only when making API calls
+- Keys are decrypted only when making API calls and cached in-memory during the session
+- **Keys never reach the renderer process** — only `hasKey: boolean` and `last4: string` are exposed via IPC
 - No proxy server — API calls go directly from the app to the provider
+- Ollama communicates via `localhost` only — no data leaves the machine
 
 ## Electron Security
 
@@ -47,7 +50,8 @@ DomainOS runs a localhost-only HTTP server on `127.0.0.1:19532` for the Chrome e
 | Threat | Mitigation |
 |--------|-----------|
 | Data exfiltration | All data is local; no telemetry, no cloud sync |
-| API key theft | Electron `safeStorage` encryption backed by OS keychain |
+| API key theft | Per-provider `safeStorage` encryption backed by OS keychain; keys never exposed to renderer |
+| Tool output data leakage | Tool result sanitization strips auth headers, API keys, base64 blobs before appending to LLM transcript |
 | Renderer compromise (XSS) | CSP, contextIsolation, sandbox, no nodeIntegration |
 | Path traversal via KB proposals | Resolve + boundary check + symlink escape detection + extension allowlist |
 | Malicious protocol injection | Protocols are user-authored local files, not downloaded |
@@ -72,5 +76,6 @@ You can independently verify that DomainOS only communicates with `localhost` an
 
 **Expected traffic:**
 - `127.0.0.1:19532` — intake server (localhost only, Chrome extension communication)
-- Your LLM API provider (e.g., `api.anthropic.com`, `api.openai.com`) — only when you send a chat message
+- `127.0.0.1:11434` — Ollama local LLM (only if Ollama is your configured provider; configurable base URL)
+- Your cloud LLM API provider (e.g., `api.anthropic.com`, `api.openai.com`) — only when you send a chat message and only for the provider you've configured
 - **Nothing else.** If you see other outbound connections, something is wrong.

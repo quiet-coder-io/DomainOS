@@ -57,12 +57,14 @@ The minimum viable feature set:
 
 This loop validates the core value prop: domain-scoped AI that reads and writes your knowledge base.
 
-### Out of scope for v0.1
-- Multi-provider LLM support (start with one: Anthropic or OpenAI)
-- Cross-domain features
+### Completed beyond v0.1
+- **Multi-provider LLM support** — Anthropic, OpenAI, and Ollama (local) with per-domain model selection
+- **Cross-domain features** — sibling domain relationships
+- **Browser ingestion pipeline** — Chrome extension → localhost intake server → AI classification
+
+### Out of scope (future)
 - Protocol marketplace/sharing
 - Auto-sync or real-time file watching
-- Browser ingestion pipeline (see Post-v0.1 Roadmap)
 
 ## Post-v0.1 Roadmap
 
@@ -79,22 +81,130 @@ Inspired by a prior project's Gmail Extension Pipeline. A Chrome Extension with 
 
 ## Key Files Reference
 
+### Core Library (`packages/core/`)
+
 | File | Purpose |
 |------|---------|
-| `packages/core/src/domains/` | Domain CRUD, config schema (incl. `allowGmail` toggle) |
-| `packages/core/src/kb/` | KB file indexing, digest generation |
-| `packages/core/src/protocols/` | Protocol parsing and composition |
-| `packages/core/src/agents/` | LLM API calls, prompt builder, `createMessage()` for tool-use |
-| `packages/core/src/storage/` | SQLite schema, migrations (v7: `allow_gmail`), queries |
-| `packages/core/src/common/` | Result type, shared Zod schemas |
-| `packages/integrations/src/gmail/` | `GmailClient` (search/read), `GmailPoller`, body parser |
-| `apps/desktop/src/main/` | Electron main process, IPC handlers |
-| `apps/desktop/src/main/gmail-oauth.ts` | OAuth PKCE flow via system browser + loopback |
-| `apps/desktop/src/main/gmail-credentials.ts` | Encrypted credential storage (safeStorage) |
-| `apps/desktop/src/main/gmail-tools.ts` | Tool definitions, input validation, executor |
-| `apps/desktop/src/main/tool-loop.ts` | LLM ↔ tool execution loop (Anthropic tool-use API) |
-| `apps/desktop/src/preload/` | contextBridge API surface |
-| `apps/desktop/src/renderer/` | React UI, pages, components, stores |
+| `src/domains/` | Domain CRUD, config schema (incl. `allowGmail`, `modelProvider`, `modelName`, `forceToolAttempt`) |
+| `src/domains/schemas.ts` | Zod schemas for domain create/update with per-domain LLM overrides |
+| `src/domains/repository.ts` | SQLite CRUD for domains, `DOMAIN_COLUMNS`, `rowToDomain()` |
+| `src/kb/` | KB file indexing, digest generation, tiered importance |
+| `src/protocols/` | Protocol parsing and composition |
+| `src/agents/provider.ts` | **Authoritative LLM contract**: `LLMProvider`, `ToolCapableProvider`, `ToolUseMessage` discriminated union, `ToolUseResponse`, `ToolsNotSupportedError`, tool capability cache (4-state), `shouldUseTools()` routing |
+| `src/agents/anthropic-provider.ts` | Anthropic (Claude) implementation — streaming chat + tool-use via normalized interface |
+| `src/agents/openai-provider.ts` | OpenAI (GPT-4o, o3-mini) implementation — streaming chat + tool-use; base class for Ollama |
+| `src/agents/ollama-provider.ts` | Ollama (local LLMs) — extends OpenAI provider with custom baseURL + native `/api/tags` for model listing |
+| `src/agents/provider-factory.ts` | `createProvider()` factory, `KNOWN_MODELS`, `DEFAULT_MODELS`, `ProviderName` type |
+| `src/agents/prompt-builder.ts` | System prompt construction from domain config + KB digest + protocols |
+| `src/storage/` | SQLite schema, migrations (v8: per-domain model override), queries |
+| `src/common/` | Result type, shared Zod schemas |
+
+### Integrations (`packages/integrations/`)
+
+| File | Purpose |
+|------|---------|
+| `src/gmail/` | `GmailClient` (search/read), `GmailPoller`, body parser |
+
+### Desktop App (`apps/desktop/`)
+
+| File | Purpose |
+|------|---------|
+| `src/main/ipc-handlers.ts` | IPC handlers: `chat:send`, `settings:set-provider-key`, `settings:get-provider-keys-status`, `settings:test-tools`, `settings:list-ollama-models`, etc. |
+| `src/main/tool-loop.ts` | **Provider-agnostic** tool-use loop — works with Anthropic, OpenAI, Ollama; includes ROWYS Gmail guard, tool output sanitization, transcript validation, size guards (75KB/result, 400KB total), capability cache management |
+| `src/main/gmail-tools.ts` | `GMAIL_TOOLS` as `ToolDefinition[]` (provider-agnostic), input validation, executor |
+| `src/main/gmail-oauth.ts` | OAuth PKCE flow via system browser + loopback |
+| `src/main/gmail-credentials.ts` | Encrypted credential storage (safeStorage) |
+| `src/preload/api.ts` | IPC type contract: `DomainOSAPI`, `ProviderConfig`, `ProviderKeysStatus`, `ToolTestResult` |
+| `src/renderer/components/SettingsDialog.tsx` | Multi-provider settings modal (API keys, Ollama connection, model defaults, tool test) |
+| `src/renderer/pages/DomainChatPage.tsx` | Chat page with per-domain model override UI (tri-state: global default / override / clear) |
+| `src/renderer/stores/settings-store.ts` | Zustand store for provider keys (boolean+last4), global config, Ollama state |
+| `src/renderer/stores/domain-store.ts` | Zustand store for domains including `modelProvider`, `modelName`, `forceToolAttempt` |
+
+## Multi-Provider LLM Architecture
+
+### Provider System
+
+Three providers, one normalized interface:
+- **Anthropic** (`AnthropicProvider`) — uses `@anthropic-ai/sdk`, native Anthropic content blocks for tool-use
+- **OpenAI** (`OpenAIProvider`) — uses `openai` SDK, native OpenAI message format for tool-use
+- **Ollama** (`OllamaProvider`) — extends `OpenAIProvider` with `baseURL: http://localhost:11434/v1`; uses native Ollama `/api/tags` for model listing
+
+All implement `ToolCapableProvider` interface with `createToolUseMessage()` for tool-use rounds.
+
+### Message Round-Tripping
+
+Each provider's `rawAssistantMessage` is an opaque blob preserving the native format:
+- Anthropic: `ContentBlock[]` (text blocks + tool_use blocks)
+- OpenAI/Ollama: `ChatCompletionMessage` (includes `tool_calls` array)
+
+**Critical**: `rawMessage` is the source of truth for round-tripping. `derivedText` is for UI display only.
+
+### Tool-Use Flow
+
+```
+Domain config → resolve provider (per-domain override or global default)
+  ↓
+shouldUseTools() → interface check + capability cache + forceToolAttempt flag
+  YES → runToolLoop() with ToolDefinition[]
+        → catch ToolsNotSupportedError → chatComplete() fallback
+  NO  → streaming chat path
+```
+
+### Tool Capability Cache (In-Memory, 4-State)
+
+```
+type ToolCapability = 'supported' | 'not_observed' | 'not_supported' | 'unknown'
+Key: ${providerName}:${model} (or ${providerName}:${model}:${ollamaBaseUrl} for Ollama)
+```
+
+- `supported`: successful tool call + result round-trip observed
+- `not_observed`: model ignores tools (2 consecutive rounds)
+- `not_supported`: provider rejects tool fields or ToolsNotSupportedError thrown
+- `unknown`: never probed — try tools on first request
+
+### Per-Domain Model Override
+
+Database columns (migration v8): `model_provider TEXT`, `model_name TEXT`, `force_tool_attempt INTEGER`
+- NULL = use global default
+- Override = specific provider + model
+- `forceToolAttempt` = try tools even when cache says `not_observed`
+
+### Key Design Rules
+
+- **D6**: Tool rounds always non-streaming (full response objects needed for round-tripping)
+- **D8**: ROWYS (read-only-what-you-searched) Gmail guard lives in tool-loop, not provider adapters
+- **D11**: `flattenForChatComplete()` converts `ToolUseMessage[]` → `ChatMessage[]` for fallback; one user message per tool result, never merged
+- **D12**: Tool result size guards — 75KB/result, 400KB total transcript (byte-based)
+- **D13**: Transcript validation before each `createToolUseMessage()` call
+- **D14**: Capability cache per (provider, model); Ollama key includes baseUrl
+- **D16**: Ollama malformed tool_calls → `ToolsNotSupportedError` → fallback
+- **D18**: Tool output sanitization (strip auth headers, API keys, long base64)
+- **D19**: `structuredClone(tool.inputSchema)` before adapter conversion
+
+### API Key Storage
+
+Per-provider encrypted files: `api-key-anthropic.enc`, `api-key-openai.enc` (Ollama needs no key).
+Decrypted keys cached in-memory after first read. Keys never cross IPC to renderer — only `hasKey: boolean` + `last4: string` exposed.
+
+### Provider Config
+
+`provider-config.json` (versioned, no secrets):
+```json
+{ "version": 1, "defaultProvider": "anthropic", "defaultModel": "claude-sonnet-4-20250514", "ollamaBaseUrl": "http://localhost:11434" }
+```
+
+### IPC Channels (Provider-Related)
+
+| Channel | Direction | Purpose |
+|---------|-----------|---------|
+| `settings:set-provider-key` | renderer→main | Encrypt + store API key |
+| `settings:clear-provider-key` | renderer→main | Delete encrypted key file |
+| `settings:get-provider-keys-status` | renderer→main | Batch: `{ hasKey, last4 }` per provider |
+| `settings:get-provider-config` | renderer→main | Load global defaults |
+| `settings:set-provider-config` | renderer→main | Save global defaults |
+| `settings:list-ollama-models` | renderer→main | Fetch installed models via `/api/tags` |
+| `settings:test-ollama` | renderer→main | Connection test |
+| `settings:test-tools` | renderer→main | Two-round tool capability probe |
 
 ## Environment Variables
 

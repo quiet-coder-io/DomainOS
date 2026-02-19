@@ -3,9 +3,10 @@
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Local-First](https://img.shields.io/badge/data-local--first-green.svg)](#security--privacy)
 [![BYOK](https://img.shields.io/badge/AI-bring--your--own--key-orange.svg)](#security--privacy)
+[![Multi-Provider](https://img.shields.io/badge/LLM-Anthropic%20%7C%20OpenAI%20%7C%20Ollama-purple.svg)](#multi-provider-llm-support)
 [![Open Source](https://img.shields.io/badge/open-source-brightgreen.svg)](LICENSE)
 
-**A local-first desktop app for managing multiple professional domains with AI assistance.**
+**A local-first desktop app for managing multiple professional domains with AI assistance. Supports Anthropic, OpenAI, and Ollama (local LLMs) with per-domain model selection.**
 
 <p align="center">
   <img src="docs/screenshot.png" alt="DomainOS — Domain-scoped AI assistant with knowledge base, gap flags, decisions, and audit log" width="960" />
@@ -39,6 +40,16 @@ DomainOS gives each area of your professional life its own AI-powered operating 
 - **Knowledge base management** — point a domain at a folder, auto-index files with tiered importance, generate digests, and track changes over time
 - **AI-proposed KB updates** — the assistant analyzes conversations and proposes edits to your knowledge base files, which you review and approve
 - **Composable protocols** — per-domain and shared instruction sets that define how your AI assistant behaves, with priority ordering and scope control
+
+### Multi-Provider LLM Support
+
+- **Three providers** — Anthropic (Claude), OpenAI (GPT-4o, o3-mini), and Ollama (local LLMs like Llama, Mistral, CodeLlama)
+- **Per-domain model selection** — each domain can override the global default provider and model; one domain can use Claude while another uses GPT-4o or a local Ollama model
+- **Tool-use across providers** — Gmail tools and AI-proposed KB updates work with all providers via a normalized tool-use abstraction
+- **Graceful tool fallback** — if a model doesn't support tool calls (common with Ollama), the system detects this automatically and falls back to plain chat with no user intervention
+- **Tool capability caching** — 4-state cache (supported / not observed / not supported / unknown) avoids wasted latency on models known to lack tool support
+- **Settings dialog** — manage API keys for Anthropic and OpenAI, test Ollama connections, browse installed Ollama models, probe tool support per model
+- **Encrypted key storage** — per-provider API keys stored via Electron `safeStorage`, encrypted by your OS keychain; keys never reach the renderer process
 
 ### Safety & Governance
 
@@ -92,11 +103,15 @@ graph TB
         end
     end
 
-    LLM["LLM API<br/><small>BYOK</small>"]
+    subgraph LLM["LLM Providers (BYOK)"]
+        ANTHROPIC["Anthropic<br/><small>Claude Sonnet · Opus</small>"]
+        OPENAI["OpenAI<br/><small>GPT-4o · o3-mini</small>"]
+        OLLAMA["Ollama (Local)<br/><small>Llama · Mistral · etc.</small>"]
+    end
 
     EXT -- "localhost" --> INTAKESVR
     Renderer -- "IPC" --> IPC --> Main
-    AGENTS -- "BYOK" --> LLM
+    AGENTS -- "provider factory" --> LLM
     Core --> SQLITE
     Core --> FS
     Core --> KEYCHAIN
@@ -138,6 +153,7 @@ flowchart LR
 | State management | Zustand |
 | Build system | electron-vite (Vite-based) |
 | Core library | TypeScript, framework-agnostic |
+| LLM providers | Anthropic SDK, OpenAI SDK (also used for Ollama via OpenAI-compatible API) |
 | Database | SQLite (better-sqlite3) |
 | Validation | Zod |
 | Package management | npm workspaces |
@@ -176,7 +192,7 @@ domain-os/
 │   │       ├── domains/      # Domain CRUD and config
 │   │       ├── kb/           # KB indexing, digests, tiering
 │   │       ├── protocols/    # Per-domain and shared protocols
-│   │       ├── agents/       # LLM integration, prompt builder
+│   │       ├── agents/       # Multi-provider LLM (Anthropic, OpenAI, Ollama), prompt builder
 │   │       ├── sessions/     # Session lifecycle management
 │   │       ├── audit/        # Event audit trail
 │   │       ├── intake/       # Browser intake classification
@@ -197,8 +213,8 @@ domain-os/
 
 ## Security & Privacy
 
-- **Local-first** — all data stored on your machine in SQLite and your filesystem. Nothing leaves your computer unless you send a chat message to the LLM API.
-- **Bring Your Own Key** — API keys are stored in your OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service), never in plaintext.
+- **Local-first** — all data stored on your machine in SQLite and your filesystem. Nothing leaves your computer unless you send a chat message to your chosen LLM provider. Ollama runs entirely on your machine — no data leaves at all.
+- **Bring Your Own Key** — per-provider API keys (Anthropic, OpenAI) are encrypted via Electron `safeStorage`, backed by your OS keychain (macOS Keychain, Windows DPAPI, Linux Secret Service). Ollama requires no API key. Keys never reach the renderer process.
 - **No telemetry** — zero analytics, tracking, or phone-home behavior.
 - **Localhost intake** — the Chrome extension communicates with the desktop app over `127.0.0.1` with token authentication. No external servers.
 
