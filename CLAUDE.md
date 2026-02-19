@@ -4,9 +4,10 @@
 
 ```
 domain-os/
-├── packages/core/    → @domain-os/core   (framework-agnostic library)
-├── apps/desktop/     → @domain-os/desktop (Electron + React app)
-└── npm workspaces    → linked via root package.json
+├── packages/core/           → @domain-os/core          (framework-agnostic library)
+├── packages/integrations/   → @domain-os/integrations   (Gmail client, poller, body parser)
+├── apps/desktop/            → @domain-os/desktop        (Electron + React app)
+└── npm workspaces           → linked via root package.json
 ```
 
 ## Quick Commands
@@ -80,15 +81,31 @@ Inspired by a prior project's Gmail Extension Pipeline. A Chrome Extension with 
 
 | File | Purpose |
 |------|---------|
-| `packages/core/src/domains/` | Domain CRUD, config schema |
+| `packages/core/src/domains/` | Domain CRUD, config schema (incl. `allowGmail` toggle) |
 | `packages/core/src/kb/` | KB file indexing, digest generation |
 | `packages/core/src/protocols/` | Protocol parsing and composition |
-| `packages/core/src/agents/` | LLM API calls, prompt builder |
-| `packages/core/src/storage/` | SQLite schema, migrations, queries |
+| `packages/core/src/agents/` | LLM API calls, prompt builder, `createMessage()` for tool-use |
+| `packages/core/src/storage/` | SQLite schema, migrations (v7: `allow_gmail`), queries |
 | `packages/core/src/common/` | Result type, shared Zod schemas |
+| `packages/integrations/src/gmail/` | `GmailClient` (search/read), `GmailPoller`, body parser |
 | `apps/desktop/src/main/` | Electron main process, IPC handlers |
+| `apps/desktop/src/main/gmail-oauth.ts` | OAuth PKCE flow via system browser + loopback |
+| `apps/desktop/src/main/gmail-credentials.ts` | Encrypted credential storage (safeStorage) |
+| `apps/desktop/src/main/gmail-tools.ts` | Tool definitions, input validation, executor |
+| `apps/desktop/src/main/tool-loop.ts` | LLM ↔ tool execution loop (Anthropic tool-use API) |
 | `apps/desktop/src/preload/` | contextBridge API surface |
 | `apps/desktop/src/renderer/` | React UI, pages, components, stores |
+
+## Environment Variables
+
+Gmail OAuth credentials are loaded from `apps/desktop/.env` (gitignored). Required for Gmail integration:
+
+```
+MAIN_VITE_GMAIL_CLIENT_ID=<your-gcp-oauth-client-id>
+MAIN_VITE_GMAIL_CLIENT_SECRET=<your-gcp-oauth-client-secret>
+```
+
+These come from a GCP project with a Desktop/Native app OAuth client and `gmail.readonly` scope enabled. Without these, Gmail connect will show a clear error; all other features work normally.
 
 ## Native Modules
 
