@@ -12,8 +12,10 @@ const DocIcon = () => (
   </svg>
 )
 
+const SCAN_COOLDOWN_MS = 10_000
+
 export function KBFileList({ domainId }: Props): React.JSX.Element {
-  const { files, loading, lastSyncResult, scanAndSync, fetchFiles } = useKBStore()
+  const { files, filesDomainId, scanning, lastSyncResult, scanAndSync, fetchFiles } = useKBStore()
   const [listHeight, setListHeight] = useState(256)
   const dragging = useRef(false)
   const startY = useRef(0)
@@ -22,9 +24,21 @@ export function KBFileList({ domainId }: Props): React.JSX.Element {
   const startWatching = useKBStore((s) => s.startWatching)
 
   useEffect(() => {
-    fetchFiles(domainId)
     startWatching(domainId)
-  }, [domainId, fetchFiles, startWatching])
+
+    const state = useKBStore.getState()
+    const lastScan = state.lastScanAttemptAt[domainId] ?? 0
+    const neverScanned = lastScan === 0
+    const cooldownExpired = Date.now() - lastScan > SCAN_COOLDOWN_MS
+
+    if (neverScanned || cooldownExpired) {
+      scanAndSync(domainId)
+    } else {
+      fetchFiles(domainId)
+    }
+  }, [domainId, scanAndSync, fetchFiles, startWatching])
+
+  const domainFiles = filesDomainId === domainId ? files : []
 
   const onMouseMove = useCallback((e: MouseEvent) => {
     if (!dragging.current) return
@@ -65,10 +79,10 @@ export function KBFileList({ domainId }: Props): React.JSX.Element {
         <h3 className="text-sm font-semibold text-text-secondary">KB Files</h3>
         <button
           onClick={() => scanAndSync(domainId)}
-          disabled={loading}
+          disabled={scanning}
           className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-surface-3 disabled:opacity-50"
         >
-          {loading ? 'Scanning...' : 'Re-scan'}
+          {scanning ? 'Scanning...' : 'Re-scan'}
         </button>
       </div>
 
@@ -81,20 +95,20 @@ export function KBFileList({ domainId }: Props): React.JSX.Element {
         </div>
       )}
 
-      {files.length === 0 && !loading && (
+      {domainFiles.length === 0 && !scanning && (
         <p className="text-xs text-text-tertiary">
           No files indexed. Click Re-scan to index the knowledge base.
         </p>
       )}
 
-      {files.length > 0 && (
+      {domainFiles.length > 0 && (
         <div>
           <div
             className="overflow-y-auto overflow-x-hidden"
             style={{ height: listHeight }}
           >
             <div>
-              {files.map((file) => {
+              {domainFiles.map((file) => {
                 const { dir, name } = splitPath(file.relativePath)
                 return (
                   <div key={file.id} className="flex items-start gap-1.5 border-b border-border-subtle/50 py-1.5">
