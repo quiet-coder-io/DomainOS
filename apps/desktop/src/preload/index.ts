@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { DomainOSAPI, KBUpdateProposal, ToolUseEvent, ProviderConfig } from './api'
+import type { DomainOSAPI, KBUpdateProposal, ToolUseEvent, ProviderConfig, DependencyType } from './api'
 
 const api: DomainOSAPI = {
   platform: process.platform,
@@ -109,10 +109,36 @@ const api: DomainOSAPI = {
 
   relationship: {
     getSiblings: (domainId: string) => ipcRenderer.invoke('relationship:get-siblings', domainId),
+    getRelationships: (domainId: string) => ipcRenderer.invoke('relationship:get-relationships', domainId),
+    addRelationship: (
+      fromDomainId: string,
+      toDomainId: string,
+      options?: {
+        relationshipType?: string
+        dependencyType?: DependencyType
+        description?: string
+        reciprocate?: boolean
+        reciprocalType?: DependencyType
+      },
+    ) => ipcRenderer.invoke('relationship:add-relationship', fromDomainId, toDomainId, options),
     addSibling: (domainId: string, siblingDomainId: string) =>
       ipcRenderer.invoke('relationship:add-sibling', domainId, siblingDomainId),
+    removeRelationship: (fromDomainId: string, toDomainId: string) =>
+      ipcRenderer.invoke('relationship:remove-relationship', fromDomainId, toDomainId),
     removeSibling: (domainId: string, siblingDomainId: string) =>
       ipcRenderer.invoke('relationship:remove-sibling', domainId, siblingDomainId),
+  },
+
+  briefing: {
+    portfolioHealth: () => ipcRenderer.invoke('briefing:portfolio-health'),
+    analyze: (requestId: string) => ipcRenderer.invoke('briefing:analyze', requestId),
+    analyzeCancel: () => ipcRenderer.invoke('briefing:analyze-cancel'),
+    onAnalysisChunk(callback: (payload: { requestId: string; chunk: string }) => void) {
+      ipcRenderer.on('briefing:analysis-chunk', (_event, payload: { requestId: string; chunk: string }) => callback(payload))
+    },
+    offAnalysisChunk() {
+      ipcRenderer.removeAllListeners('briefing:analysis-chunk')
+    },
   },
 
   audit: {

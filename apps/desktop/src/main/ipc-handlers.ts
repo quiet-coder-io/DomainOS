@@ -38,6 +38,9 @@ import {
   computeContentHash,
   classifyContent,
   TOKEN_BUDGETS,
+  computePortfolioHealth,
+  buildBriefingPrompt,
+  parseBriefingAnalysis,
 } from '@domain-os/core'
 import type {
   CreateDomainInput,
@@ -47,6 +50,7 @@ import type {
   AuditEventType,
   ProviderName,
   ToolCapableProvider,
+  AddRelationshipOptions,
 } from '@domain-os/core'
 import { getIntakeToken } from './intake-token'
 import { startKBWatcher, stopKBWatcher } from './kb-watcher'
@@ -808,12 +812,162 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
     return relationshipRepo.getSiblings(domainId)
   })
 
+  ipcMain.handle('relationship:get-relationships', (_event, domainId: string) => {
+    const getDomainName = (id: string) => {
+      const d = domainRepo.getById(id)
+      return d.ok ? d.value.name : 'Unknown'
+    }
+    return relationshipRepo.getRelationships(domainId, getDomainName)
+  })
+
+  ipcMain.handle('relationship:add-relationship', (_event, fromDomainId: string, toDomainId: string, options?: AddRelationshipOptions) => {
+    return relationshipRepo.addRelationship(fromDomainId, toDomainId, options)
+  })
+
   ipcMain.handle('relationship:add-sibling', (_event, domainId: string, siblingDomainId: string) => {
     return relationshipRepo.addSibling(domainId, siblingDomainId)
   })
 
+  ipcMain.handle('relationship:remove-relationship', (_event, fromDomainId: string, toDomainId: string) => {
+    return relationshipRepo.removeRelationship(fromDomainId, toDomainId)
+  })
+
   ipcMain.handle('relationship:remove-sibling', (_event, domainId: string, siblingDomainId: string) => {
     return relationshipRepo.removeSibling(domainId, siblingDomainId)
+  })
+
+  // --- Briefing ---
+
+  ipcMain.handle('briefing:portfolio-health', async () => {
+    return computePortfolioHealth(db)
+  })
+
+  // Briefing analysis — streaming LLM interpretation of portfolio health
+  let currentBriefingRequestId: string | null = null
+  const activeBriefingAnalyses = new Map<string, AbortController>()
+
+  ipcMain.handle('briefing:analyze', async (event: IpcMainInvokeEvent, requestId: string) => {
+    // Cancel any existing analysis
+    if (currentBriefingRequestId) {
+      activeBriefingAnalyses.get(currentBriefingRequestId)?.abort()
+    }
+    currentBriefingRequestId = requestId
+
+    const controller = new AbortController()
+    activeBriefingAnalyses.set(requestId, controller)
+
+    try {
+      // 1. Compute health
+      const healthResult = await computePortfolioHealth(db)
+      if (!healthResult.ok) return { ok: false, error: healthResult.error.message }
+
+      // 2. Load domains for digest paths
+      const domainsResult = domainRepo.list()
+      if (!domainsResult.ok) return { ok: false, error: domainsResult.error.message }
+
+      // 3. Load digests with per-domain error handling
+      const digests: Array<{ domainId: string; domainName: string; content: string }> = []
+      for (const domain of domainsResult.value) {
+        try {
+          const digestPath = join(domain.kbPath, 'kb_digest.md')
+          const raw = await readFile(digestPath, 'utf-8')
+          digests.push({ domainId: domain.id, domainName: domain.name, content: raw.slice(0, 6000) })
+        } catch {
+          digests.push({ domainId: domain.id, domainName: domain.name, content: '(kb_digest.md missing)' })
+        }
+      }
+
+      // 4. Build prompt
+      const currentDate = new Intl.DateTimeFormat('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZoneName: 'short',
+      }).format(new Date())
+
+      const prompt = buildBriefingPrompt({
+        health: healthResult.value,
+        digests,
+        currentDate,
+      })
+
+      // 5. Resolve provider (same pattern as chat:send)
+      const globalConfig = await loadProviderConfig()
+      const resolvedProvider = (globalConfig.defaultProvider ?? 'anthropic') as ProviderName
+      const resolvedModel = globalConfig.defaultModel ?? DEFAULT_MODELS[resolvedProvider]
+      const ollamaBaseUrl = globalConfig.ollamaBaseUrl ?? 'http://localhost:11434'
+
+      if (resolvedProvider !== 'ollama') {
+        const apiKey = await loadProviderKey(resolvedProvider)
+        if (!apiKey) {
+          return { ok: false, error: `No API key configured for ${resolvedProvider}. Open Settings to add one.` }
+        }
+      } else {
+        const reachable = await OllamaProvider.testConnection(ollamaBaseUrl)
+        if (!reachable) {
+          return { ok: false, error: `Ollama not reachable at ${ollamaBaseUrl}. Is it running?` }
+        }
+      }
+
+      const apiKey = resolvedProvider !== 'ollama' ? await loadProviderKey(resolvedProvider) : undefined
+      const provider = createProvider({
+        provider: resolvedProvider,
+        model: resolvedModel,
+        apiKey,
+        ollamaBaseUrl,
+      })
+
+      // 6. Stream LLM response
+      const userMessage = 'Analyze this portfolio and produce briefing blocks.'
+      let fullResponse = ''
+
+      for await (const chunk of provider.chat(
+        [{ role: 'user' as const, content: userMessage }],
+        prompt,
+      )) {
+        if (controller.signal.aborted) break
+        fullResponse += chunk
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('briefing:analysis-chunk', { requestId, chunk })
+        }
+      }
+
+      if (controller.signal.aborted) {
+        return { ok: false, error: 'CANCELLED' }
+      }
+
+      // 7. Parse response
+      const parsed = parseBriefingAnalysis(fullResponse)
+
+      return {
+        ok: true,
+        value: {
+          requestId,
+          ...parsed,
+          rawText: fullResponse,
+          snapshotHash: healthResult.value.snapshotHash,
+        },
+      }
+    } catch (err) {
+      if (controller.signal.aborted) {
+        return { ok: false, error: 'CANCELLED' }
+      }
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    } finally {
+      activeBriefingAnalyses.delete(requestId)
+      if (currentBriefingRequestId === requestId) currentBriefingRequestId = null
+    }
+  })
+
+  ipcMain.handle('briefing:analyze-cancel', () => {
+    if (currentBriefingRequestId) {
+      activeBriefingAnalyses.get(currentBriefingRequestId)?.abort()
+      currentBriefingRequestId = null
+    }
+    return { ok: true, value: undefined }
   })
 
   // --- Gap Flags ---

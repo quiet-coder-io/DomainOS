@@ -114,8 +114,29 @@ export interface DomainOSAPI {
 
   relationship: {
     getSiblings(domainId: string): Promise<IPCResult<DomainRelationship[]>>
+    getRelationships(domainId: string): Promise<IPCResult<RelationshipView[]>>
+    addRelationship(
+      fromDomainId: string,
+      toDomainId: string,
+      options?: {
+        relationshipType?: string
+        dependencyType?: DependencyType
+        description?: string
+        reciprocate?: boolean
+        reciprocalType?: DependencyType
+      },
+    ): Promise<IPCResult<DomainRelationship>>
     addSibling(domainId: string, siblingDomainId: string): Promise<IPCResult<DomainRelationship>>
+    removeRelationship(fromDomainId: string, toDomainId: string): Promise<IPCResult<void>>
     removeSibling(domainId: string, siblingDomainId: string): Promise<IPCResult<void>>
+  }
+
+  briefing: {
+    portfolioHealth(): Promise<IPCResult<PortfolioHealth>>
+    analyze(requestId: string): Promise<IPCResult<BriefingAnalysis>>
+    analyzeCancel(): Promise<IPCResult<void>>
+    onAnalysisChunk(callback: (payload: { requestId: string; chunk: string }) => void): void
+    offAnalysisChunk(): void
   }
 
   audit: {
@@ -287,12 +308,95 @@ export interface Session {
   endedAt: string | null
 }
 
+export type DependencyType = 'blocks' | 'depends_on' | 'informs' | 'parallel' | 'monitor_only'
+
 export interface DomainRelationship {
   id: string
   domainId: string
   siblingDomainId: string
   relationshipType: string
+  dependencyType: DependencyType
+  description: string
   createdAt: string
+}
+
+export type RelationshipPerspective = 'outgoing' | 'incoming'
+
+export interface RelationshipView extends DomainRelationship {
+  perspective: RelationshipPerspective
+  peerDomainId: string
+  peerDomainName: string
+  displayKey: string
+}
+
+export type DomainStatus = 'active' | 'quiet' | 'stale-risk' | 'blocked'
+
+export interface DomainHealth {
+  domainId: string
+  domainName: string
+  status: DomainStatus
+  fileCountTotal: number
+  fileCountStatChecked: number
+  staleSummary: {
+    freshByTier: Record<string, number>
+    staleByTier: Record<string, number>
+    criticalByTier: Record<string, number>
+    fresh: number
+    stale: number
+    critical: number
+    worstFile?: { path: string; tier: string; daysSinceUpdate: number }
+  }
+  openGapFlags: number
+  severityScore: number
+  lastTouchedAt: string | null
+  outgoingDeps: Array<{
+    targetDomainId: string
+    targetDomainName: string
+    dependencyType: DependencyType
+    description: string
+  }>
+  incomingDeps: Array<{
+    sourceDomainId: string
+    sourceDomainName: string
+    dependencyType: DependencyType
+    description: string
+  }>
+}
+
+export interface CrossDomainAlert {
+  severity: 'critical' | 'warning' | 'monitor'
+  sourceDomainId: string
+  sourceDomainName: string
+  dependentDomainId: string
+  dependentDomainName: string
+  dependentStatus: DomainStatus
+  dependentOpenGaps: number
+  text: string
+  trace: {
+    triggerFile?: string
+    triggerTier?: string
+    triggerStaleness?: number
+    dependencyType: DependencyType
+    description: string
+    baseSeverityScore: number
+    escalated: boolean
+  }
+}
+
+export interface PortfolioHealth {
+  domains: DomainHealth[]
+  alerts: CrossDomainAlert[]
+  computedAt: string
+  snapshotHash: string
+}
+
+export interface BriefingAnalysis {
+  alerts: Array<{ domain: string; severity: string; text: string; evidence: string }>
+  actions: Array<{ domain: string; priority: number; deadline: string; text: string }>
+  monitors: Array<{ domain: string; text: string }>
+  diagnostics: { skippedBlocks: number; errors: string[] }
+  rawText: string
+  snapshotHash: string
 }
 
 export interface GapFlag {
