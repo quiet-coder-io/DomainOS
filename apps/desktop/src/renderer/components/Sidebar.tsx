@@ -6,8 +6,8 @@ import { DomainContextMenu } from './DomainContextMenu'
 import { IntakeTokenDisplay } from './IntakeTokenDisplay'
 
 interface SidebarProps {
-  activeView: 'domains' | 'intake'
-  onViewChange: (view: 'domains' | 'intake') => void
+  activeView: 'domains' | 'intake' | 'briefing'
+  onViewChange: (view: 'domains' | 'intake' | 'briefing') => void
 }
 
 export function Sidebar({ activeView, onViewChange }: SidebarProps): React.JSX.Element {
@@ -127,6 +127,21 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps): React.JSX.E
             )}
           </button>
 
+          {/* Briefing icon button */}
+          <button
+            onClick={() => {
+              onViewChange('briefing')
+              setCollapsed(false)
+            }}
+            aria-label="Open Briefing"
+            title="Portfolio Briefing"
+            className="flex h-10 w-10 items-center justify-center text-text-tertiary hover:text-text-secondary focus:outline-none focus:ring-2 focus:ring-accent rounded"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+              <path fillRule="evenodd" d="M1 2.75A.75.75 0 0 1 1.75 2h16.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 2.75ZM1 8.75A.75.75 0 0 1 1.75 8h16.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 8.75ZM1 14.75a.75.75 0 0 1 .75-.75h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1-.75-.75Z" clipRule="evenodd" />
+            </svg>
+          </button>
+
           {/* Divider */}
           <div className="mx-2 my-1 w-6 border-b border-border" />
 
@@ -169,6 +184,16 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps): React.JSX.E
               }`}
             >
               Domains
+            </button>
+            <button
+              onClick={() => onViewChange('briefing')}
+              className={`flex-1 px-3 py-2 text-xs font-medium ${
+                activeView === 'briefing'
+                  ? 'border-b-2 border-accent text-accent-text'
+                  : 'text-text-tertiary hover:text-text-secondary'
+              }`}
+            >
+              Briefing
             </button>
             <button
               onClick={() => onViewChange('intake')}

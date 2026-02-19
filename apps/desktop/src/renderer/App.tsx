@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Sidebar, IntakePanel, OnboardingFlow } from './components'
 import { DomainListPage, DomainChatPage } from './pages'
+import { BriefingPage } from './pages/BriefingPage'
 import { useDomainStore, useIntakeStore } from './stores'
 
-type ActiveView = 'domains' | 'intake'
+export type ActiveView = 'domains' | 'intake' | 'briefing'
 
 export function App(): React.JSX.Element {
   const activeDomainId = useDomainStore((s) => s.activeDomainId)
@@ -24,6 +25,7 @@ export function App(): React.JSX.Element {
 
   const renderMainContent = () => {
     if (activeView === 'intake') return <IntakePanel />
+    if (activeView === 'briefing') return <BriefingPage onViewChange={setActiveView} />
     if (domainsLoading) {
       return (
         <div className="flex h-full items-center justify-center">
@@ -32,7 +34,9 @@ export function App(): React.JSX.Element {
       )
     }
     if (domains.length === 0) return <OnboardingFlow />
-    return activeDomainId ? <DomainChatPage /> : <DomainListPage />
+    return activeDomainId
+      ? <DomainChatPage />
+      : <DomainListPage onViewChange={setActiveView} />
   }
 
   return (

@@ -282,6 +282,19 @@ const migrations: Migration[] = [
       )
     },
   },
+  {
+    version: 9,
+    description: 'Directed domain relationships — dependency type and description',
+    up(db) {
+      runSQL(
+        db,
+        `
+        ALTER TABLE domain_relationships ADD COLUMN dependency_type TEXT NOT NULL DEFAULT 'informs';
+        ALTER TABLE domain_relationships ADD COLUMN description TEXT NOT NULL DEFAULT '';
+        `,
+      )
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {
