@@ -36,6 +36,8 @@ jobs:
         run: npm ci
       - name: Build core
         run: npm run build --workspace=@domain-os/core
+      - name: Build integrations
+        run: npm run build --workspace=@domain-os/integrations
       - name: Typecheck
         run: npm run typecheck
       - name: Test

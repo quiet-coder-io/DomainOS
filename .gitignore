@@ -28,6 +28,7 @@ release/
 *.pfx
 *.crt
 *credentials*
+!**/gmail-credentials.ts
 id_rsa*
 
 # TypeScript build info
