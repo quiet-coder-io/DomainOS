@@ -30,6 +30,7 @@ export function ChatPanel({ domainId, apiKey }: Props): React.JSX.Element {
     isExtracting,
     extractionError,
     extractionResult,
+    activeToolCall,
     sendMessage,
     clearMessages,
     extractKbUpdates,
@@ -164,7 +165,17 @@ export function ChatPanel({ domainId, apiKey }: Props): React.JSX.Element {
         {isStreaming && streamingContent && (
           <MessageBubble role="assistant" content={streamingContent} />
         )}
-        {isStreaming && !streamingContent && (
+        {activeToolCall?.status === 'running' && (
+          <div className="mb-3 flex justify-start animate-fade-in">
+            <div className="flex items-center gap-2 rounded-2xl rounded-bl-sm bg-surface-2 border border-border-subtle px-4 py-2.5 text-xs text-text-secondary">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent animate-pulse" />
+              {activeToolCall.toolName === 'gmail_search'
+                ? `Searching Gmail${activeToolCall.detail?.query ? `: "${activeToolCall.detail.query}"` : ''}...`
+                : `Reading email${activeToolCall.detail?.subject ? `: ${activeToolCall.detail.subject}` : ''}...`}
+            </div>
+          </div>
+        )}
+        {isStreaming && !streamingContent && !activeToolCall && (
           <div className="mb-3 flex justify-start animate-fade-in">
             <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm bg-surface-2 border border-border-subtle px-4 py-3">
               {[0, 1, 2].map((i) => (

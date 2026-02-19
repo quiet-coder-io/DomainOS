@@ -39,6 +39,11 @@ import type {
 } from '@domain-os/core'
 import { getIntakeToken } from './intake-token'
 import { startKBWatcher, stopKBWatcher } from './kb-watcher'
+import { loadGmailCredentials, checkGmailConnected } from './gmail-credentials'
+import { startGmailOAuth, disconnectGmail } from './gmail-oauth'
+import { GMAIL_TOOLS, executeGmailTool } from './gmail-tools'
+import { runToolLoop } from './tool-loop'
+import { GmailClient } from '@domain-os/integrations'
 
 export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWindow | null): void {
   const domainRepo = new DomainRepository(db)
@@ -257,12 +262,47 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
         const provider = new AnthropicProvider({ apiKey: payload.apiKey })
         let fullResponse = ''
 
-        for await (const chunk of provider.chat(payload.messages, systemPrompt)) {
-          fullResponse += chunk
-          event.sender.send('chat:stream-chunk', chunk)
-        }
+        // --- Gmail tool-use branch ---
+        const gmailCreds = await loadGmailCredentials()
+        const gmailEnabled = gmailCreds && domain.value.allowGmail
 
-        event.sender.send('chat:stream-done')
+        if (gmailEnabled) {
+          const gmailClient = new GmailClient({
+            clientId: gmailCreds.clientId,
+            clientSecret: gmailCreds.clientSecret,
+            refreshToken: gmailCreds.refreshToken,
+          })
+
+          // Preflight: validate credentials before entering tool loop
+          const profile = await gmailClient.getProfile()
+          if (!profile.ok) {
+            event.sender.send('chat:stream-chunk', 'Gmail credentials appear to be invalid or expired. Please reconnect Gmail in the settings bar above.')
+            event.sender.send('chat:stream-done')
+            return { ok: true, value: { content: 'Gmail credentials appear to be invalid or expired. Please reconnect Gmail in the settings bar above.', proposals: [], rejectedProposals: [], stopBlocks: [], gapFlags: [], decisions: [] } }
+          }
+
+          const toolsHint = '\n\n## Available Tools\nYou have access to Gmail search and read tools. Use gmail_search to find messages and gmail_read for full content. Always use the tools — do not assume email content. Only use Gmail tools when the user\'s request clearly requires email access; otherwise answer normally.'
+
+          const result = await runToolLoop({
+            provider,
+            domainId: payload.domainId,
+            userMessages: payload.messages,
+            systemPrompt: systemPrompt + toolsHint,
+            tools: GMAIL_TOOLS,
+            gmailClient,
+            eventSender: event.sender,
+          })
+
+          fullResponse = result.fullResponse
+        } else {
+          // --- Existing streaming path (unchanged) ---
+          for await (const chunk of provider.chat(payload.messages, systemPrompt)) {
+            fullResponse += chunk
+            event.sender.send('chat:stream-chunk', chunk)
+          }
+
+          event.sender.send('chat:stream-done')
+        }
 
         const { proposals, rejectedProposals } = parseKBUpdates(fullResponse)
 
@@ -682,6 +722,35 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
 
   ipcMain.handle('decision:reject', (_event, id: string) => {
     return decisionRepo.reject(id)
+  })
+
+  // --- Gmail ---
+
+  ipcMain.handle('gmail:start-oauth', async () => {
+    try {
+      await startGmailOAuth()
+      return { ok: true, value: undefined }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('gmail:check-connected', async () => {
+    try {
+      const status = await checkGmailConnected()
+      return { ok: true, value: status }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('gmail:disconnect', async () => {
+    try {
+      await disconnectGmail()
+      return { ok: true, value: undefined }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
   })
 
   // --- Settings (API Key with safeStorage) ---

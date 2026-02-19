@@ -41,6 +41,25 @@ export class AnthropicProvider implements LLMProvider {
     }
   }
 
+  /**
+   * Non-streaming message creation with optional tool definitions.
+   * Used by the tool-use loop where we need the full Message object
+   * (including tool_use content blocks) rather than streamed text.
+   */
+  async createMessage(params: {
+    messages: Anthropic.Messages.MessageParam[]
+    system: string
+    tools?: Anthropic.Messages.Tool[]
+  }): Promise<Anthropic.Messages.Message> {
+    return this.client.messages.create({
+      model: this.model,
+      max_tokens: this.maxTokens,
+      system: params.system,
+      messages: params.messages,
+      ...(params.tools?.length ? { tools: params.tools } : {}),
+    })
+  }
+
   async chatComplete(
     messages: ChatMessage[],
     systemPrompt: string,

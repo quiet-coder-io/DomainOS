@@ -7,10 +7,10 @@ export interface DomainOSAPI {
   platform: string
 
   domain: {
-    create(input: { name: string; description?: string; kbPath: string; identity?: string; escalationTriggers?: string }): Promise<IPCResult<Domain>>
+    create(input: { name: string; description?: string; kbPath: string; identity?: string; escalationTriggers?: string; allowGmail?: boolean }): Promise<IPCResult<Domain>>
     list(): Promise<IPCResult<Domain[]>>
     get(id: string): Promise<IPCResult<Domain>>
-    update(id: string, input: { name?: string; description?: string; kbPath?: string; identity?: string; escalationTriggers?: string }): Promise<IPCResult<Domain>>
+    update(id: string, input: { name?: string; description?: string; kbPath?: string; identity?: string; escalationTriggers?: string; allowGmail?: boolean }): Promise<IPCResult<Domain>>
     delete(id: string): Promise<IPCResult<void>>
   }
 
@@ -52,6 +52,13 @@ export interface DomainOSAPI {
     offStreamChunk(): void
     onStreamDone(callback: () => void): void
     offStreamDone(): void
+    onToolUse(callback: (data: ToolUseEvent) => void): () => void
+  }
+
+  gmail: {
+    startOAuth(): Promise<IPCResult<void>>
+    checkConnected(): Promise<IPCResult<{ connected: boolean; blocked?: boolean; email?: string }>>
+    disconnect(): Promise<IPCResult<void>>
   }
 
   kbUpdate: {
@@ -144,8 +151,23 @@ export interface Domain {
   kbPath: string
   identity: string
   escalationTriggers: string
+  allowGmail: boolean
   createdAt: string
   updatedAt: string
+}
+
+export interface ToolUseEvent {
+  toolName: string
+  toolUseId: string
+  status: 'running' | 'done'
+  domainId: string
+  roundIndex: number
+  detail?: {
+    query?: string
+    resultCount?: number
+    messageId?: string
+    subject?: string
+  }
 }
 
 export interface KBFile {

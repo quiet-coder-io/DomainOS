@@ -131,6 +131,54 @@ export function DomainChatPage(): React.JSX.Element {
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
+  // --- Gmail connection state ---
+  const [gmailStatus, setGmailStatus] = useState<{
+    connected: boolean
+    blocked?: boolean
+    email?: string
+  }>({ connected: false })
+  const [gmailLoading, setGmailLoading] = useState(false)
+
+  const refreshGmailStatus = useCallback(async () => {
+    const res = await window.domainOS.gmail.checkConnected()
+    if (res.ok && res.value) setGmailStatus(res.value)
+  }, [])
+
+  useEffect(() => {
+    refreshGmailStatus()
+  }, [refreshGmailStatus])
+
+  async function handleGmailConnect(): Promise<void> {
+    setGmailLoading(true)
+    try {
+      await window.domainOS.gmail.startOAuth()
+      await refreshGmailStatus()
+    } catch {
+      // User cancelled or error — refreshing status will show current state
+      await refreshGmailStatus()
+    } finally {
+      setGmailLoading(false)
+    }
+  }
+
+  async function handleGmailDisconnect(): Promise<void> {
+    setGmailLoading(true)
+    try {
+      await window.domainOS.gmail.disconnect()
+      await refreshGmailStatus()
+    } finally {
+      setGmailLoading(false)
+    }
+  }
+
+  async function handleToggleAllowGmail(): Promise<void> {
+    if (!activeDomainId || !domain) return
+    const newValue = !domain.allowGmail
+    await window.domainOS.domain.update(activeDomainId, { allowGmail: newValue })
+    // Refresh domain list to pick up the change
+    await useDomainStore.getState().fetchDomains()
+  }
+
   useEffect(() => {
     loadApiKey()
   }, [loadApiKey])
@@ -166,6 +214,42 @@ export function DomainChatPage(): React.JSX.Element {
           <span className="flex items-center gap-1 text-xs text-text-tertiary">
             <LockIcon /> encrypted
           </span>
+
+          {/* Gmail connection + per-domain toggle */}
+          <div className="ml-3 flex items-center gap-2 border-l border-border-subtle pl-3">
+            {gmailStatus.blocked ? (
+              <span className="text-xs text-text-tertiary">Gmail unavailable</span>
+            ) : gmailStatus.connected ? (
+              <>
+                <span className="text-xs text-success">Gmail: {gmailStatus.email || 'connected'}</span>
+                <button
+                  onClick={handleGmailDisconnect}
+                  disabled={gmailLoading}
+                  className="text-xs text-text-tertiary hover:text-danger disabled:opacity-50"
+                >
+                  Disconnect
+                </button>
+                <label className="flex items-center gap-1 text-xs text-text-tertiary cursor-pointer" title="When enabled, this domain's agent can search and read your Gmail during conversations.">
+                  <input
+                    type="checkbox"
+                    checked={domain.allowGmail}
+                    onChange={handleToggleAllowGmail}
+                    className="h-3 w-3 rounded border-border accent-accent"
+                  />
+                  Gmail tools
+                </label>
+              </>
+            ) : (
+              <button
+                onClick={handleGmailConnect}
+                disabled={gmailLoading}
+                className="text-xs text-accent hover:text-accent-hover disabled:opacity-50"
+              >
+                {gmailLoading ? 'Connecting...' : 'Connect Gmail'}
+              </button>
+            )}
+          </div>
+
           <div className="flex-1" />
           <span className="text-sm font-medium text-text-secondary">{domain.name}</span>
         </div>

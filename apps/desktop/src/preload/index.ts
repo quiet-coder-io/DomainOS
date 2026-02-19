@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { DomainOSAPI, KBUpdateProposal } from './api'
+import type { DomainOSAPI, KBUpdateProposal, ToolUseEvent } from './api'
 
 const api: DomainOSAPI = {
   platform: process.platform,
@@ -42,6 +42,17 @@ const api: DomainOSAPI = {
     offStreamDone() {
       ipcRenderer.removeAllListeners('chat:stream-done')
     },
+    onToolUse(callback: (data: ToolUseEvent) => void) {
+      const handler = (_e: unknown, data: ToolUseEvent): void => callback(data)
+      ipcRenderer.on('chat:tool-use', handler as (...args: unknown[]) => void)
+      return () => { ipcRenderer.removeListener('chat:tool-use', handler as (...args: unknown[]) => void) }
+    },
+  },
+
+  gmail: {
+    startOAuth: () => ipcRenderer.invoke('gmail:start-oauth'),
+    checkConnected: () => ipcRenderer.invoke('gmail:check-connected'),
+    disconnect: () => ipcRenderer.invoke('gmail:disconnect'),
   },
 
   kbUpdate: {

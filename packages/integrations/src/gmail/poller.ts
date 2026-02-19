@@ -8,6 +8,7 @@
 import { google } from 'googleapis'
 import type { gmail_v1 } from 'googleapis'
 import { IntakeClient } from '../common/intake-client.js'
+import { extractTextBody } from './body-parser.js'
 import type { GmailPollerConfig, GmailMessageMeta } from './types.js'
 
 export class GmailPoller {
@@ -142,22 +143,3 @@ export class GmailPoller {
   }
 }
 
-/**
- * Recursively extract plain text body from Gmail message payload.
- */
-function extractTextBody(payload: gmail_v1.Schema$MessagePart | undefined): string {
-  if (!payload) return ''
-
-  if (payload.mimeType === 'text/plain' && payload.body?.data) {
-    return Buffer.from(payload.body.data, 'base64url').toString('utf-8')
-  }
-
-  if (payload.parts) {
-    for (const part of payload.parts) {
-      const text = extractTextBody(part)
-      if (text) return text
-    }
-  }
-
-  return ''
-}

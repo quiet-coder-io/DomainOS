@@ -13,9 +13,12 @@ interface DomainRow {
   kb_path: string
   identity: string
   escalation_triggers: string
+  allow_gmail: number
   created_at: string
   updated_at: string
 }
+
+const DOMAIN_COLUMNS = 'id, name, description, kb_path, identity, escalation_triggers, allow_gmail, created_at, updated_at'
 
 function rowToDomain(row: DomainRow): Domain {
   return {
@@ -25,6 +28,7 @@ function rowToDomain(row: DomainRow): Domain {
     kbPath: row.kb_path,
     identity: row.identity ?? '',
     escalationTriggers: row.escalation_triggers ?? '',
+    allowGmail: row.allow_gmail === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -45,7 +49,7 @@ export class DomainRepository {
     try {
       this.db
         .prepare(
-          'INSERT INTO domains (id, name, description, kb_path, identity, escalation_triggers, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO domains (id, name, description, kb_path, identity, escalation_triggers, allow_gmail, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
         )
         .run(
           id,
@@ -54,6 +58,7 @@ export class DomainRepository {
           parsed.data.kbPath,
           parsed.data.identity,
           parsed.data.escalationTriggers,
+          parsed.data.allowGmail ? 1 : 0,
           now,
           now,
         )
@@ -65,6 +70,7 @@ export class DomainRepository {
         kbPath: parsed.data.kbPath,
         identity: parsed.data.identity,
         escalationTriggers: parsed.data.escalationTriggers,
+        allowGmail: parsed.data.allowGmail,
         createdAt: now,
         updatedAt: now,
       })
@@ -74,7 +80,7 @@ export class DomainRepository {
   }
 
   getById(id: string): Result<Domain, DomainOSError> {
-    const row = this.db.prepare('SELECT * FROM domains WHERE id = ?').get(id) as
+    const row = this.db.prepare(`SELECT ${DOMAIN_COLUMNS} FROM domains WHERE id = ?`).get(id) as
       | DomainRow
       | undefined
 
@@ -85,7 +91,7 @@ export class DomainRepository {
   list(): Result<Domain[], DomainOSError> {
     try {
       const rows = this.db
-        .prepare('SELECT * FROM domains ORDER BY created_at DESC')
+        .prepare(`SELECT ${DOMAIN_COLUMNS} FROM domains ORDER BY created_at DESC`)
         .all() as DomainRow[]
       return Ok(rows.map(rowToDomain))
     } catch (e) {
@@ -112,9 +118,9 @@ export class DomainRepository {
     try {
       this.db
         .prepare(
-          'UPDATE domains SET name = ?, description = ?, kb_path = ?, identity = ?, escalation_triggers = ?, updated_at = ? WHERE id = ?',
+          'UPDATE domains SET name = ?, description = ?, kb_path = ?, identity = ?, escalation_triggers = ?, allow_gmail = ?, updated_at = ? WHERE id = ?',
         )
-        .run(updated.name, updated.description, updated.kbPath, updated.identity, updated.escalationTriggers, now, id)
+        .run(updated.name, updated.description, updated.kbPath, updated.identity, updated.escalationTriggers, updated.allowGmail ? 1 : 0, now, id)
 
       return Ok(updated)
     } catch (e) {

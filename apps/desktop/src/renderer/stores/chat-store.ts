@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { KBUpdateProposal, RejectedProposal } from '../../preload/api'
+import type { KBUpdateProposal, RejectedProposal, ToolUseEvent } from '../../preload/api'
 import { fnv1aHash } from '../common/hash'
 
 // --- Store-layer wrappers with IDs and source attribution ---
@@ -43,11 +43,18 @@ interface ChatState {
   rejectedProposalsByDomain: Record<string, StoredRejectedProposal[]>
   activeDomainId: string | null
 
+  /** Tool-use state (Gmail tool loop feedback) */
+  activeToolCall: ToolUseEvent | null
+  toolEvents: ToolUseEvent[]
+
   /** Extraction state */
   isExtracting: boolean
   lastExtractAt: Record<string, number>
   extractionError: string | null
   extractionResult: ExtractionResult | null
+
+  /** Send guard to prevent double-sends */
+  isSending: boolean
 
   switchDomain(domainId: string, domainName: string): void
   sendMessage(content: string, domainId: string, apiKey: string): Promise<void>
@@ -100,6 +107,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   proposalsByDomain: {},
   rejectedProposalsByDomain: {},
   activeDomainId: null,
+  activeToolCall: null,
+  toolEvents: [],
+  isSending: false,
   isExtracting: false,
   lastExtractAt: {},
   extractionError: null,
@@ -143,13 +153,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   async sendMessage(content, domainId, apiKey) {
+    // Send guard: prevent double-sends
+    if (get().isSending) return
+
     const userMessage: ChatMessage = { role: 'user', content }
     const currentMessages = [...get().messages, userMessage]
 
     set({
       messages: currentMessages,
       isStreaming: true,
+      isSending: true,
       streamingContent: '',
+      activeToolCall: null,
+      toolEvents: [],
     })
 
     // Listen for streaming chunks
@@ -157,65 +173,86 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set((s) => ({ streamingContent: s.streamingContent + chunk }))
     })
 
-    const result = await window.domainOS.chat.send({
-      domainId,
-      messages: currentMessages.filter((m) => m.role !== 'system') as Array<{ role: 'user' | 'assistant'; content: string }>,
-      apiKey,
+    // Listen for tool-use events (Gmail tool loop)
+    const unsubToolUse = window.domainOS.chat.onToolUse((data) => {
+      const event = data as ToolUseEvent
+      set((s) => ({
+        activeToolCall: event.status === 'running'
+          ? event
+          : (s.activeToolCall?.toolUseId === event.toolUseId ? null : s.activeToolCall),
+        toolEvents: [...s.toolEvents, event].slice(-100),
+      }))
     })
 
-    // Clean up listeners
-    window.domainOS.chat.offStreamChunk()
-    window.domainOS.chat.offStreamDone()
-
-    if (result.ok && result.value) {
-      const newMessages = [
-        ...currentMessages,
-        {
-          role: 'assistant' as const,
-          content: result.value.content,
-          stopBlocks: result.value.stopBlocks,
-          gapFlags: result.value.gapFlags,
-          decisions: result.value.decisions,
-        },
-      ]
-      const messageIndex = newMessages.length - 1
-      const incomingProposals = result.value.proposals.map((p) => toStoredProposal(p, 'chat-send', messageIndex))
-      const incomingRejected = (result.value.rejectedProposals ?? []).map((r) => toStoredRejected(r, 'chat-send', messageIndex))
-
-      const newProposals = [...get().kbProposals, ...incomingProposals]
-      const newRejected = [...get().rejectedProposals, ...incomingRejected]
-
-      set({
-        messages: newMessages,
-        isStreaming: false,
-        streamingContent: '',
-        kbProposals: newProposals,
-        rejectedProposals: newRejected,
-        messagesByDomain: { ...get().messagesByDomain, [domainId]: newMessages },
-        proposalsByDomain: { ...get().proposalsByDomain, [domainId]: newProposals },
-        rejectedProposalsByDomain: { ...get().rejectedProposalsByDomain, [domainId]: newRejected },
+    try {
+      const result = await window.domainOS.chat.send({
+        domainId,
+        messages: currentMessages.filter((m) => m.role !== 'system') as Array<{ role: 'user' | 'assistant'; content: string }>,
+        apiKey,
       })
-    } else {
-      let errorContent = result.error ?? 'Unknown error occurred'
-      // Try to extract human-readable message from API error JSON
-      try {
-        const parsed = JSON.parse(errorContent.replace(/^Error:\s*\d+\s*/, ''))
-        if (parsed?.error?.message) errorContent = parsed.error.message
-      } catch {
-        // If error contains embedded JSON, try to extract message from it
-        const msgMatch = errorContent.match(/"message"\s*:\s*"([^"]+)"/)
-        if (msgMatch) errorContent = msgMatch[1]
+
+      if (result.ok && result.value) {
+        const newMessages = [
+          ...currentMessages,
+          {
+            role: 'assistant' as const,
+            content: result.value.content,
+            stopBlocks: result.value.stopBlocks,
+            gapFlags: result.value.gapFlags,
+            decisions: result.value.decisions,
+          },
+        ]
+        const messageIndex = newMessages.length - 1
+        const incomingProposals = result.value.proposals.map((p) => toStoredProposal(p, 'chat-send', messageIndex))
+        const incomingRejected = (result.value.rejectedProposals ?? []).map((r) => toStoredRejected(r, 'chat-send', messageIndex))
+
+        const newProposals = [...get().kbProposals, ...incomingProposals]
+        const newRejected = [...get().rejectedProposals, ...incomingRejected]
+
+        set({
+          messages: newMessages,
+          isStreaming: false,
+          isSending: false,
+          streamingContent: '',
+          activeToolCall: null,
+          toolEvents: [],
+          kbProposals: newProposals,
+          rejectedProposals: newRejected,
+          messagesByDomain: { ...get().messagesByDomain, [domainId]: newMessages },
+          proposalsByDomain: { ...get().proposalsByDomain, [domainId]: newProposals },
+          rejectedProposalsByDomain: { ...get().rejectedProposalsByDomain, [domainId]: newRejected },
+        })
+      } else {
+        let errorContent = result.error ?? 'Unknown error occurred'
+        // Try to extract human-readable message from API error JSON
+        try {
+          const parsed = JSON.parse(errorContent.replace(/^Error:\s*\d+\s*/, ''))
+          if (parsed?.error?.message) errorContent = parsed.error.message
+        } catch {
+          // If error contains embedded JSON, try to extract message from it
+          const msgMatch = errorContent.match(/"message"\s*:\s*"([^"]+)"/)
+          if (msgMatch) errorContent = msgMatch[1]
+        }
+        const newMessages = [
+          ...currentMessages,
+          { role: 'assistant' as const, content: `Error: ${errorContent}` },
+        ]
+        set({
+          messages: newMessages,
+          isStreaming: false,
+          isSending: false,
+          streamingContent: '',
+          activeToolCall: null,
+          toolEvents: [],
+          messagesByDomain: { ...get().messagesByDomain, [domainId]: newMessages },
+        })
       }
-      const newMessages = [
-        ...currentMessages,
-        { role: 'assistant' as const, content: `Error: ${errorContent}` },
-      ]
-      set({
-        messages: newMessages,
-        isStreaming: false,
-        streamingContent: '',
-        messagesByDomain: { ...get().messagesByDomain, [domainId]: newMessages },
-      })
+    } finally {
+      // Always clean up listeners
+      unsubToolUse()
+      window.domainOS.chat.offStreamChunk()
+      window.domainOS.chat.offStreamDone()
+      set({ isSending: false })
     }
   },
 

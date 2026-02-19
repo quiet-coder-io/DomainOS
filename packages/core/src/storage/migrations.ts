@@ -258,6 +258,16 @@ const migrations: Migration[] = [
       )
     },
   },
+  {
+    version: 7,
+    description: 'Per-domain Gmail access toggle',
+    up(db) {
+      runSQL(
+        db,
+        `ALTER TABLE domains ADD COLUMN allow_gmail INTEGER NOT NULL DEFAULT 0;`,
+      )
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

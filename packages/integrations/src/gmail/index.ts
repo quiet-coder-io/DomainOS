@@ -1,2 +1,5 @@
 export { GmailPoller } from './poller.js'
+export { GmailClient } from './client.js'
+export { extractTextBody } from './body-parser.js'
 export type { GmailPollerConfig, GmailMessageMeta } from './types.js'
+export type { GmailClientConfig, GmailSearchResult, GmailMessage } from './client.js'

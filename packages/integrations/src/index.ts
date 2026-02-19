@@ -6,7 +6,10 @@
  */
 
 export { GmailPoller } from './gmail/index.js'
+export { GmailClient } from './gmail/index.js'
+export { extractTextBody } from './gmail/index.js'
 export type { GmailPollerConfig, GmailMessageMeta } from './gmail/index.js'
+export type { GmailClientConfig, GmailSearchResult, GmailMessage } from './gmail/index.js'
 
 export { GTasksReader } from './gtasks/index.js'
 export type { GTasksReaderConfig, GTaskMeta } from './gtasks/index.js'

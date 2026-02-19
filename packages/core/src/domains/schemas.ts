@@ -7,6 +7,7 @@ export const CreateDomainInputSchema = z.object({
   kbPath: FilePathSchema,
   identity: z.string().default(''),
   escalationTriggers: z.string().default(''),
+  allowGmail: z.boolean().default(false),
 })
 
 export type CreateDomainInput = z.input<typeof CreateDomainInputSchema>
@@ -17,6 +18,7 @@ export const UpdateDomainInputSchema = z.object({
   kbPath: FilePathSchema.optional(),
   identity: z.string().optional(),
   escalationTriggers: z.string().optional(),
+  allowGmail: z.boolean().optional(),
 })
 
 export type UpdateDomainInput = z.infer<typeof UpdateDomainInputSchema>
@@ -28,6 +30,7 @@ export const DomainSchema = z.object({
   kbPath: z.string(),
   identity: z.string(),
   escalationTriggers: z.string(),
+  allowGmail: z.boolean().default(false),
   createdAt: TimestampSchema,
   updatedAt: TimestampSchema,
 })

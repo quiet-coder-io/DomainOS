@@ -128,4 +128,48 @@ describe('DomainRepository', () => {
       expect(result.error.code).toBe('VALIDATION_ERROR')
     }
   })
+
+  it('defaults allowGmail to false', () => {
+    const created = repo.create({ name: 'Test', kbPath: '/tmp/kb' })
+    expect(created.ok).toBe(true)
+    if (created.ok) {
+      expect(created.value.allowGmail).toBe(false)
+    }
+  })
+
+  it('creates a domain with allowGmail enabled', () => {
+    const created = repo.create({ name: 'Test', kbPath: '/tmp/kb', allowGmail: true })
+    expect(created.ok).toBe(true)
+    if (created.ok) {
+      expect(created.value.allowGmail).toBe(true)
+    }
+  })
+
+  it('toggles allowGmail and persists on partial update', () => {
+    const created = repo.create({ name: 'Test', kbPath: '/tmp/kb' })
+    if (!created.ok) throw new Error('setup failed')
+    expect(created.value.allowGmail).toBe(false)
+
+    // Enable allowGmail
+    const toggled = repo.update(created.value.id, { allowGmail: true })
+    expect(toggled.ok).toBe(true)
+    if (toggled.ok) {
+      expect(toggled.value.allowGmail).toBe(true)
+    }
+
+    // Update name only (omit allowGmail) — should preserve the true value
+    const renamed = repo.update(created.value.id, { name: 'Renamed' })
+    expect(renamed.ok).toBe(true)
+    if (renamed.ok) {
+      expect(renamed.value.name).toBe('Renamed')
+      expect(renamed.value.allowGmail).toBe(true)
+    }
+
+    // Re-read from DB to verify persistence
+    const reread = repo.getById(created.value.id)
+    expect(reread.ok).toBe(true)
+    if (reread.ok) {
+      expect(reread.value.allowGmail).toBe(true)
+    }
+  })
 })
