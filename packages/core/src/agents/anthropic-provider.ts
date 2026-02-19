@@ -1,12 +1,13 @@
 /**
  * Anthropic (Claude) implementation of the LLM provider interface.
+ * Implements ToolCapableProvider for tool-use loop support.
  */
 
 import Anthropic from '@anthropic-ai/sdk'
 import { Ok, Err } from '../common/index.js'
 import { DomainOSError } from '../common/index.js'
 import type { Result } from '../common/index.js'
-import type { ChatMessage, LLMProvider } from './provider.js'
+import type { ChatMessage, LLMProvider, ToolCapableProvider, ToolUseMessage, ToolUseResponse, ToolDefinition, ToolCall } from './provider.js'
 
 export interface AnthropicProviderOptions {
   apiKey: string
@@ -14,8 +15,9 @@ export interface AnthropicProviderOptions {
   maxTokens?: number
 }
 
-export class AnthropicProvider implements LLMProvider {
+export class AnthropicProvider implements ToolCapableProvider {
   readonly name = 'anthropic'
+  readonly supportsTools = true as const
   private readonly client: Anthropic
   private readonly model: string
   private readonly maxTokens: number
@@ -42,22 +44,63 @@ export class AnthropicProvider implements LLMProvider {
   }
 
   /**
-   * Non-streaming message creation with optional tool definitions.
-   * Used by the tool-use loop where we need the full Message object
-   * (including tool_use content blocks) rather than streamed text.
+   * Non-streaming tool-use message creation using normalized types.
+   *
+   * Uses stream: false intentionally — tool rounds need full response objects,
+   * not streamed deltas. Do NOT "optimize" this to use streaming. (D6)
    */
-  async createMessage(params: {
-    messages: Anthropic.Messages.MessageParam[]
-    system: string
-    tools?: Anthropic.Messages.Tool[]
-  }): Promise<Anthropic.Messages.Message> {
-    return this.client.messages.create({
+  async createToolUseMessage(params: {
+    messages: ToolUseMessage[]
+    systemPrompt: string
+    tools: ToolDefinition[]
+  }): Promise<ToolUseResponse> {
+    // Convert ToolDefinition[] → Anthropic.Messages.Tool[]
+    // Key rename only: inputSchema → input_schema. No schema mutation. (D5)
+    const anthropicTools: Anthropic.Messages.Tool[] = params.tools.map((t) => ({
+      name: t.name,
+      description: t.description,
+      input_schema: t.inputSchema as Anthropic.Messages.Tool.InputSchema,
+    }))
+
+    // Convert ToolUseMessage[] → Anthropic.Messages.MessageParam[]
+    const anthropicMessages = convertToAnthropicMessages(params.messages)
+
+    const response = await this.client.messages.create({
       model: this.model,
       max_tokens: this.maxTokens,
-      system: params.system,
-      messages: params.messages,
-      ...(params.tools?.length ? { tools: params.tools } : {}),
+      system: params.systemPrompt,
+      messages: anthropicMessages,
+      ...(anthropicTools.length ? { tools: anthropicTools } : {}),
     })
+
+    // Map stop_reason to normalized stopReason (D9/D17)
+    let stopReason: ToolUseResponse['stopReason']
+    if (response.stop_reason === 'tool_use') stopReason = 'tool_use'
+    else if (response.stop_reason === 'max_tokens') stopReason = 'max_tokens'
+    else stopReason = 'end_turn'
+
+    // Extract text content: concatenate type:"text" blocks
+    const textContent = response.content
+      .filter((block): block is Anthropic.Messages.TextBlock => block.type === 'text')
+      .map((block) => block.text)
+      .join('')
+
+    // Extract tool calls from type:"tool_use" blocks
+    const toolCalls: ToolCall[] = response.content
+      .filter((block): block is Anthropic.Messages.ToolUseBlock => block.type === 'tool_use')
+      .map((block) => ({
+        id: block.id,
+        name: block.name,
+        input: block.input as Record<string, unknown>,
+      }))
+
+    return {
+      stopReason,
+      textContent,
+      toolCalls,
+      // rawAssistantMessage = full native content array (preserves text + tool_use blocks)
+      rawAssistantMessage: response.content,
+    }
   }
 
   async chatComplete(
@@ -83,4 +126,51 @@ export class AnthropicProvider implements LLMProvider {
       return Err(DomainOSError.llm(message))
     }
   }
+}
+
+/**
+ * Convert ToolUseMessage[] → Anthropic.Messages.MessageParam[].
+ *
+ * Key rules:
+ * - role:'assistant' → pass rawMessage as native content blocks with tool_use
+ * - role:'tool' → batch consecutive tool messages into ONE user message with tool_result blocks
+ *   (Anthropic requires all tool results for a turn in a single user message)
+ * - role:'user' → standard user message
+ */
+function convertToAnthropicMessages(messages: ToolUseMessage[]): Anthropic.Messages.MessageParam[] {
+  const result: Anthropic.Messages.MessageParam[] = []
+
+  let i = 0
+  while (i < messages.length) {
+    const msg = messages[i]
+
+    if (msg.role === 'user') {
+      result.push({ role: 'user', content: msg.content })
+      i++
+    } else if (msg.role === 'assistant') {
+      // rawMessage is the native Anthropic content blocks array
+      result.push({
+        role: 'assistant',
+        content: msg.rawMessage as Anthropic.Messages.ContentBlock[],
+      })
+      i++
+    } else if (msg.role === 'tool') {
+      // Batch consecutive tool messages into one user message with tool_result blocks
+      const toolResults: Anthropic.Messages.ToolResultBlockParam[] = []
+      while (i < messages.length && messages[i].role === 'tool') {
+        const toolMsg = messages[i] as { role: 'tool'; toolCallId: string; toolName: string; content: string }
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: toolMsg.toolCallId,
+          content: toolMsg.content,
+        })
+        i++
+      }
+      result.push({ role: 'user', content: toolResults })
+    } else {
+      i++
+    }
+  }
+
+  return result
 }

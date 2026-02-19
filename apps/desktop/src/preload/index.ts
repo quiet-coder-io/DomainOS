@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { DomainOSAPI, KBUpdateProposal, ToolUseEvent } from './api'
+import type { DomainOSAPI, KBUpdateProposal, ToolUseEvent, ProviderConfig } from './api'
 
 const api: DomainOSAPI = {
   platform: process.platform,
@@ -137,6 +137,14 @@ const api: DomainOSAPI = {
   settings: {
     getApiKey: () => ipcRenderer.invoke('settings:get-api-key'),
     setApiKey: (key: string) => ipcRenderer.invoke('settings:set-api-key', key),
+    setProviderKey: (provider: string, key: string) => ipcRenderer.invoke('settings:set-provider-key', provider, key),
+    clearProviderKey: (provider: string) => ipcRenderer.invoke('settings:clear-provider-key', provider),
+    getProviderKeysStatus: () => ipcRenderer.invoke('settings:get-provider-keys-status'),
+    getProviderConfig: () => ipcRenderer.invoke('settings:get-provider-config'),
+    setProviderConfig: (config) => ipcRenderer.invoke('settings:set-provider-config', config),
+    listOllamaModels: (baseUrl?: string) => ipcRenderer.invoke('settings:list-ollama-models', baseUrl),
+    testOllama: (baseUrl?: string) => ipcRenderer.invoke('settings:test-ollama', baseUrl),
+    testTools: (provider: string, model: string) => ipcRenderer.invoke('settings:test-tools', provider, model),
   },
 }
 

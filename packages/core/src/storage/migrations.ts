@@ -268,6 +268,20 @@ const migrations: Migration[] = [
       )
     },
   },
+  {
+    version: 8,
+    description: 'Per-domain LLM model override and force-tool-attempt flag',
+    up(db) {
+      runSQL(
+        db,
+        `
+        ALTER TABLE domains ADD COLUMN model_provider TEXT DEFAULT NULL;
+        ALTER TABLE domains ADD COLUMN model_name TEXT DEFAULT NULL;
+        ALTER TABLE domains ADD COLUMN force_tool_attempt INTEGER DEFAULT 0;
+        `,
+      )
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

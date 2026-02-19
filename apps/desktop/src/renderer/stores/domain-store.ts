@@ -7,8 +7,14 @@ interface DomainState {
   loading: boolean
 
   fetchDomains(): Promise<void>
-  createDomain(input: { name: string; description?: string; kbPath: string; identity?: string; escalationTriggers?: string; allowGmail?: boolean }): Promise<Domain | null>
-  updateDomain(id: string, input: { name?: string; description?: string; kbPath?: string; identity?: string; escalationTriggers?: string; allowGmail?: boolean }): Promise<boolean>
+  createDomain(input: {
+    name: string; description?: string; kbPath: string; identity?: string; escalationTriggers?: string; allowGmail?: boolean
+    modelProvider?: string | null; modelName?: string | null; forceToolAttempt?: boolean
+  }): Promise<Domain | null>
+  updateDomain(id: string, input: {
+    name?: string; description?: string; kbPath?: string; identity?: string; escalationTriggers?: string; allowGmail?: boolean
+    modelProvider?: string | null; modelName?: string | null; forceToolAttempt?: boolean
+  }): Promise<boolean>
   setActiveDomain(id: string | null): void
   deleteDomain(id: string): Promise<void>
 }

@@ -1,8 +1,9 @@
 import { ipcMain, dialog, safeStorage, app } from 'electron'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type Database from 'better-sqlite3'
-import { writeFile, readFile, unlink, realpath, stat } from 'node:fs/promises'
+import { writeFile, readFile, unlink, realpath, stat, copyFile } from 'node:fs/promises'
 import { join, resolve, sep, extname } from 'node:path'
+import { existsSync } from 'node:fs'
 import {
   DomainRepository,
   DomainRelationshipRepository,
@@ -20,6 +21,14 @@ import {
   buildSystemPrompt,
   buildStartupReport,
   AnthropicProvider,
+  createProvider,
+  shouldUseTools,
+  isToolCapableProvider,
+  setToolCapability,
+  toolCapKey,
+  ToolsNotSupportedError,
+  DEFAULT_MODELS,
+  OllamaProvider,
   parseKBUpdates,
   parseDecisions,
   parseGapFlags,
@@ -36,14 +45,35 @@ import type {
   ChatMessage,
   KBUpdateProposal,
   AuditEventType,
+  ProviderName,
+  ToolCapableProvider,
 } from '@domain-os/core'
 import { getIntakeToken } from './intake-token'
 import { startKBWatcher, stopKBWatcher } from './kb-watcher'
 import { loadGmailCredentials, checkGmailConnected } from './gmail-credentials'
 import { startGmailOAuth, disconnectGmail } from './gmail-oauth'
-import { GMAIL_TOOLS, executeGmailTool } from './gmail-tools'
+import { GMAIL_TOOLS } from './gmail-tools'
 import { runToolLoop } from './tool-loop'
 import { GmailClient } from '@domain-os/integrations'
+
+// ── Provider config types (D20) ──
+
+interface ProviderConfigFile {
+  version: number
+  defaultProvider: ProviderName
+  defaultModel: string
+  ollamaBaseUrl: string
+}
+
+const DEFAULT_PROVIDER_CONFIG: ProviderConfigFile = {
+  version: 1,
+  defaultProvider: 'anthropic',
+  defaultModel: 'claude-sonnet-4-20250514',
+  ollamaBaseUrl: 'http://localhost:11434',
+}
+
+// ── In-memory key cache (avoids repeated safeStorage calls) ──
+const keyCache: Map<string, string> = new Map()
 
 export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWindow | null): void {
   const domainRepo = new DomainRepository(db)
@@ -59,6 +89,67 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
 
   // Seed default shared protocols (STOP + Gap Detection) — idempotent
   seedDefaultProtocols(sharedProtocolRepo)
+
+  // ── Multi-key storage helpers (D7) ──
+
+  const userDataPath = app.getPath('userData')
+
+  function providerKeyPath(provider: string): string {
+    return resolve(userDataPath, `api-key-${provider}.enc`)
+  }
+
+  const providerConfigPath = resolve(userDataPath, 'provider-config.json')
+
+  // Legacy migration: copy api-key.enc → api-key-anthropic.enc on first run
+  const legacyKeyPath = resolve(userDataPath, 'api-key.enc')
+  const anthropicKeyPath = providerKeyPath('anthropic')
+  if (existsSync(legacyKeyPath) && !existsSync(anthropicKeyPath)) {
+    copyFile(legacyKeyPath, anthropicKeyPath).catch(() => {
+      // Best-effort migration
+    })
+  }
+
+  /** Load a provider's decrypted API key. Internal only — never exposed to renderer. */
+  async function loadProviderKey(provider: string): Promise<string> {
+    // Check in-memory cache first
+    const cached = keyCache.get(provider)
+    if (cached) return cached
+
+    try {
+      const encrypted = await readFile(providerKeyPath(provider))
+      let key: string
+      if (safeStorage.isEncryptionAvailable()) {
+        key = safeStorage.decryptString(encrypted)
+      } else {
+        key = encrypted.toString('utf-8')
+      }
+      if (key) keyCache.set(provider, key)
+      return key
+    } catch {
+      return '' // File doesn't exist yet
+    }
+  }
+
+  /** Load provider config (no secrets). */
+  async function loadProviderConfig(): Promise<ProviderConfigFile> {
+    try {
+      const raw = await readFile(providerConfigPath, 'utf-8')
+      const parsed = JSON.parse(raw) as Partial<ProviderConfigFile>
+      // D20: normalize/migrate if version is missing or outdated
+      return {
+        ...DEFAULT_PROVIDER_CONFIG,
+        ...parsed,
+        version: 1,
+      }
+    } catch {
+      return { ...DEFAULT_PROVIDER_CONFIG }
+    }
+  }
+
+  /** Save provider config. */
+  async function saveProviderConfig(config: ProviderConfigFile): Promise<void> {
+    await writeFile(providerConfigPath, JSON.stringify({ ...config, version: 1 }, null, 2), 'utf-8')
+  }
 
   // --- Domain CRUD ---
 
@@ -115,12 +206,41 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
       payload: {
         domainId: string
         messages: ChatMessage[]
-        apiKey: string
       },
     ) => {
       try {
         const domain = domainRepo.getById(payload.domainId)
         if (!domain.ok) return { ok: false, error: domain.error.message }
+
+        // ── Resolve provider + model (per-domain override or global default) ──
+        const globalConfig = await loadProviderConfig()
+        const resolvedProvider = (domain.value.modelProvider ?? globalConfig.defaultProvider ?? 'anthropic') as ProviderName
+        const resolvedModel = domain.value.modelName ?? globalConfig.defaultModel ?? DEFAULT_MODELS[resolvedProvider]
+        const ollamaBaseUrl = globalConfig.ollamaBaseUrl ?? 'http://localhost:11434'
+
+        // ── Pre-flight checks (user-facing errors, not crashes) ──
+        if (resolvedProvider !== 'ollama') {
+          const apiKey = await loadProviderKey(resolvedProvider)
+          if (!apiKey) {
+            const source = domain.value.modelProvider ? 'Domain override' : 'Global default'
+            event.sender.send('chat:stream-done')
+            return { ok: false, error: `${source} uses ${resolvedProvider}, but no API key is configured. Open Settings to add one.` }
+          }
+        } else {
+          const reachable = await OllamaProvider.testConnection(ollamaBaseUrl)
+          if (!reachable) {
+            event.sender.send('chat:stream-done')
+            return { ok: false, error: `Ollama not reachable at ${ollamaBaseUrl}. Is it running?` }
+          }
+        }
+
+        const apiKey = resolvedProvider !== 'ollama' ? await loadProviderKey(resolvedProvider) : undefined
+        const provider = createProvider({
+          provider: resolvedProvider,
+          model: resolvedModel,
+          apiKey,
+          ollamaBaseUrl,
+        })
 
         // Session: get or create active session
         let activeSession = sessionRepo.getActive(payload.domainId)
@@ -131,8 +251,8 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           const newSession = sessionRepo.create({
             domainId: payload.domainId,
             scope: 'working',
-            modelProvider: 'anthropic',
-            modelName: 'claude-sonnet-4-5-20250929',
+            modelProvider: resolvedProvider,
+            modelName: resolvedModel,
           })
           if (newSession.ok) {
             sessionId = newSession.value.id
@@ -140,7 +260,7 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
             auditRepo.logChange({
               domainId: payload.domainId,
               sessionId,
-              changeDescription: `Session started (scope: working)`,
+              changeDescription: `Session started (scope: working, provider: ${resolvedProvider}, model: ${resolvedModel})`,
               eventType: 'session_start',
               source: 'system',
             })
@@ -259,14 +379,13 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
         })
         const systemPrompt = promptResult.prompt
 
-        const provider = new AnthropicProvider({ apiKey: payload.apiKey })
         let fullResponse = ''
 
-        // --- Gmail tool-use branch ---
+        // --- Gmail tool-use branch (uses unified shouldUseTools routing) ---
         const gmailCreds = await loadGmailCredentials()
         const gmailEnabled = gmailCreds && domain.value.allowGmail
 
-        if (gmailEnabled) {
+        if (gmailEnabled && shouldUseTools(provider, resolvedProvider, resolvedModel, domain.value, ollamaBaseUrl)) {
           const gmailClient = new GmailClient({
             clientId: gmailCreds.clientId,
             clientSecret: gmailCreds.clientSecret,
@@ -284,18 +403,21 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           const toolsHint = '\n\n## Available Tools\nYou have access to Gmail search and read tools. Use gmail_search to find messages and gmail_read for full content. Always use the tools — do not assume email content. Only use Gmail tools when the user\'s request clearly requires email access; otherwise answer normally.'
 
           const result = await runToolLoop({
-            provider,
+            provider: provider as ToolCapableProvider,
+            providerName: resolvedProvider,
+            model: resolvedModel,
             domainId: payload.domainId,
             userMessages: payload.messages,
             systemPrompt: systemPrompt + toolsHint,
             tools: GMAIL_TOOLS,
             gmailClient,
             eventSender: event.sender,
+            ollamaBaseUrl: resolvedProvider === 'ollama' ? ollamaBaseUrl : undefined,
           })
 
           fullResponse = result.fullResponse
         } else {
-          // --- Existing streaming path (unchanged) ---
+          // --- Streaming path (all providers) ---
           for await (const chunk of provider.chat(payload.messages, systemPrompt)) {
             fullResponse += chunk
             event.sender.send('chat:stream-chunk', chunk)
@@ -472,9 +594,21 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           return { ok: false, error: 'No domains available for classification' }
         }
 
-        const provider = new AnthropicProvider({ apiKey })
+        const classifyConfig = await loadProviderConfig()
+        const classifyProviderName = (classifyConfig.defaultProvider ?? 'anthropic') as ProviderName
+        const classifyModel = classifyConfig.defaultModel ?? DEFAULT_MODELS[classifyProviderName]
+        const classifyKey = classifyProviderName !== 'ollama' ? await loadProviderKey(classifyProviderName) : undefined
+        if (classifyProviderName !== 'ollama' && !classifyKey) {
+          return { ok: false, error: `No API key configured for ${classifyProviderName}` }
+        }
+        const classifyProvider = createProvider({
+          provider: classifyProviderName,
+          model: classifyModel,
+          apiKey: classifyKey,
+          ollamaBaseUrl: classifyConfig.ollamaBaseUrl,
+        })
         const classification = await classifyContent(
-          provider,
+          classifyProvider,
           domains.value.map((d) => ({ id: d.id, name: d.name, description: d.description })),
           item.value.title,
           item.value.content,
@@ -753,47 +887,189 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
     }
   })
 
-  // --- Settings (API Key with safeStorage) ---
+  // --- Settings: Multi-Provider Keys (D7) ---
 
-  const apiKeyPath = resolve(app.getPath('userData'), 'api-key.enc')
-
+  // Legacy get/set for backward compatibility (maps to anthropic)
   ipcMain.handle('settings:get-api-key', async () => {
-    try {
-      const encrypted = await readFile(apiKeyPath)
-      if (safeStorage.isEncryptionAvailable()) {
-        const decrypted = safeStorage.decryptString(encrypted)
-        return { ok: true, value: decrypted }
-      }
-      // Fallback: file stored as plain UTF-8
-      return { ok: true, value: encrypted.toString('utf-8') }
-    } catch {
-      // File doesn't exist yet
-      return { ok: true, value: '' }
-    }
+    const key = await loadProviderKey('anthropic')
+    return { ok: true, value: key }
   })
 
   ipcMain.handle('settings:set-api-key', async (_event, key: string) => {
     try {
       if (!key) {
-        // Clear the key
-        try {
-          await unlink(apiKeyPath)
-        } catch {
-          // File didn't exist, that's fine
-        }
+        keyCache.delete('anthropic')
+        try { await unlink(providerKeyPath('anthropic')) } catch { /* noop */ }
         return { ok: true, value: undefined }
       }
-
       if (safeStorage.isEncryptionAvailable()) {
         const encrypted = safeStorage.encryptString(key)
-        await writeFile(apiKeyPath, encrypted)
+        await writeFile(providerKeyPath('anthropic'), encrypted)
       } else {
-        console.warn('[settings] safeStorage not available — storing API key as plaintext')
-        await writeFile(apiKeyPath, key, 'utf-8')
+        await writeFile(providerKeyPath('anthropic'), key, 'utf-8')
       }
+      keyCache.set('anthropic', key)
       return { ok: true, value: undefined }
     } catch (err) {
       return { ok: false, error: (err as Error).message }
+    }
+  })
+
+  // New multi-provider key endpoints
+  ipcMain.handle('settings:set-provider-key', async (_event, provider: string, key: string) => {
+    try {
+      if (!key) {
+        keyCache.delete(provider)
+        try { await unlink(providerKeyPath(provider)) } catch { /* noop */ }
+        return { ok: true, value: undefined }
+      }
+      if (safeStorage.isEncryptionAvailable()) {
+        const encrypted = safeStorage.encryptString(key)
+        await writeFile(providerKeyPath(provider), encrypted)
+      } else {
+        console.warn(`[settings] safeStorage not available — storing ${provider} API key as plaintext`)
+        await writeFile(providerKeyPath(provider), key, 'utf-8')
+      }
+      keyCache.set(provider, key)
+      return { ok: true, value: undefined }
+    } catch (err) {
+      return { ok: false, error: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle('settings:clear-provider-key', async (_event, provider: string) => {
+    try {
+      keyCache.delete(provider)
+      try { await unlink(providerKeyPath(provider)) } catch { /* noop */ }
+      return { ok: true, value: undefined }
+    } catch (err) {
+      return { ok: false, error: (err as Error).message }
+    }
+  })
+
+  /** Batch endpoint: returns hasKey + last4 for each provider (D7). */
+  ipcMain.handle('settings:get-provider-keys-status', async () => {
+    try {
+      const anthropicKey = await loadProviderKey('anthropic')
+      const openaiKey = await loadProviderKey('openai')
+      return {
+        ok: true,
+        value: {
+          anthropic: { hasKey: !!anthropicKey, last4: anthropicKey ? anthropicKey.slice(-4) : undefined },
+          openai: { hasKey: !!openaiKey, last4: openaiKey ? openaiKey.slice(-4) : undefined },
+          ollama: { hasKey: false, note: 'No key required' },
+        },
+      }
+    } catch (err) {
+      return { ok: false, error: (err as Error).message }
+    }
+  })
+
+  // --- Settings: Provider Config ---
+
+  ipcMain.handle('settings:get-provider-config', async () => {
+    try {
+      const config = await loadProviderConfig()
+      return { ok: true, value: config }
+    } catch (err) {
+      return { ok: false, error: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle('settings:set-provider-config', async (_event, config: ProviderConfigFile) => {
+    try {
+      await saveProviderConfig(config)
+      return { ok: true, value: undefined }
+    } catch (err) {
+      return { ok: false, error: (err as Error).message }
+    }
+  })
+
+  // --- Settings: Ollama ---
+
+  ipcMain.handle('settings:list-ollama-models', async (_event, baseUrl?: string) => {
+    try {
+      const models = await OllamaProvider.listModels(baseUrl)
+      return { ok: true, value: models }
+    } catch (err) {
+      return { ok: false, error: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle('settings:test-ollama', async (_event, baseUrl?: string) => {
+    try {
+      const connected = await OllamaProvider.testConnection(baseUrl)
+      return { ok: true, value: connected }
+    } catch (err) {
+      return { ok: false, error: (err as Error).message }
+    }
+  })
+
+  // --- Settings: Test Tools Probe ---
+
+  ipcMain.handle('settings:test-tools', async (_event, providerName: string, model: string) => {
+    try {
+      const globalCfg = await loadProviderConfig()
+      const ollamaBase = globalCfg.ollamaBaseUrl ?? 'http://localhost:11434'
+
+      const key = providerName !== 'ollama' ? await loadProviderKey(providerName) : undefined
+      if (providerName !== 'ollama' && !key) {
+        return { ok: false, error: `No API key configured for ${providerName}` }
+      }
+
+      const testProvider = createProvider({
+        provider: providerName as ProviderName,
+        model,
+        apiKey: key,
+        ollamaBaseUrl: ollamaBase,
+      })
+
+      if (!isToolCapableProvider(testProvider)) {
+        return { ok: true, value: { status: 'not_supported', message: 'Provider does not implement tool interface' } }
+      }
+
+      const testTool = {
+        name: 'ping_tool',
+        description: 'A test tool. When called, return the input value.',
+        inputSchema: {
+          type: 'object',
+          properties: { input: { type: 'string' } },
+          required: ['input'],
+        },
+      }
+
+      // Round 1: expect tool call
+      const r1 = await testProvider.createToolUseMessage({
+        messages: [{ role: 'user', content: "Call ping_tool with input='ping' and return only 'ok' after tool result." }],
+        systemPrompt: 'You are a test assistant. Use the provided tools when asked.',
+        tools: [testTool],
+      })
+
+      if (r1.toolCalls.length === 0) {
+        const capKey2 = toolCapKey(providerName, model, providerName === 'ollama' ? ollamaBase : undefined)
+        setToolCapability(providerName, model, 'not_observed', providerName === 'ollama' ? ollamaBase : undefined)
+        return { ok: true, value: { status: 'not_observed', message: 'Model did not make a tool call' } }
+      }
+
+      // Round 2: provide tool result, expect final text
+      const r2 = await testProvider.createToolUseMessage({
+        messages: [
+          { role: 'user', content: "Call ping_tool with input='ping' and return only 'ok' after tool result." },
+          { role: 'assistant', rawMessage: r1.rawAssistantMessage, derivedText: r1.textContent },
+          { role: 'tool', toolCallId: r1.toolCalls[0].id, toolName: 'ping_tool', content: 'pong' },
+        ],
+        systemPrompt: 'You are a test assistant. Use the provided tools when asked.',
+        tools: [testTool],
+      })
+
+      setToolCapability(providerName, model, 'supported', providerName === 'ollama' ? ollamaBase : undefined)
+      return { ok: true, value: { status: 'supported', message: `Tool call succeeded. Model response: ${r2.textContent.slice(0, 100)}` } }
+    } catch (err) {
+      if (err instanceof ToolsNotSupportedError) {
+        setToolCapability(providerName, model, 'not_supported', providerName === 'ollama' ? (await loadProviderConfig()).ollamaBaseUrl : undefined)
+        return { ok: true, value: { status: 'not_supported', message: err.message } }
+      }
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
 
@@ -810,24 +1086,7 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
     'chat:extract-kb-updates',
     async (_event, payload: { domainId: string; content: string }) => {
       try {
-        // 1. Read API key from secure storage
-        let apiKey = ''
-        try {
-          const encrypted = await readFile(apiKeyPath)
-          if (safeStorage.isEncryptionAvailable()) {
-            apiKey = safeStorage.decryptString(encrypted)
-          } else {
-            apiKey = encrypted.toString('utf-8')
-          }
-        } catch {
-          // File doesn't exist
-        }
-
-        if (!apiKey) {
-          return { ok: false, error: 'API key not set' }
-        }
-
-        // 2. Get domain config
+        // 1. Get domain config
         const domain = domainRepo.getById(payload.domainId)
         if (!domain.ok) {
           return { ok: false, error: domain.error.message }
@@ -886,9 +1145,21 @@ Rules:
           extractionDirective,
         ].filter(Boolean).join('\n')
 
-        // 5. Call LLM (non-streaming)
-        const provider = new AnthropicProvider({ apiKey })
-        const response = await provider.chatComplete(
+        // 5. Call LLM (non-streaming) — use resolved provider from global config
+        const extractConfig = await loadProviderConfig()
+        const extractProviderName = (extractConfig.defaultProvider ?? 'anthropic') as ProviderName
+        const extractModel = extractConfig.defaultModel ?? DEFAULT_MODELS[extractProviderName]
+        const extractKey = extractProviderName !== 'ollama' ? await loadProviderKey(extractProviderName) : undefined
+        if (extractProviderName !== 'ollama' && !extractKey) {
+          return { ok: false, error: `No API key configured for ${extractProviderName}. Open Settings to add one.` }
+        }
+        const extractProvider = createProvider({
+          provider: extractProviderName,
+          model: extractModel,
+          apiKey: extractKey,
+          ollamaBaseUrl: extractConfig.ollamaBaseUrl,
+        })
+        const response = await extractProvider.chatComplete(
           [{ role: 'user' as const, content: payload.content }],
           systemPrompt,
         )

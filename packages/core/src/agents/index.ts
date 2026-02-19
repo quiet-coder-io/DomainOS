@@ -3,9 +3,23 @@
  * Handles prompt construction, API calls (BYOK), and response processing.
  */
 
-export type { ChatMessage, LLMProvider } from './provider.js'
+// Provider types and interfaces
+export type { ChatMessage, LLMProvider, ToolCapableProvider, ToolUseMessage, ToolUseResponse, ToolDefinition, ToolCall, ToolCapability } from './provider.js'
+export { ToolsNotSupportedError, isToolCapableProvider, toolCapKey, getToolCapability, setToolCapability, shouldUseTools, maybeWrapToolsNotSupported, toolCapabilityCache, notObservedCounters } from './provider.js'
+
+// Provider implementations
 export { AnthropicProvider } from './anthropic-provider.js'
 export type { AnthropicProviderOptions } from './anthropic-provider.js'
+export { OpenAIProvider } from './openai-provider.js'
+export type { OpenAIProviderOptions } from './openai-provider.js'
+export { OllamaProvider, normalizeOllamaUrl } from './ollama-provider.js'
+export type { OllamaProviderOptions } from './ollama-provider.js'
+
+// Provider factory
+export { createProvider, KNOWN_MODELS, DEFAULT_MODELS } from './provider-factory.js'
+export type { ProviderName, ProviderConfig } from './provider-factory.js'
+
+// Prompt builder
 export { buildSystemPrompt } from './prompt-builder.js'
 export type {
   PromptDomain,
@@ -21,6 +35,8 @@ export type {
   PromptManifestFile,
   PromptManifestExcludedFile,
 } from './prompt-builder.js'
+
+// Parsers
 export { parseKBUpdates, parseKBUpdatesCompat, REJECTION_REASONS } from './kb-update-parser.js'
 export type { KBUpdateProposal, KBUpdateMode, KBUpdateBasis, RejectedProposal, ParseKBUpdatesResult } from './kb-update-parser.js'
 export { parseDecisions } from './decision-parser.js'

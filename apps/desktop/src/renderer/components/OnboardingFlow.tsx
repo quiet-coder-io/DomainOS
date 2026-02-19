@@ -4,6 +4,7 @@ import { LayersIcon } from './icons/LayersIcon'
 import { inputClass, primaryButtonClass } from './ui'
 
 type Step = 'welcome' | 'apiKey' | 'createDomain' | 'scanning'
+type ProviderTab = 'anthropic' | 'openai' | 'ollama'
 
 export function OnboardingFlow(): React.JSX.Element {
   const [step, setStep] = useState<Step>('welcome')
@@ -11,11 +12,24 @@ export function OnboardingFlow(): React.JSX.Element {
   const transitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [scanResult, setScanResult] = useState<{ added: number } | null>(null)
 
+  // Provider tab state
+  const [providerTab, setProviderTab] = useState<ProviderTab>('anthropic')
+
   // API key state
-  const { apiKey, loadApiKey, setApiKey: storeSetApiKey } = useSettingsStore()
+  const {
+    providerKeys,
+    loadProviderKeysStatus,
+    setProviderKey,
+    ollamaConnected,
+    testOllama,
+  } = useSettingsStore()
   const [localKey, setLocalKey] = useState('')
-  const [showReplaceKey, setShowReplaceKey] = useState(false)
   const [apiKeyError, setApiKeyError] = useState('')
+  const [savingKey, setSavingKey] = useState(false)
+
+  // Ollama state
+  const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434')
+  const [ollamaTesting, setOllamaTesting] = useState(false)
 
   // Domain creation state
   const { domains, createDomain, setActiveDomain } = useDomainStore()
@@ -29,10 +43,10 @@ export function OnboardingFlow(): React.JSX.Element {
   const [scanError, setScanError] = useState('')
   const [scanSlow, setScanSlow] = useState(false)
 
-  // Load API key on mount
+  // Load provider keys status on mount
   useEffect(() => {
-    loadApiKey()
-  }, [loadApiKey])
+    loadProviderKeysStatus()
+  }, [loadProviderKeysStatus])
 
   // Cleanup transition timeout on unmount
   useEffect(() => () => {
@@ -42,7 +56,6 @@ export function OnboardingFlow(): React.JSX.Element {
   // Edge case: domain created via sidebar "+New" while onboarding is mounted
   useEffect(() => {
     if (domains.length === 0) return
-    // Only auto-redirect from welcome or apiKey steps
     if (step !== 'welcome' && step !== 'apiKey') return
 
     const latest = [...domains].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
@@ -51,27 +64,35 @@ export function OnboardingFlow(): React.JSX.Element {
 
   // --- Step handlers ---
 
-  async function handleSaveApiKey(): Promise<void> {
+  async function handleSaveKey(): Promise<void> {
     if (!localKey.trim()) return
+    setSavingKey(true)
     try {
-      storeSetApiKey(localKey.trim())
+      await setProviderKey(providerTab, localKey.trim())
+      setLocalKey('')
       setApiKeyError('')
-      setStep('createDomain')
     } catch {
       setApiKeyError('Failed to save API key. Please try again.')
+    } finally {
+      setSavingKey(false)
     }
   }
 
-  async function handleReplaceKey(): Promise<void> {
-    if (!localKey.trim()) return
-    try {
-      storeSetApiKey(localKey.trim())
-      setApiKeyError('')
-      setShowReplaceKey(false)
-      setLocalKey('')
-    } catch {
-      setApiKeyError('Failed to save API key. Please try again.')
+  async function handleTestOllama(): Promise<void> {
+    setOllamaTesting(true)
+    await testOllama(ollamaUrl.trim() || undefined)
+    setOllamaTesting(false)
+  }
+
+  function handleContinueToCreate(): void {
+    // At least one provider must be configured
+    const hasAnyKey = providerKeys?.anthropic?.hasKey || providerKeys?.openai?.hasKey || ollamaConnected
+    if (!hasAnyKey) {
+      setApiKeyError('Configure at least one provider to continue.')
+      return
     }
+    setApiKeyError('')
+    setStep('createDomain')
   }
 
   async function handleBrowse(): Promise<void> {
@@ -164,97 +185,115 @@ export function OnboardingFlow(): React.JSX.Element {
   }
 
   if (step === 'apiKey') {
-    const hasKey = !!apiKey
+    const anthropicStatus = providerKeys?.anthropic
+    const openaiStatus = providerKeys?.openai
 
     return (
       <div className="flex h-full items-center justify-center" data-testid="onboarding-apikey">
         <div className="w-full max-w-md px-6">
-          <h2 className="mb-1 text-lg font-semibold text-text-primary">Anthropic API Key</h2>
+          <h2 className="mb-1 text-lg font-semibold text-text-primary">Configure a Provider</h2>
+          <p className="mb-4 text-sm text-text-tertiary">
+            Set up at least one LLM provider to start chatting.
+          </p>
 
-          {hasKey && !showReplaceKey ? (
-            <div className="mt-4">
-              <div className="flex items-center gap-2 text-sm text-green-400">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                  <path d="M13.5 4.5L6 12L2.5 8.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                API key saved
-              </div>
+          {/* Provider tabs */}
+          <div className="flex border-b border-border-subtle mb-4">
+            {(['anthropic', 'openai', 'ollama'] as const).map((p) => (
               <button
-                data-testid="onboarding-replace-key"
-                onClick={() => setShowReplaceKey(true)}
-                className="mt-2 text-sm text-text-tertiary hover:text-text-secondary underline"
+                key={p}
+                onClick={() => { setProviderTab(p); setLocalKey(''); setApiKeyError('') }}
+                className={`px-3 py-2 text-sm border-b-2 transition-colors ${
+                  providerTab === p
+                    ? 'border-accent text-text-primary'
+                    : 'border-transparent text-text-tertiary hover:text-text-secondary'
+                }`}
               >
-                Replace key
+                {p === 'anthropic' ? 'Anthropic' : p === 'openai' ? 'OpenAI' : 'Ollama'}
+                {p === 'anthropic' && anthropicStatus?.hasKey && (
+                  <span className="ml-1 text-[10px] text-success">*</span>
+                )}
+                {p === 'openai' && openaiStatus?.hasKey && (
+                  <span className="ml-1 text-[10px] text-success">*</span>
+                )}
+                {p === 'ollama' && ollamaConnected && (
+                  <span className="ml-1 text-[10px] text-success">*</span>
+                )}
               </button>
-              <div className="mt-6">
+            ))}
+          </div>
+
+          {/* Anthropic / OpenAI tab content */}
+          {(providerTab === 'anthropic' || providerTab === 'openai') && (
+            <div>
+              {(providerTab === 'anthropic' ? anthropicStatus?.hasKey : openaiStatus?.hasKey) ? (
+                <div className="flex items-center gap-2 text-sm text-success mb-3">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <path d="M13.5 4.5L6 12L2.5 8.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  API key saved (****{(providerTab === 'anthropic' ? anthropicStatus : openaiStatus)?.last4})
+                </div>
+              ) : null}
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="password"
+                  value={localKey}
+                  onChange={(e) => setLocalKey(e.target.value)}
+                  placeholder={providerTab === 'anthropic' ? 'sk-ant-...' : 'sk-...'}
+                  className={`flex-1 ${inputClass}`}
+                  autoFocus
+                />
                 <button
-                  data-testid="onboarding-continue-apikey"
-                  onClick={() => setStep('createDomain')}
-                  className={primaryButtonClass}
+                  onClick={handleSaveKey}
+                  disabled={savingKey || !localKey.trim()}
+                  className="rounded bg-accent px-3 py-2 text-sm text-white hover:bg-accent-hover disabled:opacity-50"
                 >
-                  Continue
+                  {savingKey ? '...' : (providerTab === 'anthropic' ? anthropicStatus?.hasKey : openaiStatus?.hasKey) ? 'Replace' : 'Save'}
                 </button>
               </div>
-            </div>
-          ) : hasKey && showReplaceKey ? (
-            <div className="mt-4">
-              <input
-                type="password"
-                value={localKey}
-                onChange={(e) => setLocalKey(e.target.value)}
-                placeholder="sk-ant-..."
-                className={inputClass}
-                autoFocus
-              />
-              {apiKeyError && <p className="mt-1 text-xs text-red-400">{apiKeyError}</p>}
-              <div className="mt-4 flex gap-2">
-                <button onClick={handleReplaceKey} disabled={!localKey.trim()} className={primaryButtonClass}>
-                  Save
-                </button>
-                <button
-                  data-testid="onboarding-cancel-replace"
-                  onClick={() => { setShowReplaceKey(false); setLocalKey(''); setApiKeyError('') }}
-                  className="text-sm text-text-tertiary hover:text-text-secondary"
-                >
-                  Cancel
-                </button>
-              </div>
-              <div className="mt-4">
-                <button
-                  data-testid="onboarding-continue-apikey"
-                  onClick={() => setStep('createDomain')}
-                  className="text-sm text-text-tertiary hover:text-text-secondary underline"
-                >
-                  Continue without replacing
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="mt-4">
-              <input
-                type="password"
-                value={localKey}
-                onChange={(e) => setLocalKey(e.target.value)}
-                placeholder="sk-ant-..."
-                className={inputClass}
-                autoFocus
-              />
               <p className="mt-2 text-xs text-text-tertiary">
-                Required to chat. Stored locally. Encrypted via Electron safeStorage when available.
+                Encrypted via Electron safeStorage. Never leaves your machine.
               </p>
-              {apiKeyError && <p className="mt-1 text-xs text-red-400">{apiKeyError}</p>}
-              <div className="mt-4">
-                <button
-                  data-testid="onboarding-continue-apikey"
-                  onClick={handleSaveApiKey}
-                  disabled={!localKey.trim()}
-                  className={primaryButtonClass}
-                >
-                  Continue
-                </button>
-              </div>
             </div>
           )}
+
+          {/* Ollama tab content */}
+          {providerTab === 'ollama' && (
+            <div>
+              <p className="mb-2 text-xs text-text-tertiary">No API key required. Ollama must be running locally.</p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={ollamaUrl}
+                  onChange={(e) => setOllamaUrl(e.target.value)}
+                  className={`flex-1 ${inputClass}`}
+                  placeholder="http://localhost:11434"
+                />
+                <button
+                  onClick={handleTestOllama}
+                  disabled={ollamaTesting}
+                  className="rounded border border-border bg-surface-2 px-3 py-2 text-sm text-text-secondary hover:bg-surface-3 disabled:opacity-50"
+                >
+                  {ollamaTesting ? 'Testing...' : 'Test'}
+                </button>
+              </div>
+              {ollamaConnected && (
+                <p className="mt-2 text-xs text-success">Connected to Ollama</p>
+              )}
+            </div>
+          )}
+
+          {apiKeyError && <p className="mt-2 text-xs text-red-400">{apiKeyError}</p>}
+
+          <div className="mt-6">
+            <button
+              data-testid="onboarding-continue-apikey"
+              onClick={handleContinueToCreate}
+              className={primaryButtonClass}
+            >
+              Continue
+            </button>
+          </div>
         </div>
       </div>
     )

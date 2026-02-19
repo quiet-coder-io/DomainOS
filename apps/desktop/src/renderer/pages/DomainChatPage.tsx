@@ -9,6 +9,7 @@ import { SessionIndicator } from '../components/SessionIndicator'
 import { GapFlagPanel } from '../components/GapFlagPanel'
 import { DecisionLogPanel } from '../components/DecisionLogPanel'
 import { AuditLogPanel } from '../components/AuditLogPanel'
+import { SettingsDialog } from '../components/SettingsDialog'
 
 const DocumentIcon = () => (
   <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-text-tertiary">
@@ -20,15 +21,34 @@ const DocumentIcon = () => (
   </svg>
 )
 
-const LockIcon = () => (
-  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg" className="inline-block">
-    <rect x="1.5" y="4.5" width="7" height="5" rx="1" fill="currentColor" />
-    <path d="M3 4.5V3a2 2 0 1 1 4 0v1.5" stroke="currentColor" strokeWidth="1.2" fill="none" />
+const GearIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M6.86 1.33h2.28l.34 1.7a5.47 5.47 0 0 1 1.32.76l1.64-.6.84 1.46-1.3 1.1c.07.27.1.54.1.82s-.03.55-.1.82l1.3 1.1-.84 1.46-1.64-.6c-.4.32-.84.58-1.32.76l-.34 1.7H6.86l-.34-1.7a5.47 5.47 0 0 1-1.32-.76l-1.64.6-.84-1.46 1.3-1.1A4.2 4.2 0 0 1 3.92 6.57l-1.3-1.1.84-1.46 1.64.6a5.47 5.47 0 0 1 1.32-.76l.34-1.7ZM8 10a2.33 2.33 0 1 0 0-4.67A2.33 2.33 0 0 0 8 10Z" stroke="currentColor" strokeWidth="1.2" fill="none" />
   </svg>
 )
 
+type ProviderName = 'anthropic' | 'openai' | 'ollama'
+
+const KNOWN_MODELS: Record<ProviderName, string[]> = {
+  anthropic: ['claude-sonnet-4-20250514', 'claude-haiku-4-5-20251001', 'claude-opus-4-6'],
+  openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o3-mini'],
+  ollama: ['llama3.2', 'llama3.1', 'mistral', 'codellama', 'mixtral'],
+}
+
+const DEFAULT_MODELS: Record<ProviderName, string> = {
+  anthropic: 'claude-sonnet-4-20250514',
+  openai: 'gpt-4o',
+  ollama: 'llama3.2',
+}
+
+const PROVIDER_LABELS: Record<ProviderName, string> = {
+  anthropic: 'Anthropic',
+  openai: 'OpenAI',
+  ollama: 'Ollama',
+}
+
 export function DomainChatPage(): React.JSX.Element {
-  const { activeDomainId, domains } = useDomainStore()
+  const { activeDomainId, domains, updateDomain } = useDomainStore()
   const {
     messages,
     kbProposals,
@@ -40,7 +60,16 @@ export function DomainChatPage(): React.JSX.Element {
     switchDomain,
   } = useChatStore()
   const prevDomainIdRef = useRef<string | null>(null)
-  const { apiKey, loading: apiKeyLoading, setApiKey, loadApiKey } = useSettingsStore()
+  const { providerConfig, loadProviderConfig, ollamaModels, listOllamaModels } = useSettingsStore()
+
+  const [showSettings, setShowSettings] = useState(false)
+
+  // --- Per-domain model override state ---
+  const [overrideExpanded, setOverrideExpanded] = useState(false)
+  const [overrideProvider, setOverrideProvider] = useState<ProviderName | ''>('')
+  const [overrideModel, setOverrideModel] = useState('')
+  const [overrideCustom, setOverrideCustom] = useState('')
+  const [useCustomOverride, setUseCustomOverride] = useState(false)
 
   // --- Resizable sidebar state ---
   const [sidebarWidth, setSidebarWidth] = useState(() => {
@@ -154,7 +183,6 @@ export function DomainChatPage(): React.JSX.Element {
       await window.domainOS.gmail.startOAuth()
       await refreshGmailStatus()
     } catch {
-      // User cancelled or error — refreshing status will show current state
       await refreshGmailStatus()
     } finally {
       setGmailLoading(false)
@@ -175,15 +203,15 @@ export function DomainChatPage(): React.JSX.Element {
     if (!activeDomainId || !domain) return
     const newValue = !domain.allowGmail
     await window.domainOS.domain.update(activeDomainId, { allowGmail: newValue })
-    // Refresh domain list to pick up the change
     await useDomainStore.getState().fetchDomains()
   }
 
+  // Load provider config on mount
   useEffect(() => {
-    loadApiKey()
-  }, [loadApiKey])
+    loadProviderConfig()
+  }, [loadProviderConfig])
 
-  // Switch domain context: save current messages, restore target domain's messages
+  // Switch domain context
   useEffect(() => {
     if (!activeDomainId) return
     const prev = prevDomainIdRef.current
@@ -195,25 +223,120 @@ export function DomainChatPage(): React.JSX.Element {
   }, [activeDomainId, domains, switchDomain])
 
   const domain = domains.find((d) => d.id === activeDomainId)
+
+  // Auto-load Ollama models when Ollama is selected as override provider
+  useEffect(() => {
+    if (overrideProvider === 'ollama' && ollamaModels.length === 0) {
+      const url = providerConfig?.ollamaBaseUrl || 'http://localhost:11434'
+      listOllamaModels(url)
+    }
+  }, [overrideProvider, ollamaModels.length, providerConfig?.ollamaBaseUrl, listOllamaModels])
+
+  // Sync override dropdown values from domain (never controls expanded state)
+  useEffect(() => {
+    if (!domain) return
+    if (domain.modelProvider) {
+      setOverrideProvider(domain.modelProvider as ProviderName)
+      const known = KNOWN_MODELS[domain.modelProvider as ProviderName] ?? []
+      const allKnown = domain.modelProvider === 'ollama'
+        ? [...new Set([...ollamaModels, ...known])]
+        : known
+      if (domain.modelName && allKnown.includes(domain.modelName)) {
+        setOverrideModel(domain.modelName)
+        setUseCustomOverride(false)
+        setOverrideCustom('')
+      } else if (domain.modelName) {
+        setOverrideModel('__custom__')
+        setUseCustomOverride(true)
+        setOverrideCustom(domain.modelName)
+      }
+    } else {
+      setOverrideProvider('')
+      setOverrideModel('')
+      setOverrideCustom('')
+      setUseCustomOverride(false)
+    }
+  }, [domain?.id, domain?.modelProvider, domain?.modelName, ollamaModels])
+
   if (!domain || !activeDomainId) return <div />
+
+  // Resolve effective provider/model for display
+  const effectiveProvider = (domain.modelProvider ?? providerConfig?.defaultProvider ?? 'anthropic') as ProviderName
+  const effectiveModel = domain.modelName ?? providerConfig?.defaultModel ?? DEFAULT_MODELS[effectiveProvider]
+
+  // --- Per-domain override handlers ---
+
+  async function handleToggleOverride(): Promise<void> {
+    if (!activeDomainId) return
+    if (overrideExpanded) {
+      // Clear override → set both to null
+      await updateDomain(activeDomainId, { modelProvider: null, modelName: null })
+      setOverrideExpanded(false)
+      setOverrideProvider('')
+      setOverrideModel('')
+      setOverrideCustom('')
+      setUseCustomOverride(false)
+    } else {
+      setOverrideExpanded(true)
+      setOverrideProvider(effectiveProvider)
+      setOverrideModel(effectiveModel)
+    }
+  }
+
+  async function handleSaveOverride(): Promise<void> {
+    if (!activeDomainId || !overrideProvider) return
+    const model = useCustomOverride ? overrideCustom.trim() : overrideModel
+    if (!model || model === '__custom__') return
+    await updateDomain(activeDomainId, {
+      modelProvider: overrideProvider,
+      modelName: model,
+    })
+    setOverrideExpanded(false)
+  }
+
+  function handleOverrideProviderChange(p: string): void {
+    const pn = p as ProviderName
+    setOverrideProvider(pn)
+    setOverrideModel(DEFAULT_MODELS[pn])
+    setUseCustomOverride(false)
+    setOverrideCustom('')
+  }
+
+  function handleOverrideModelChange(val: string): void {
+    if (val === '__custom__') {
+      setOverrideModel('__custom__')
+      setUseCustomOverride(true)
+    } else {
+      setOverrideModel(val)
+      setUseCustomOverride(false)
+      setOverrideCustom('')
+    }
+  }
 
   return (
     <div className="flex h-full">
       {/* Main chat area */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {/* API Key bar */}
+        {/* Header bar */}
         <div className="flex items-center gap-2 border-b border-border-subtle px-4 py-2">
-          <span className="text-xs text-text-tertiary">API Key:</span>
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            className="w-64 rounded border border-border bg-surface-2 px-2 py-1 text-xs text-text-primary placeholder-text-tertiary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
-            placeholder="sk-ant-..."
-          />
-          <span className="flex items-center gap-1 text-xs text-text-tertiary">
-            <LockIcon /> encrypted
+          {/* Settings gear */}
+          <button
+            onClick={() => setShowSettings(true)}
+            className="flex h-7 w-7 items-center justify-center rounded text-text-tertiary hover:bg-surface-2 hover:text-text-secondary"
+            title="Settings"
+          >
+            <GearIcon />
+          </button>
+
+          {/* Effective model display */}
+          <span className="text-xs text-text-tertiary">
+            {PROVIDER_LABELS[effectiveProvider]} / {effectiveModel}
           </span>
+          {domain.modelProvider && (
+            <span className="text-[10px] text-accent" title="This domain uses a model override">
+              override
+            </span>
+          )}
 
           {/* Gmail connection + per-domain toggle */}
           <div className="ml-3 flex items-center gap-2 border-l border-border-subtle pl-3">
@@ -251,10 +374,84 @@ export function DomainChatPage(): React.JSX.Element {
           </div>
 
           <div className="flex-1" />
-          <span className="text-sm font-medium text-text-secondary">{domain.name}</span>
+
+          {/* Domain name + model override toggle */}
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-text-secondary">{domain.name}</span>
+            <button
+              onClick={handleToggleOverride}
+              className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                overrideExpanded
+                  ? 'border-accent text-accent'
+                  : 'border-border text-text-tertiary hover:text-text-secondary'
+              }`}
+              title={overrideExpanded ? 'Clear model override (use global default)' : 'Set model override for this domain'}
+            >
+              {overrideExpanded ? 'Clear Override' : 'Model Override'}
+            </button>
+          </div>
         </div>
 
-        <ChatPanel domainId={activeDomainId} apiKey={apiKey} />
+        {/* Per-domain model override panel (collapsible) */}
+        {overrideExpanded && (
+          <div className="flex items-center gap-2 border-b border-border-subtle bg-surface-0 px-4 py-2">
+            <span className="text-xs text-text-tertiary">Override:</span>
+            <select
+              value={overrideProvider}
+              onChange={(e) => handleOverrideProviderChange(e.target.value)}
+              className="rounded border border-border bg-surface-2 px-2 py-1 text-xs text-text-primary"
+            >
+              <option value="anthropic">Anthropic</option>
+              <option value="openai">OpenAI</option>
+              <option value="ollama">Ollama</option>
+            </select>
+            <select
+              value={useCustomOverride ? '__custom__' : overrideModel}
+              onChange={(e) => handleOverrideModelChange(e.target.value)}
+              className="rounded border border-border bg-surface-2 px-2 py-1 text-xs text-text-primary"
+            >
+              {(overrideProvider === 'ollama'
+                ? ollamaModels.length > 0
+                  ? ollamaModels  // Show only installed models when available
+                  : KNOWN_MODELS.ollama
+                : KNOWN_MODELS[overrideProvider as ProviderName] ?? []
+              ).map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+              <option value="__custom__">Custom...</option>
+            </select>
+            {useCustomOverride && (
+              <input
+                type="text"
+                value={overrideCustom}
+                onChange={(e) => setOverrideCustom(e.target.value)}
+                className="w-40 rounded border border-border bg-surface-2 px-2 py-1 text-xs text-text-primary"
+                placeholder="model-id"
+                maxLength={128}
+              />
+            )}
+            <button
+              onClick={handleSaveOverride}
+              disabled={!overrideProvider || (!useCustomOverride && !overrideModel) || (useCustomOverride && !overrideCustom.trim())}
+              className="rounded bg-accent px-2.5 py-1 text-xs text-white hover:bg-accent-hover disabled:opacity-50"
+            >
+              Save
+            </button>
+            <label className="flex items-center gap-1 text-xs text-text-tertiary cursor-pointer ml-2" title="Force tool use attempt even when model capability is uncertain">
+              <input
+                type="checkbox"
+                checked={domain.forceToolAttempt}
+                onChange={async () => {
+                  await updateDomain(activeDomainId, { forceToolAttempt: !domain.forceToolAttempt })
+                }}
+                className="h-3 w-3 rounded border-border accent-accent"
+              />
+              Force tools
+            </label>
+          </div>
+        )}
+
+        <ChatPanel domainId={activeDomainId} />
       </div>
 
       {/* Resize divider — hidden when collapsed */}
@@ -360,6 +557,9 @@ export function DomainChatPage(): React.JSX.Element {
           </div>
         )}
       </div>
+
+      {/* Settings modal */}
+      {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
     </div>
   )
 }

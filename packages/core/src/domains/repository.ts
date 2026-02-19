@@ -14,13 +14,37 @@ interface DomainRow {
   identity: string
   escalation_triggers: string
   allow_gmail: number
+  model_provider: string | null
+  model_name: string | null
+  force_tool_attempt: number
   created_at: string
   updated_at: string
 }
 
-const DOMAIN_COLUMNS = 'id, name, description, kb_path, identity, escalation_triggers, allow_gmail, created_at, updated_at'
+const DOMAIN_COLUMNS = 'id, name, description, kb_path, identity, escalation_triggers, allow_gmail, model_provider, model_name, force_tool_attempt, created_at, updated_at'
+
+const DEFAULT_MODELS: Record<string, string> = {
+  anthropic: 'claude-sonnet-4-20250514',
+  openai: 'gpt-4o',
+  ollama: 'llama3.2',
+}
 
 function rowToDomain(row: DomainRow): Domain {
+  let modelProvider = row.model_provider
+  let modelName = row.model_name
+
+  // D21 repository-level defense: if provider set but name missing, fill default
+  if (modelProvider && !modelName) {
+    modelName = DEFAULT_MODELS[modelProvider] ?? null
+  }
+
+  // D21 repository-level defense: if name set but provider missing, coerce both to null
+  if (modelName && !modelProvider) {
+    console.warn(`[DomainRepository] Domain ${row.id}: model_name set without model_provider — coercing both to null`)
+    modelProvider = null
+    modelName = null
+  }
+
   return {
     id: row.id,
     name: row.name,
@@ -29,6 +53,9 @@ function rowToDomain(row: DomainRow): Domain {
     identity: row.identity ?? '',
     escalationTriggers: row.escalation_triggers ?? '',
     allowGmail: row.allow_gmail === 1,
+    modelProvider: modelProvider as Domain['modelProvider'],
+    modelName: modelName,
+    forceToolAttempt: row.force_tool_attempt === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -49,7 +76,7 @@ export class DomainRepository {
     try {
       this.db
         .prepare(
-          'INSERT INTO domains (id, name, description, kb_path, identity, escalation_triggers, allow_gmail, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO domains (id, name, description, kb_path, identity, escalation_triggers, allow_gmail, model_provider, model_name, force_tool_attempt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         )
         .run(
           id,
@@ -59,6 +86,9 @@ export class DomainRepository {
           parsed.data.identity,
           parsed.data.escalationTriggers,
           parsed.data.allowGmail ? 1 : 0,
+          parsed.data.modelProvider ?? null,
+          parsed.data.modelName ?? null,
+          parsed.data.forceToolAttempt ? 1 : 0,
           now,
           now,
         )
@@ -71,6 +101,9 @@ export class DomainRepository {
         identity: parsed.data.identity,
         escalationTriggers: parsed.data.escalationTriggers,
         allowGmail: parsed.data.allowGmail,
+        modelProvider: parsed.data.modelProvider ?? null,
+        modelName: parsed.data.modelName ?? null,
+        forceToolAttempt: parsed.data.forceToolAttempt ?? false,
         createdAt: now,
         updatedAt: now,
       })
@@ -118,9 +151,21 @@ export class DomainRepository {
     try {
       this.db
         .prepare(
-          'UPDATE domains SET name = ?, description = ?, kb_path = ?, identity = ?, escalation_triggers = ?, allow_gmail = ?, updated_at = ? WHERE id = ?',
+          'UPDATE domains SET name = ?, description = ?, kb_path = ?, identity = ?, escalation_triggers = ?, allow_gmail = ?, model_provider = ?, model_name = ?, force_tool_attempt = ?, updated_at = ? WHERE id = ?',
         )
-        .run(updated.name, updated.description, updated.kbPath, updated.identity, updated.escalationTriggers, updated.allowGmail ? 1 : 0, now, id)
+        .run(
+          updated.name,
+          updated.description,
+          updated.kbPath,
+          updated.identity,
+          updated.escalationTriggers,
+          updated.allowGmail ? 1 : 0,
+          updated.modelProvider ?? null,
+          updated.modelName ?? null,
+          updated.forceToolAttempt ? 1 : 0,
+          now,
+          id,
+        )
 
       return Ok(updated)
     } catch (e) {

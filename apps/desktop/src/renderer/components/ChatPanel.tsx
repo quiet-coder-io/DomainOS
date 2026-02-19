@@ -7,7 +7,6 @@ import { DecisionCard } from './DecisionCard'
 
 interface Props {
   domainId: string
-  apiKey: string
 }
 
 const SendIcon = () => (
@@ -22,7 +21,7 @@ const SpinnerIcon = () => (
   </svg>
 )
 
-export function ChatPanel({ domainId, apiKey }: Props): React.JSX.Element {
+export function ChatPanel({ domainId }: Props): React.JSX.Element {
   const {
     messages,
     isStreaming,
@@ -65,7 +64,7 @@ export function ChatPanel({ domainId, apiKey }: Props): React.JSX.Element {
     if (!text || isStreaming) return
 
     setInput('')
-    await sendMessage(text, domainId, apiKey)
+    await sendMessage(text, domainId)
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>): void {

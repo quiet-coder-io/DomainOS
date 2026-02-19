@@ -7,10 +7,16 @@ export interface DomainOSAPI {
   platform: string
 
   domain: {
-    create(input: { name: string; description?: string; kbPath: string; identity?: string; escalationTriggers?: string; allowGmail?: boolean }): Promise<IPCResult<Domain>>
+    create(input: {
+      name: string; description?: string; kbPath: string; identity?: string; escalationTriggers?: string; allowGmail?: boolean
+      modelProvider?: string | null; modelName?: string | null; forceToolAttempt?: boolean
+    }): Promise<IPCResult<Domain>>
     list(): Promise<IPCResult<Domain[]>>
     get(id: string): Promise<IPCResult<Domain>>
-    update(id: string, input: { name?: string; description?: string; kbPath?: string; identity?: string; escalationTriggers?: string; allowGmail?: boolean }): Promise<IPCResult<Domain>>
+    update(id: string, input: {
+      name?: string; description?: string; kbPath?: string; identity?: string; escalationTriggers?: string; allowGmail?: boolean
+      modelProvider?: string | null; modelName?: string | null; forceToolAttempt?: boolean
+    }): Promise<IPCResult<Domain>>
     delete(id: string): Promise<IPCResult<void>>
   }
 
@@ -32,7 +38,6 @@ export interface DomainOSAPI {
     send(payload: {
       domainId: string
       messages: Array<{ role: 'user' | 'assistant'; content: string }>
-      apiKey: string
     }): Promise<IPCResult<{
       content: string
       proposals: KBUpdateProposal[]
@@ -134,6 +139,18 @@ export interface DomainOSAPI {
   settings: {
     getApiKey(): Promise<IPCResult<string>>
     setApiKey(key: string): Promise<IPCResult<void>>
+    // Multi-provider key management
+    setProviderKey(provider: string, key: string): Promise<IPCResult<void>>
+    clearProviderKey(provider: string): Promise<IPCResult<void>>
+    getProviderKeysStatus(): Promise<IPCResult<ProviderKeysStatus>>
+    // Provider config (no secrets)
+    getProviderConfig(): Promise<IPCResult<ProviderConfig>>
+    setProviderConfig(config: ProviderConfig): Promise<IPCResult<void>>
+    // Ollama
+    listOllamaModels(baseUrl?: string): Promise<IPCResult<string[]>>
+    testOllama(baseUrl?: string): Promise<IPCResult<boolean>>
+    // Tool capability probe
+    testTools(provider: string, model: string): Promise<IPCResult<ToolTestResult>>
   }
 }
 
@@ -152,6 +169,9 @@ export interface Domain {
   identity: string
   escalationTriggers: string
   allowGmail: boolean
+  modelProvider: string | null
+  modelName: string | null
+  forceToolAttempt: boolean
   createdAt: string
   updatedAt: string
 }
@@ -316,4 +336,30 @@ export interface Decision {
   linkedFiles: string[]
   createdAt: string
   updatedAt: string
+}
+
+// ── Multi-provider types ──
+
+export interface ProviderKeyStatus {
+  hasKey: boolean
+  last4?: string
+  note?: string
+}
+
+export interface ProviderKeysStatus {
+  anthropic: ProviderKeyStatus
+  openai: ProviderKeyStatus
+  ollama: ProviderKeyStatus
+}
+
+export interface ProviderConfig {
+  version: number
+  defaultProvider: string
+  defaultModel: string
+  ollamaBaseUrl: string
+}
+
+export interface ToolTestResult {
+  status: 'supported' | 'not_observed' | 'not_supported'
+  message: string
 }

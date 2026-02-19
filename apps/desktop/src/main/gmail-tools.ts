@@ -3,22 +3,24 @@
  *
  * Defines the two tools (gmail_search, gmail_read) and validates/executes
  * them against the GmailClient. All errors are returned as strings (never thrown)
- * to ensure tool_result blocks are always emitted.
+ * to ensure tool results are always emitted.
+ *
+ * Uses provider-agnostic ToolDefinition type — no Anthropic import needed.
  */
 
-import type Anthropic from '@anthropic-ai/sdk'
 import type { GmailClient } from '@domain-os/integrations'
+import type { ToolDefinition } from '@domain-os/core'
 
 /** Maximum size for any tool result string (prevents context blowup). */
 const MAX_RESULT_SIZE = 12_000
 
-export const GMAIL_TOOLS: Anthropic.Messages.Tool[] = [
+export const GMAIL_TOOLS: ToolDefinition[] = [
   {
     name: 'gmail_search',
     description:
       'Search Gmail messages. Returns subject, sender, date, snippet, and message ID for each result.',
-    input_schema: {
-      type: 'object' as const,
+    inputSchema: {
+      type: 'object',
       properties: {
         query: {
           type: 'string',
@@ -37,8 +39,8 @@ export const GMAIL_TOOLS: Anthropic.Messages.Tool[] = [
     name: 'gmail_read',
     description:
       'Read the full content of a Gmail message by ID (from gmail_search results).',
-    input_schema: {
-      type: 'object' as const,
+    inputSchema: {
+      type: 'object',
       properties: {
         message_id: {
           type: 'string',

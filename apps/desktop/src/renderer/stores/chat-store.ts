@@ -57,7 +57,7 @@ interface ChatState {
   isSending: boolean
 
   switchDomain(domainId: string, domainName: string): void
-  sendMessage(content: string, domainId: string, apiKey: string): Promise<void>
+  sendMessage(content: string, domainId: string): Promise<void>
   applyProposal(domainId: string, id: string): Promise<void>
   dismissProposal(id: string): void
   editProposal(id: string, newContent: string): void
@@ -152,7 +152,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     })
   },
 
-  async sendMessage(content, domainId, apiKey) {
+  async sendMessage(content, domainId) {
     // Send guard: prevent double-sends
     if (get().isSending) return
 
@@ -188,7 +188,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const result = await window.domainOS.chat.send({
         domainId,
         messages: currentMessages.filter((m) => m.role !== 'system') as Array<{ role: 'user' | 'assistant'; content: string }>,
-        apiKey,
       })
 
       if (result.ok && result.value) {
