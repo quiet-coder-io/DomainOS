@@ -400,7 +400,7 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
             return { ok: true, value: { content: 'Gmail credentials appear to be invalid or expired. Please reconnect Gmail in the settings bar above.', proposals: [], rejectedProposals: [], stopBlocks: [], gapFlags: [], decisions: [] } }
           }
 
-          const toolsHint = '\n\n## Available Tools\nYou have access to Gmail search and read tools. Use gmail_search to find messages and gmail_read for full content. Always use the tools — do not assume email content. Only use Gmail tools when the user\'s request clearly requires email access; otherwise answer normally.'
+          const toolsHint = '\n\n## Gmail Access\nYou have tools available to search and read the user\'s Gmail. When the user\'s request involves email, use the provided tool functions to retrieve real data — never fabricate or assume email content. If the request does not involve email, respond normally without using tools.'
 
           const result = await runToolLoop({
             provider: provider as ToolCapableProvider,
