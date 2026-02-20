@@ -76,7 +76,7 @@ export function DomainChatPage(): React.JSX.Element {
     const raw = localStorage.getItem('domainOS:sidebarWidth')
     const n = raw ? Number(raw) : NaN
     if (!Number.isFinite(n)) return 288
-    return Math.round(Math.max(200, Math.min(n, window.innerWidth * 0.5)))
+    return Math.round(Math.max(200, Math.min(n, window.innerWidth - 580)))
   })
   const isDragging = useRef(false)
   const sidebarWidthRef = useRef(sidebarWidth)
@@ -123,7 +123,7 @@ export function DomainChatPage(): React.JSX.Element {
   useEffect(() => {
     const move = (e: PointerEvent) => {
       if (!isDragging.current) return
-      const w = Math.round(Math.max(200, Math.min(window.innerWidth - e.clientX, window.innerWidth * 0.5)))
+      const w = Math.round(Math.max(200, Math.min(window.innerWidth - e.clientX, window.innerWidth - 580)))
       setSidebarWidth(w)
     }
     const up = () => {
@@ -151,7 +151,7 @@ export function DomainChatPage(): React.JSX.Element {
     const onResize = () => {
       if (rightCollapsedRef.current) return
       setSidebarWidth(prev => {
-        const clamped = Math.round(Math.max(200, Math.min(prev, window.innerWidth * 0.5)))
+        const clamped = Math.round(Math.max(200, Math.min(prev, window.innerWidth - 580)))
         if (clamped !== prev) localStorage.setItem('domainOS:sidebarWidth', String(clamped))
         return clamped
       })

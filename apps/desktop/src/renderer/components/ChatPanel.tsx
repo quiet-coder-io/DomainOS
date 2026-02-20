@@ -191,12 +191,12 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
       </div>
 
       {/* Input */}
-      <div className="border-t border-border-subtle p-4">
-        <div className="flex gap-2">
+      <div className="border-t border-border-subtle px-4 py-2">
+        <div className="mb-1.5 flex gap-2">
           <button
             onClick={clearMessages}
             disabled={isStreaming || messages.filter((m) => m.role !== 'system').length === 0}
-            className="self-end rounded border border-border px-2 py-2 text-xs text-text-tertiary hover:bg-surface-2 hover:text-text-secondary disabled:opacity-30"
+            className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-surface-2 hover:text-text-primary disabled:opacity-40"
             title="Clear chat history"
           >
             Clear
@@ -204,17 +204,19 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
           <button
             onClick={handleExtractAll}
             disabled={isStreaming || isExtracting || !hasAssistantMessages}
-            className="flex items-center gap-1 self-end rounded border border-border px-2 py-2 text-xs text-text-tertiary hover:bg-surface-2 hover:text-text-secondary disabled:opacity-30"
+            className="flex items-center gap-1 rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-surface-2 hover:text-text-primary disabled:opacity-40"
             title="Extract KB updates from last 10 messages"
           >
             {isExtracting ? <SpinnerIcon /> : null}
             Update All
           </button>
+        </div>
+        <div className="flex gap-2">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="flex-1 resize-none rounded border border-border bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder-text-tertiary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
+            className="flex-1 min-w-0 resize-none rounded border border-border bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder-text-tertiary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
             rows={2}
             placeholder="Type a message... (Enter to send, Shift+Enter for newline)"
             disabled={isStreaming}
@@ -222,7 +224,7 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
           <button
             onClick={handleSend}
             disabled={isStreaming || !input.trim()}
-            className="flex items-center gap-1.5 self-end rounded bg-accent px-4 py-2 text-sm text-white hover:bg-accent-hover disabled:opacity-50"
+            className="flex items-center gap-1.5 self-end rounded bg-accent px-3 py-2 text-sm text-white hover:bg-accent-hover disabled:opacity-50"
           >
             <SendIcon />
             Send
