@@ -59,25 +59,24 @@ This loop validates the core value prop: domain-scoped AI that reads and writes 
 
 ### Completed beyond v0.1
 - **Multi-provider LLM support** — Anthropic, OpenAI, and Ollama (local) with per-domain model selection
-- **Cross-domain features** — sibling domain relationships
+- **Cross-domain features** — directed domain relationships with dependency types (blocks, depends_on, informs, parallel, monitor_only) + sibling relationships
+- **Portfolio health briefing** — computed health scoring, cross-domain alerts, LLM-powered analysis with streaming, snapshot hashing for stale detection
 - **Browser ingestion pipeline** — Chrome extension → localhost intake server → AI classification
+- **KB file watching** — filesystem monitoring with debounced auto-scan on domain switch
 
 ### Out of scope (future)
 - Protocol marketplace/sharing
-- Auto-sync or real-time file watching
 
-## Post-v0.1 Roadmap
+## Post-v0.1 Completed Features
 
-### Browser-to-App Ingestion Pipeline
-Inspired by a prior project's Gmail Extension Pipeline. A Chrome Extension with a "Send to DomainOS" button that extracts content from web pages (starting with Gmail) and routes it to the desktop app for domain classification and KB ingestion.
+### Browser-to-App Ingestion Pipeline (Completed)
+Chrome Extension → localhost HTTP listener (Electron main process, token-authenticated) → AI domain classifier → user confirms classification → KB ingestion.
 
-**Architecture:** Chrome Extension → localhost HTTP listener (Electron main process) → domain classifier → KB update proposal. Unlike the prior project's approach (separate relay server + temp files + CLI launch), DomainOS can handle this natively — the Electron main process already runs Node.js and can accept localhost requests directly.
+### Portfolio Health Briefing (Completed)
+Computed dashboard: per-domain health scoring (KB staleness × tiered importance, open gap flags, dependency status), cross-domain alerts (stale/blocked domain impacting dependents), snapshot hashing. LLM interpretive layer: streams structured analysis (alerts, prioritized actions, monitors) from health snapshot + KB digests.
 
-**Design considerations:**
-- Localhost HTTP listener in main process (token-authenticated, localhost-only)
-- Intake classifier in `@domain-os/core/agents` alongside the chat agent
-- Domain routing UI in renderer (user confirms classification before ingestion)
-- Structured extraction with excerpt/full modes and content-length guards
+### Cross-Domain Relationships (Completed)
+Directed relationships with typed dependencies (`blocks`, `depends_on`, `informs`, `parallel`, `monitor_only`). Supports reciprocal relationships with different types per direction. Powers cross-domain alerts in portfolio health.
 
 ## Key Files Reference
 
@@ -88,15 +87,19 @@ Inspired by a prior project's Gmail Extension Pipeline. A Chrome Extension with 
 | `src/domains/` | Domain CRUD, config schema (incl. `allowGmail`, `modelProvider`, `modelName`, `forceToolAttempt`) |
 | `src/domains/schemas.ts` | Zod schemas for domain create/update with per-domain LLM overrides |
 | `src/domains/repository.ts` | SQLite CRUD for domains, `DOMAIN_COLUMNS`, `rowToDomain()` |
+| `src/domains/relationships.ts` | `DomainRelationshipRepository` — directed relationships with `DependencyType` (blocks/depends_on/informs/parallel/monitor_only), reciprocation, `RelationshipView` |
 | `src/kb/` | KB file indexing, digest generation, tiered importance |
 | `src/protocols/` | Protocol parsing and composition |
+| `src/briefing/portfolio-health.ts` | `computePortfolioHealth()`, `DomainStatus`, `DomainHealth`, `StaleSummary`, `CrossDomainAlert`, snapshot hashing |
+| `src/briefing/prompt-builder.ts` | `buildBriefingPrompt()`, `projectPortfolioHealthForLLM()`, token budget compression, `redactForLLM()` |
+| `src/briefing/output-parser.ts` | `parseBriefingAnalysis()` — multiline-tolerant fence block parser for alerts/actions/monitors with diagnostics |
 | `src/agents/provider.ts` | **Authoritative LLM contract**: `LLMProvider`, `ToolCapableProvider`, `ToolUseMessage` discriminated union, `ToolUseResponse`, `ToolsNotSupportedError`, tool capability cache (4-state), `shouldUseTools()` routing |
 | `src/agents/anthropic-provider.ts` | Anthropic (Claude) implementation — streaming chat + tool-use via normalized interface |
 | `src/agents/openai-provider.ts` | OpenAI (GPT-4o, o3-mini) implementation — streaming chat + tool-use; base class for Ollama |
 | `src/agents/ollama-provider.ts` | Ollama (local LLMs) — extends OpenAI provider with custom baseURL + native `/api/tags` for model listing |
 | `src/agents/provider-factory.ts` | `createProvider()` factory, `KNOWN_MODELS`, `DEFAULT_MODELS`, `ProviderName` type |
 | `src/agents/prompt-builder.ts` | System prompt construction from domain config + KB digest + protocols |
-| `src/storage/` | SQLite schema, migrations (v8: per-domain model override), queries |
+| `src/storage/` | SQLite schema, migrations (v1–v9), queries. v8: per-domain model override. v9: directed relationships with dependency type |
 | `src/common/` | Result type, shared Zod schemas |
 
 ### Integrations (`packages/integrations/`)
@@ -109,16 +112,19 @@ Inspired by a prior project's Gmail Extension Pipeline. A Chrome Extension with 
 
 | File | Purpose |
 |------|---------|
-| `src/main/ipc-handlers.ts` | IPC handlers: `chat:send`, `settings:set-provider-key`, `settings:get-provider-keys-status`, `settings:test-tools`, `settings:list-ollama-models`, etc. |
+| `src/main/ipc-handlers.ts` | 52 IPC handlers: domains, KB, chat, briefing, intake, protocols, sessions, relationships, gap flags, decisions, audit, Gmail, settings |
 | `src/main/tool-loop.ts` | **Provider-agnostic** tool-use loop — works with Anthropic, OpenAI, Ollama; includes ROWYS Gmail guard, tool output sanitization, transcript validation, size guards (75KB/result, 400KB total), capability cache management |
 | `src/main/gmail-tools.ts` | `GMAIL_TOOLS` as `ToolDefinition[]` (provider-agnostic), input validation, executor |
 | `src/main/gmail-oauth.ts` | OAuth PKCE flow via system browser + loopback |
 | `src/main/gmail-credentials.ts` | Encrypted credential storage (safeStorage) |
-| `src/preload/api.ts` | IPC type contract: `DomainOSAPI`, `ProviderConfig`, `ProviderKeysStatus`, `ToolTestResult` |
+| `src/main/kb-watcher.ts` | Filesystem monitoring for KB directories — `startKBWatcher()`, `stopKBWatcher()`, debounced (500ms), sends `kb:files-changed` to renderer |
+| `src/preload/api.ts` | IPC type contract: `DomainOSAPI`, `ProviderConfig`, `ProviderKeysStatus`, `ToolTestResult`, `PortfolioHealth`, `BriefingAnalysis` |
 | `src/renderer/components/SettingsDialog.tsx` | Multi-provider settings modal (API keys, Ollama connection, model defaults, tool test) |
 | `src/renderer/pages/DomainChatPage.tsx` | Chat page with per-domain model override UI (tri-state: global default / override / clear) |
+| `src/renderer/pages/BriefingPage.tsx` | Portfolio health dashboard + LLM analysis streaming UI with alerts, actions, monitors |
 | `src/renderer/stores/settings-store.ts` | Zustand store for provider keys (boolean+last4), global config, Ollama state |
 | `src/renderer/stores/domain-store.ts` | Zustand store for domains including `modelProvider`, `modelName`, `forceToolAttempt` |
+| `src/renderer/stores/briefing-store.ts` | Zustand store: `fetchHealth()`, `analyze()` with streaming + cancel, snapshot hash stale detection |
 
 ## Multi-Provider LLM Architecture
 
@@ -164,7 +170,7 @@ Key: ${providerName}:${model} (or ${providerName}:${model}:${ollamaBaseUrl} for 
 
 ### Per-Domain Model Override
 
-Database columns (migration v8): `model_provider TEXT`, `model_name TEXT`, `force_tool_attempt INTEGER`
+Database columns (migration v8): `model_provider TEXT`, `model_name TEXT`, `force_tool_attempt INTEGER` (latest migration: v9 — directed relationships)
 - NULL = use global default
 - Override = specific provider + model
 - `forceToolAttempt` = try tools even when cache says `not_observed`
@@ -205,6 +211,11 @@ Decrypted keys cached in-memory after first read. Keys never cross IPC to render
 | `settings:list-ollama-models` | renderer→main | Fetch installed models via `/api/tags` |
 | `settings:test-ollama` | renderer→main | Connection test |
 | `settings:test-tools` | renderer→main | Two-round tool capability probe |
+| `briefing:portfolio-health` | renderer→main | Compute health across all domains |
+| `briefing:analyze` | renderer→main | Stream LLM briefing analysis (with requestId for cancel) |
+| `briefing:analyze-cancel` | renderer→main | Cancel active briefing analysis |
+| `briefing:analysis-chunk` | main→renderer | Streaming chunk event during analysis |
+| `kb:files-changed` | main→renderer | KB watcher detected file changes |
 
 ## Environment Variables
 

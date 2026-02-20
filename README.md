@@ -59,10 +59,19 @@ DomainOS gives each area of your professional life its own AI-powered operating 
 - **Audit trail** — full event log of KB changes, session activity, and agent actions per domain
 - **Session tracking** — monitor active AI sessions with scope, model, and elapsed time
 
+### Portfolio Health Briefing
+
+- **Computed portfolio health** — scores each domain's health based on KB staleness, open gap flags, and cross-domain dependencies; status tiers: active, quiet, stale-risk, blocked
+- **Cross-domain alerts** — automatically detects when a stale or blocked domain affects a dependent domain (e.g., a stale PCA report blocking a refinance closing)
+- **LLM-powered analysis** — streams a briefing narrative from the health snapshot + KB digests, producing structured alerts, prioritized actions, and monitors
+- **Snapshot hashing** — detects when portfolio state has changed since the last analysis, prompting a re-run
+
 ### Cross-Domain
 
-- **Sibling domain relationships** — link related domains so the AI can surface cross-domain context without mixing knowledge bases
+- **Directed domain relationships** — link domains with typed dependencies: `blocks`, `depends_on`, `informs`, `parallel`, `monitor_only`; supports reciprocal relationships with different types per direction
+- **Sibling domain relationships** — lightweight link for related domains so the AI can surface cross-domain context without mixing knowledge bases
 - **Browser-to-app intake pipeline** — Chrome extension with "Send to DomainOS" that extracts web content and routes it to the right domain via AI classification
+- **KB file watching** — automatic filesystem monitoring with debounced re-scan when KB files change on disk
 
 ## Architecture
 
@@ -76,8 +85,9 @@ graph TB
         subgraph Renderer["Renderer Process — React 19 + Tailwind CSS 4"]
             CHAT["Chat Panel"]
             SIDEBAR["Sidebar Panels<br/><small>Gap Flags · Decisions · Audit Log</small>"]
+            BRIEFING["Portfolio Briefing<br/><small>Health · Alerts · Analysis</small>"]
             INTAKE["Intake Panel"]
-            SETTINGS["Domain Settings<br/><small>Protocols · Siblings · KB</small>"]
+            SETTINGS["Domain Settings<br/><small>Protocols · Dependencies · KB</small>"]
         end
 
         IPC["IPC Bridge (contextBridge)"]
@@ -88,6 +98,7 @@ graph TB
                 KB[Knowledge Base]
                 PROTOCOLS[Protocols]
                 AGENTS[Agents]
+                BRIEFMOD["Briefing<br/><small>Health · Alerts</small>"]
                 SESSIONS[Sessions]
                 AUDIT[Audit Trail]
                 GAPFLAGS[Gap Flags]
@@ -193,10 +204,11 @@ domain-os/
 │   │       ├── kb/           # KB indexing, digests, tiering
 │   │       ├── protocols/    # Per-domain and shared protocols
 │   │       ├── agents/       # Multi-provider LLM (Anthropic, OpenAI, Ollama), prompt builder
+│   │       ├── briefing/     # Portfolio health computation, LLM analysis, output parsing
 │   │       ├── sessions/     # Session lifecycle management
 │   │       ├── audit/        # Event audit trail
 │   │       ├── intake/       # Browser intake classification
-│   │       ├── storage/      # SQLite schema and migrations
+│   │       ├── storage/      # SQLite schema and migrations (v1–v9)
 │   │       └── common/       # Result type, shared schemas
 │   └── integrations/         # External service integrations
 ├── apps/
@@ -208,7 +220,7 @@ domain-os/
 │               ├── components/  # Shared UI components
 │               ├── pages/       # Route-level pages
 │               └── stores/      # Zustand state management
-└── extension/                # Chrome extension (intake pipeline)
+└── extensions/               # Chrome extension (intake pipeline)
 ```
 
 ## Security & Privacy
