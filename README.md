@@ -5,6 +5,7 @@
 [![BYOK](https://img.shields.io/badge/AI-bring--your--own--key-orange.svg)](#security--privacy)
 [![Multi-Provider](https://img.shields.io/badge/LLM-Anthropic%20%7C%20OpenAI%20%7C%20Ollama-purple.svg)](#multi-provider-llm-support)
 [![Open Source](https://img.shields.io/badge/open-source-brightgreen.svg)](LICENSE)
+[![Release](https://img.shields.io/badge/release-early--alpha-yellow.svg)](#project-status)
 
 **DomainOS is a local-first AI knowledge management desktop app for managing multiple domains with domain-scoped assistants, RAG-ready knowledge bases, and bring-your-own-key (BYOK) privacy. Choose hosted or local LLM providers per domain, keep your work separated by context, and organize durable domain protocols and files — all on your machine.**
 
@@ -13,6 +14,17 @@
 </p>
 
 ---
+
+## Project Status
+
+> **Early alpha.** Architecture is stabilizing. The API surface may change between commits. Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Why DomainOS?
+
+- **Context separation** — each professional domain gets its own AI assistant, knowledge base, and behavioral protocols. No cross-contamination.
+- **Per-domain model selection** — choose Anthropic, OpenAI, or local Ollama models independently for each domain.
+- **Local-first architecture** — SQLite database, filesystem KB, OS keychain for secrets. Nothing leaves your machine unless you send a chat message.
+- **Privacy by default** — zero telemetry, no cloud backend, bring-your-own-key. Ollama runs entirely on-device.
 
 ## The Problem
 
@@ -171,27 +183,16 @@ flowchart LR
 
 ## Quick Start
 
+**Prerequisites:** Node.js >= 22, npm
+
 ```bash
-# Clone and install
 git clone https://github.com/quiet-coder-io/DomainOS.git
 cd DomainOS
 npm install
-
-# Rebuild native modules for Electron
-npx electron-rebuild -f -w better-sqlite3
-
-# Run in development
 npm run dev
-
-# Type-check all packages
-npm run typecheck
-
-# Run tests
-npm test
-
-# Production build
-npm run build
 ```
+
+No cloud backend required. The app runs entirely on your machine.
 
 ## Project Structure
 
@@ -229,6 +230,12 @@ domain-os/
 - **Bring Your Own Key** — per-provider API keys (Anthropic, OpenAI) are encrypted via Electron `safeStorage`, backed by your OS keychain (macOS Keychain, Windows DPAPI, Linux Secret Service). Ollama requires no API key. Keys never reach the renderer process.
 - **No telemetry** — zero analytics, tracking, or phone-home behavior.
 - **Localhost intake** — the Chrome extension communicates with the desktop app over `127.0.0.1` with token authentication. No external servers.
+
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, development philosophy, PR workflow, and privacy expectations.
+
+Looking for a place to start? Check issues labeled [`good-first-issue`](https://github.com/quiet-coder-io/DomainOS/labels/good-first-issue).
 
 ## License
 

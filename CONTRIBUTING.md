@@ -1,34 +1,28 @@
 # Contributing to DomainOS
 
-## Setup
+Thanks for your interest in DomainOS — the local-first, privacy-respecting AI knowledge management system. Whether you're fixing a typo, improving docs, or building a new feature, contributions are welcome.
 
-```bash
-# Prerequisites: Node.js >= 22
-node --version
+## Getting Started
 
-# Install dependencies
-npm install
+See the [Quick Start](README.md#quick-start) section in the README for setup instructions. Prerequisites: **Node.js >= 22** and **npm**.
 
-# Verify everything works
-npm run typecheck
-npm test
-```
+## Good First Contributions
 
-## Development Workflow
+Look for issues tagged with these labels:
 
-```bash
-# Start the desktop app in dev mode
-npm run dev
+- **`good-first-issue`** — small, well-scoped tasks ideal for new contributors
+- **`documentation`** — docs improvements, examples, and guides
+- **`refactor`** — code cleanup and structural improvements
+- **`help-wanted`** — features or fixes where maintainer guidance is available
 
-# Run tests in watch mode
-cd packages/core && npm run test:watch
+Don't see an issue for your idea? Open one first to discuss the approach before writing code.
 
-# Type-check all packages
-npm run typecheck
+## Development Philosophy
 
-# Build everything
-npm run build
-```
+1. **Local-first** — data stays on the user's machine. No telemetry, no cloud dependencies.
+2. **Core stays framework-agnostic** — `@domain-os/core` has zero React or Electron dependencies. All UI concerns live in `apps/desktop/`.
+3. **Explicit over implicit** — use `Result<T, E>` for fallible operations, Zod for validation, strict TypeScript everywhere.
+4. **Small surface, big leverage** — avoid abstractions until you need them. Three similar lines beat a premature helper.
 
 ## Code Standards
 
@@ -43,7 +37,7 @@ npm run build
 - `packages/core/` — framework-agnostic core library (no React, no Electron). Includes LLM providers (Anthropic, OpenAI, Ollama), domain management, KB indexing, protocols, and storage.
 - `packages/integrations/` — external service integrations (Gmail client, poller, body parser)
 - `apps/desktop/` — Electron + React desktop application. Main process handles IPC, tool-use loop, and credential storage. Renderer is React 19 + Tailwind CSS 4.
-- Core is imported by desktop, never the other way around
+- Core is imported by desktop, never the other way around.
 
 ## LLM Provider Development
 
@@ -57,10 +51,29 @@ When working on provider-related code:
 - Ollama extends OpenAI provider via OpenAI-compatible API at `${base}/v1`
 - The tool-loop in `apps/desktop/src/main/tool-loop.ts` is provider-agnostic — never add provider-specific logic there
 
-## PR Process
+## PR Workflow
 
-1. Create a feature branch from `main`
-2. Make your changes
-3. Ensure `npm run typecheck` and `npm test` pass
-4. Open a PR with a clear description of what and why
-5. One approval required to merge
+1. **Fork and branch** — create a feature branch from `main`.
+2. **Keep PRs focused** — one logical change per PR. Smaller PRs get faster reviews.
+3. **Write a clear description** — explain *what* changed and *why*.
+4. **Pass CI** — ensure `npm run typecheck` and `npm test` pass before requesting review.
+
+## Privacy Expectations
+
+DomainOS is a privacy-first project. All contributions must respect this:
+
+- **No secrets in code** — never commit API keys, tokens, or credentials. Use environment variables or the OS keychain.
+- **No `.env` files** — `.env` is gitignored. Never include it in PRs.
+- **No logs with file paths** — avoid logging absolute filesystem paths that could reveal user directory structure.
+- **Redact screenshots** — if your PR includes screenshots, redact any personal data, file paths, or domain names.
+
+## PR Checklist
+
+Before submitting your PR, verify:
+
+- [ ] `npm run build` succeeds
+- [ ] `npm run typecheck` passes with no errors
+- [ ] `npm test` passes
+- [ ] No secrets, credentials, or `.env` files included
+- [ ] PR description clearly explains the change and motivation
+- [ ] Changes align with the [privacy expectations](#privacy-expectations) above
