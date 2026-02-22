@@ -6,7 +6,7 @@
 [![Multi-Provider](https://img.shields.io/badge/LLM-Anthropic%20%7C%20OpenAI%20%7C%20Ollama-purple.svg)](#multi-provider-llm-support)
 [![Open Source](https://img.shields.io/badge/open-source-brightgreen.svg)](LICENSE)
 
-**A local-first desktop app for managing multiple professional domains with AI assistance. Supports Anthropic, OpenAI, and Ollama (local LLMs) with per-domain model selection.**
+**DomainOS is a local-first AI knowledge management desktop app for managing multiple domains with domain-scoped assistants, RAG-ready knowledge bases, and bring-your-own-key (BYOK) privacy. Choose hosted or local LLM providers per domain, keep your work separated by context, and organize durable domain protocols and files — all on your machine.**
 
 <p align="center">
   <img src="docs/screenshot.png" alt="DomainOS — Domain chat with KB management, portfolio health briefing, Chrome extension intake pipeline, and main dashboard" width="960" />
