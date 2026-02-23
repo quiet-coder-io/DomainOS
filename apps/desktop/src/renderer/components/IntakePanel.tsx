@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useIntakeStore, useDomainStore, useSettingsStore } from '../stores'
+import { useIntakeStore, useDomainStore } from '../stores'
 import type { IntakeItem } from '../../preload/api'
 
 function StatusPill({ status }: { status: IntakeItem['status'] }): React.JSX.Element {
@@ -24,13 +24,11 @@ function ConfidenceBadge({ confidence }: { confidence: number }): React.JSX.Elem
 
 function IntakeItemCard({
   item,
-  apiKey,
   onClassify,
   onConfirm,
   onDismiss,
 }: {
   item: IntakeItem
-  apiKey: string
   onClassify: (id: string) => void
   onConfirm: (id: string, domainId: string) => void
   onDismiss: (id: string) => void
@@ -71,7 +69,7 @@ function IntakeItemCard({
               await onClassify(item.id)
               setClassifying(false)
             }}
-            disabled={!apiKey || classifying}
+            disabled={classifying}
             className="rounded bg-accent px-3 py-1 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50"
           >
             {classifying ? 'Classifying...' : 'Classify'}
@@ -120,7 +118,6 @@ function IntakeItemCard({
 
 export function IntakePanel(): React.JSX.Element {
   const { items, loading, fetchPending, classifyItem, confirmItem, dismissItem } = useIntakeStore()
-  const { apiKey, setApiKey } = useSettingsStore()
 
   useEffect(() => {
     fetchPending()
@@ -133,16 +130,6 @@ export function IntakePanel(): React.JSX.Element {
         <span className="rounded-full bg-accent-muted px-2 py-0.5 text-[10px] font-medium text-accent-text">
           {items.length}
         </span>
-        <div className="ml-auto flex items-center gap-2">
-          <span className="text-xs text-text-tertiary">API Key:</span>
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder="sk-..."
-            className="w-48 rounded border border-border bg-surface-2 px-2 py-1 text-xs text-text-primary placeholder:text-text-tertiary focus:border-accent focus:outline-none"
-          />
-        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
@@ -174,8 +161,7 @@ export function IntakePanel(): React.JSX.Element {
             <IntakeItemCard
               key={item.id}
               item={item}
-              apiKey={apiKey}
-              onClassify={(id) => classifyItem(id, apiKey)}
+              onClassify={(id) => classifyItem(id)}
               onConfirm={confirmItem}
               onDismiss={dismissItem}
             />

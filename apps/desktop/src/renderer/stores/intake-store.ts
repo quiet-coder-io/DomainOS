@@ -6,7 +6,7 @@ interface IntakeState {
   loading: boolean
 
   fetchPending(): Promise<void>
-  classifyItem(id: string, apiKey: string): Promise<ClassifyResult | null>
+  classifyItem(id: string): Promise<ClassifyResult | null>
   confirmItem(id: string, domainId: string): Promise<boolean>
   dismissItem(id: string): Promise<boolean>
   getToken(): Promise<string | null>
@@ -33,15 +33,17 @@ export const useIntakeStore = create<IntakeState>((set, get) => ({
     }
   },
 
-  async classifyItem(id, apiKey) {
+  async classifyItem(id) {
     try {
-      const result = await window.domainOS.intake.classify(id, apiKey)
+      const result = await window.domainOS.intake.classify(id, '')
       if (result.ok && result.value) {
         await get().fetchPending()
         return result.value.classification
       }
+      console.error('[intake] classify failed:', result)
       return null
-    } catch {
+    } catch (err) {
+      console.error('[intake] classify error:', err)
       return null
     }
   },
