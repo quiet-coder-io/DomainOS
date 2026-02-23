@@ -9,6 +9,7 @@ import { SessionIndicator } from '../components/SessionIndicator'
 import { GapFlagPanel } from '../components/GapFlagPanel'
 import { DecisionLogPanel } from '../components/DecisionLogPanel'
 import { AuditLogPanel } from '../components/AuditLogPanel'
+import { AdvisoryPanel } from '../components/AdvisoryPanel'
 import { SettingsDialog } from '../components/SettingsDialog'
 
 const DocumentIcon = () => (
@@ -552,6 +553,7 @@ export function DomainChatPage(): React.JSX.Element {
 
               <GapFlagPanel domainId={activeDomainId} />
               <DecisionLogPanel domainId={activeDomainId} />
+              <AdvisoryPanel domainId={activeDomainId} />
               <AuditLogPanel domainId={activeDomainId} />
             </div>
           </div>

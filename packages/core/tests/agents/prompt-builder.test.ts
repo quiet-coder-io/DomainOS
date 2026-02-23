@@ -235,6 +235,7 @@ describe('buildSystemPrompt', () => {
       '=== ESCALATION TRIGGERS ===',
       '=== SESSION ===',
       '=== KB UPDATE INSTRUCTIONS ===',
+      '=== ADVISORY PROTOCOL ===',
     ]
 
     let lastIndex = -1
@@ -245,7 +246,7 @@ describe('buildSystemPrompt', () => {
     }
 
     // Verify manifest completeness
-    expect(manifest.sections.length).toBe(10)
+    expect(manifest.sections.length).toBe(11)
     expect(manifest.filesIncluded.length).toBe(2)
     expect(manifest.totalTokenEstimate).toBeGreaterThan(0)
   })

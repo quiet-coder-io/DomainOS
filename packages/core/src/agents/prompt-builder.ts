@@ -213,8 +213,56 @@ rationale: <why this was chosen>
 downside: <known tradeoffs>
 revisit_trigger: <when to reconsider>
 linked_files: <comma-separated KB files affected>
-\`\`\``
+confidence: <high|medium|low>
+horizon: <immediate|near_term|strategic>
+reversibility_class: <reversible|irreversible>
+reversibility_notes: <what makes reversal easy or hard>
+category: <strategic|tactical|operational>
+authority: <source_tier> (<authority_confidence>)
+\`\`\`
+
+Quality gates for decisions:
+- confidence: how certain you are (high/medium/low)
+- horizon: time frame (immediate = days, near_term = weeks, strategic = months+)
+- reversibility_class + notes: can this be undone? At what cost?
+- category: strategic (direction), tactical (execution), operational (routine)
+- authority: cite the KB tier or source (structural/status/intelligence/general/user_statement/tool_result/cross_domain) and your confidence in that source (high/medium/low)
+
+Advisory fence blocks — when producing structured strategic output (brainstorms, risk assessments, scenarios, strategic reviews), use this JSON format:
+
+\`\`\`advisory-<type>
+{"schemaVersion":1,"type":"<type>","persist":"no","title":"<4-120 char title>", ...payload fields}
+\`\`\`
+
+Types: brainstorm, risk_assessment, scenario, strategic_review.
+persist: "no" (default, ephemeral) | "yes" (save to Strategic History) | "archive" (save as archived reference).
+Only set persist to "yes" when the user asks to save, or for significant strategic reviews and risk assessments. Casual brainstorming defaults to "no".
+
+Brainstorm payload: topic, options (array of {title, description, pros?, cons?, leverage?, optionality?, risk?, action?}), recommendation, contrarian_view?
+Risk assessment payload: summary, risks (array of {category, description, severity?, likelihood?, mitigation?, impact?}), trend? (improving|stable|worsening), trendConfidence? (low|medium|high)
+Scenario payload: variables (string array), scenarios (array of {name, description, probability?, outcome?, timeline?}), triggers? (string array), leading_indicators? (string array)
+Strategic review payload: posture, highest_leverage_action, trajectory?, tensions? (string array), assumptions_to_check? (string array)`
   addSection('KB Update Instructions', kbInstructions)
+
+  // === ADVISORY MINI-PROTOCOL (always-on) ===
+  const advisoryMiniProtocol = `=== ADVISORY PROTOCOL ===
+Mode classification: Before each response, classify user intent as one of: brainstorm | challenge | review | scenario | general.
+Classification considers conversational context, not just trigger words. Ambiguous defaults to general.
+Emit <!-- advisory_mode: <mode> --> as a hidden comment at the start of your response.
+
+Mode formatting:
+- brainstorm: 3-5 options with pros/cons and a recommendation
+- challenge: weakest link, opposing argument, unstated assumptions, failure modes
+- review: posture assessment, trajectory, highest-leverage action
+- scenario: key variables, 3 scenarios (best/base/worst), triggers
+
+Cross-domain fact labeling: When citing facts from sibling domains via tools, include "(per [DomainName] KB — cross-domain)" in the same sentence. Never state cross-domain facts without attribution.
+
+Proactive insights: Max 1 per user statement, only at decision points. Format as "**Insight:** [content]" — a single inline paragraph, not a section or heading.
+Insight guards:
+- When user intent is "draft" (email/doc/memo): no proactive insight unless explicitly requested.
+- Insight must not introduce new facts — only interpret/reframe existing facts from KB, tool output, or user statements. If referencing numbers, dates, or proper nouns not in current context, include (assumption) label.`
+  addSection('Advisory Mini-Protocol', advisoryMiniProtocol)
 
   const prompt = sections.join('\n\n')
   const totalTokenEstimate = estimateTokens(prompt.length)
