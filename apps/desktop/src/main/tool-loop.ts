@@ -27,9 +27,10 @@ import {
   setToolCapability,
   notObservedCounters,
 } from '@domain-os/core'
-import type { GmailClient } from '@domain-os/integrations'
+import type { GmailClient, GTasksClient } from '@domain-os/integrations'
 import type { WebContents } from 'electron'
 import { executeGmailTool } from './gmail-tools'
+import { executeGTasksTool } from './gtasks-tools'
 
 // ── Constants (D12) ──
 
@@ -63,6 +64,8 @@ export interface ToolUseEvent {
     resultCount?: number
     messageId?: string
     subject?: string
+    taskId?: string
+    taskListTitle?: string
   }
 }
 
@@ -74,7 +77,8 @@ export interface ToolLoopOptions {
   userMessages: Array<{ role: 'user' | 'assistant'; content: string }>
   systemPrompt: string
   tools: ToolDefinition[]
-  gmailClient: GmailClient
+  gmailClient?: GmailClient
+  gtasksClient?: GTasksClient
   eventSender: WebContents
   maxRounds?: number
   ollamaBaseUrl?: string
@@ -106,6 +110,7 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
     systemPrompt,
     tools,
     gmailClient,
+    gtasksClient,
     eventSender,
     maxRounds = 5,
     ollamaBaseUrl,
@@ -234,53 +239,69 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
         allToolCalls.push({ toolUseId: call.id, name: call.name, input })
 
         // Send "running" IPC event
+        const runningDetail: ToolUseEvent['detail'] = {}
+        if (call.name === 'gmail_search') {
+          runningDetail.query = typeof input.query === 'string' ? input.query : undefined
+        } else if (call.name === 'gmail_read') {
+          runningDetail.messageId = typeof input.message_id === 'string' ? input.message_id : undefined
+        } else if (call.name === 'gtasks_search') {
+          runningDetail.taskListTitle = typeof input.list_name === 'string' ? input.list_name : undefined
+        } else if (call.name === 'gtasks_read' || call.name === 'gtasks_complete' || call.name === 'gtasks_update' || call.name === 'gtasks_delete') {
+          runningDetail.taskId = typeof input.task_id === 'string' ? input.task_id : undefined
+        }
+
         const runningEvent: ToolUseEvent = {
           toolName: call.name,
           toolUseId: call.id,
           status: 'running',
           domainId,
           roundIndex: round - 1,
-          detail: call.name === 'gmail_search'
-            ? { query: typeof input.query === 'string' ? input.query : undefined }
-            : { messageId: typeof input.message_id === 'string' ? input.message_id : undefined },
+          detail: runningDetail,
         }
         eventSender.send('chat:tool-use', runningEvent)
 
         const toolStart = Date.now()
         let result: string
+        const errorPrefix = call.name.startsWith('gtasks_') ? 'GTASKS_ERROR' : 'GMAIL_ERROR'
 
         try {
-          // ROWYS guard for gmail_read (D8, provider-agnostic)
-          if (call.name === 'gmail_read') {
-            const msgId = typeof input.message_id === 'string' ? input.message_id : ''
-            if (!guard.allowedMessageIds.has(msgId)) {
-              result = 'GMAIL_ERROR: access — Message ID not found in recent search results. Run gmail_search first.'
+          if (call.name.startsWith('gmail_') && gmailClient) {
+            // ROWYS guard for gmail_read (D8, provider-agnostic)
+            if (call.name === 'gmail_read') {
+              const msgId = typeof input.message_id === 'string' ? input.message_id : ''
+              if (!guard.allowedMessageIds.has(msgId)) {
+                result = 'GMAIL_ERROR: access — Message ID not found in recent search results. Run gmail_search first.'
+              } else {
+                result = await executeGmailTool(gmailClient, call.name, input)
+              }
             } else {
               result = await executeGmailTool(gmailClient, call.name, input)
             }
-          } else {
-            result = await executeGmailTool(gmailClient, call.name, input)
-          }
 
-          // Populate ROWYS guard from search results
-          if (call.name === 'gmail_search' && !result.startsWith('GMAIL_ERROR:')) {
-            const jsonMatch = result.match(/--- JSON START ---\n([\s\S]*?)\n--- JSON END ---/)
-            if (jsonMatch) {
-              try {
-                const parsed = JSON.parse(jsonMatch[1]) as Array<{ messageId: string; threadId: string }>
-                for (const item of parsed) {
-                  guard.allowedMessageIds.add(item.messageId)
-                  guard.allowedThreadIds.add(item.threadId)
+            // Populate ROWYS guard from search results
+            if (call.name === 'gmail_search' && !result.startsWith('GMAIL_ERROR:')) {
+              const jsonMatch = result.match(/--- JSON START ---\n([\s\S]*?)\n--- JSON END ---/)
+              if (jsonMatch) {
+                try {
+                  const parsed = JSON.parse(jsonMatch[1]) as Array<{ messageId: string; threadId: string }>
+                  for (const item of parsed) {
+                    guard.allowedMessageIds.add(item.messageId)
+                    guard.allowedThreadIds.add(item.threadId)
+                  }
+                } catch {
+                  // JSON parse fail — guard stays restrictive
                 }
-              } catch {
-                // JSON parse fail — guard stays restrictive
               }
             }
+          } else if (call.name.startsWith('gtasks_') && gtasksClient) {
+            result = await executeGTasksTool(gtasksClient, call.name, input)
+          } else {
+            result = `${errorPrefix}: executor — No client available for tool ${call.name}`
           }
 
           toolExecutionSucceeded = true
         } catch (e) {
-          result = `GMAIL_ERROR: executor — ${e instanceof Error ? e.message : String(e)}`
+          result = `${errorPrefix}: executor — ${e instanceof Error ? e.message : String(e)}`
         }
 
         // D18: sanitize tool output (strip secrets/auth headers)
@@ -292,7 +313,8 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
         }
 
         const toolLatency = Date.now() - toolStart
-        console.info(`[tool-loop] tool_execution toolName=${call.name} toolCallId=${call.id} success=${!result.startsWith('GMAIL_ERROR:')} latencyMs=${toolLatency}`)
+        const isError = result.startsWith('GMAIL_ERROR:') || result.startsWith('GTASKS_ERROR:')
+        console.info(`[tool-loop] tool_execution toolName=${call.name} toolCallId=${call.id} success=${!isError} latencyMs=${toolLatency}`)
 
         messages.push({
           role: 'tool',
@@ -309,6 +331,14 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
         } else if (call.name === 'gmail_read') {
           const subjectMatch = result.match(/^Subject: (.+)$/m)
           doneDetail.subject = subjectMatch ? subjectMatch[1] : '(no subject)'
+        } else if (call.name === 'gtasks_search') {
+          const countMatch = result.match(/GTASKS_SEARCH_RESULTS \(n=(\d+)\)/)
+          doneDetail.resultCount = countMatch ? parseInt(countMatch[1], 10) : 0
+        } else if (call.name === 'gtasks_read' || call.name === 'gtasks_complete' || call.name === 'gtasks_update') {
+          const titleMatch = result.match(/^Title: (.+)$/m)
+          doneDetail.taskListTitle = titleMatch ? titleMatch[1] : '(no title)'
+        } else if (call.name === 'gtasks_delete') {
+          doneDetail.taskListTitle = '(deleted)'
         }
 
         const doneEvent: ToolUseEvent = {

@@ -60,8 +60,11 @@ import { startKBWatcher, stopKBWatcher } from './kb-watcher'
 import { loadGmailCredentials, checkGmailConnected } from './gmail-credentials'
 import { startGmailOAuth, disconnectGmail } from './gmail-oauth'
 import { GMAIL_TOOLS } from './gmail-tools'
+import { loadGTasksCredentials, checkGTasksConnected } from './gtasks-credentials'
+import { startGTasksOAuth, disconnectGTasks } from './gtasks-oauth'
+import { GTASKS_TOOLS } from './gtasks-tools'
 import { runToolLoop } from './tool-loop'
-import { GmailClient } from '@domain-os/integrations'
+import { GmailClient, GTasksClient } from '@domain-os/integrations'
 
 // ── Provider config types (D20) ──
 
@@ -412,42 +415,84 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
 
         let fullResponse = ''
 
-        // --- Gmail tool-use branch (uses unified shouldUseTools routing) ---
+        // --- Tool-use branch (Gmail + GTasks, uses unified shouldUseTools routing) ---
         const gmailCreds = await loadGmailCredentials()
         const gmailEnabled = gmailCreds && domain.value.allowGmail
+        const gtasksCreds = await loadGTasksCredentials()
+        const gtasksEnabled = !!gtasksCreds // global, no per-domain flag
 
-        if (gmailEnabled && shouldUseTools(provider, resolvedProvider, resolvedModel, domain.value, ollamaBaseUrl)) {
-          const gmailClient = new GmailClient({
-            clientId: gmailCreds.clientId,
-            clientSecret: gmailCreds.clientSecret,
-            refreshToken: gmailCreds.refreshToken,
-          })
+        const toolsAvailable = gmailEnabled || gtasksEnabled
 
-          // Preflight: validate credentials before entering tool loop
-          const profile = await gmailClient.getProfile()
-          if (!profile.ok) {
-            event.sender.send('chat:stream-chunk', 'Gmail credentials appear to be invalid or expired. Please reconnect Gmail in the settings bar above.')
-            event.sender.send('chat:stream-done')
-            return { ok: true, value: { content: 'Gmail credentials appear to be invalid or expired. Please reconnect Gmail in the settings bar above.', proposals: [], rejectedProposals: [], stopBlocks: [], gapFlags: [], decisions: [] } }
+        if (toolsAvailable && shouldUseTools(provider, resolvedProvider, resolvedModel, domain.value, ollamaBaseUrl)) {
+          const tools: Array<{ name: string; description: string; inputSchema: Record<string, unknown> }> = []
+          let gmailClient: GmailClient | undefined
+          let gtasksClient: GTasksClient | undefined
+          let toolsHint = ''
+
+          if (gmailEnabled) {
+            gmailClient = new GmailClient({
+              clientId: gmailCreds.clientId,
+              clientSecret: gmailCreds.clientSecret,
+              refreshToken: gmailCreds.refreshToken,
+            })
+
+            // Preflight: validate credentials before entering tool loop
+            const profile = await gmailClient.getProfile()
+            if (!profile.ok) {
+              event.sender.send('chat:stream-chunk', 'Gmail credentials appear to be invalid or expired. Please reconnect Gmail in the settings bar above.')
+              event.sender.send('chat:stream-done')
+              return { ok: true, value: { content: 'Gmail credentials appear to be invalid or expired. Please reconnect Gmail in the settings bar above.', proposals: [], rejectedProposals: [], stopBlocks: [], gapFlags: [], decisions: [] } }
+            }
+
+            tools.push(...GMAIL_TOOLS)
+            toolsHint += '\n\n## Gmail Access\nYou have tools available to search and read the user\'s Gmail. When the user\'s request involves email, use the provided tool functions to retrieve real data — never fabricate or assume email content. If the request does not involve email, respond normally without using tools.'
           }
 
-          const toolsHint = '\n\n## Gmail Access\nYou have tools available to search and read the user\'s Gmail. When the user\'s request involves email, use the provided tool functions to retrieve real data — never fabricate or assume email content. If the request does not involve email, respond normally without using tools.'
+          if (gtasksEnabled) {
+            gtasksClient = new GTasksClient({
+              clientId: gtasksCreds.clientId,
+              clientSecret: gtasksCreds.clientSecret,
+              refreshToken: gtasksCreds.refreshToken,
+            })
 
-          const result = await runToolLoop({
-            provider: provider as ToolCapableProvider,
-            providerName: resolvedProvider,
-            model: resolvedModel,
-            domainId: payload.domainId,
-            userMessages: payload.messages,
-            systemPrompt: systemPrompt + toolsHint,
-            tools: GMAIL_TOOLS,
-            gmailClient,
-            eventSender: event.sender,
-            ollamaBaseUrl: resolvedProvider === 'ollama' ? ollamaBaseUrl : undefined,
-          })
+            // Preflight: validate GTasks credentials
+            const profile = await gtasksClient.getProfile()
+            if (!profile.ok) {
+              // Non-fatal: skip GTasks tools but continue with other tools
+              console.warn('[chat:send] GTasks credentials invalid, skipping GTasks tools')
+              gtasksClient = undefined
+            } else {
+              tools.push(...GTASKS_TOOLS)
+              toolsHint += '\n\n## Google Tasks Access\nYou have tools available to search, read, complete, update, and delete the user\'s Google Tasks. When the user\'s request involves tasks or to-do items, use the provided tool functions to retrieve and modify real data — never fabricate or assume task content. If the request does not involve tasks, respond normally without using tools.'
+            }
+          }
 
-          fullResponse = result.fullResponse
-        } else {
+          if (tools.length === 0) {
+            // Both preflights failed — fall through to streaming
+            gmailClient = undefined
+            gtasksClient = undefined
+          }
+
+          if (tools.length > 0) {
+            const result = await runToolLoop({
+              provider: provider as ToolCapableProvider,
+              providerName: resolvedProvider,
+              model: resolvedModel,
+              domainId: payload.domainId,
+              userMessages: payload.messages,
+              systemPrompt: systemPrompt + toolsHint,
+              tools,
+              gmailClient,
+              gtasksClient,
+              eventSender: event.sender,
+              ollamaBaseUrl: resolvedProvider === 'ollama' ? ollamaBaseUrl : undefined,
+            })
+
+            fullResponse = result.fullResponse
+          }
+        }
+
+        if (!fullResponse) {
           // --- Streaming path (all providers) ---
           for await (const chunk of provider.chat(payload.messages, systemPrompt)) {
             fullResponse += chunk
@@ -922,7 +967,36 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
   // --- Briefing ---
 
   ipcMain.handle('briefing:portfolio-health', async () => {
-    return computePortfolioHealth(db)
+    const healthResult = await computePortfolioHealth(db)
+    if (!healthResult.ok) return healthResult
+
+    let globalOverdueGTasks = 0
+    let overdueGTasksList: Array<{ id: string; taskListId: string; taskListTitle: string; title: string; due: string; notes: string }> = []
+    const gtasksCreds = await loadGTasksCredentials()
+    if (gtasksCreds) {
+      try {
+        const client = new GTasksClient({
+          clientId: gtasksCreds.clientId,
+          clientSecret: gtasksCreds.clientSecret,
+          refreshToken: gtasksCreds.refreshToken,
+        })
+        const overdueResults = await client.getOverdue()
+        globalOverdueGTasks = overdueResults.length
+        overdueGTasksList = overdueResults.map((t) => ({
+          id: t.id,
+          taskListId: t.taskListId,
+          taskListTitle: t.taskListTitle,
+          title: t.title,
+          due: t.due,
+          notes: t.notes,
+        }))
+      } catch (err) {
+        // Non-fatal: covers invalid creds, expired refresh token, network failure
+        console.warn('[briefing] GTasks overdue fetch failed (non-fatal):', (err as Error).message)
+      }
+    }
+
+    return { ok: true, value: { ...healthResult.value, globalOverdueGTasks, overdueGTasksList } }
   })
 
   // Briefing analysis — streaming LLM interpretation of portfolio health
@@ -971,10 +1045,27 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
         timeZoneName: 'short',
       }).format(new Date())
 
+      // Fetch GTasks overdue for prompt context
+      let analyzeGTasks = 0
+      const analyzeGTasksCreds = await loadGTasksCredentials()
+      if (analyzeGTasksCreds) {
+        try {
+          const gtClient = new GTasksClient({
+            clientId: analyzeGTasksCreds.clientId,
+            clientSecret: analyzeGTasksCreds.clientSecret,
+            refreshToken: analyzeGTasksCreds.refreshToken,
+          })
+          analyzeGTasks = (await gtClient.getOverdue()).length
+        } catch {
+          // Non-fatal
+        }
+      }
+
       const prompt = buildBriefingPrompt({
         health: healthResult.value,
         digests,
         currentDate,
+        globalOverdueGTasks: analyzeGTasks,
       })
 
       // 5. Resolve provider (same pattern as chat:send)
@@ -1121,6 +1212,109 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
       return { ok: true, value: undefined }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // --- Google Tasks ---
+
+  ipcMain.handle('gtasks:start-oauth', async () => {
+    try {
+      await startGTasksOAuth()
+      return { ok: true, value: undefined }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('gtasks:check-connected', async () => {
+    try {
+      const status = await checkGTasksConnected()
+      return { ok: true, value: status }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('gtasks:disconnect', async () => {
+    try {
+      await disconnectGTasks()
+      return { ok: true, value: undefined }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('gtasks:complete-task', async (_event, taskListId: string, taskId: string) => {
+    try {
+      if (typeof taskListId !== 'string' || !taskListId.trim() || typeof taskId !== 'string' || !taskId.trim()) {
+        return { ok: false, error: 'taskListId and taskId are required' }
+      }
+      const creds = await loadGTasksCredentials()
+      if (!creds) return { ok: false, error: 'Not connected to Google Tasks' }
+      const client = new GTasksClient({
+        clientId: creds.clientId,
+        clientSecret: creds.clientSecret,
+        refreshToken: creds.refreshToken,
+      })
+      await client.completeTask(taskListId.trim(), taskId.trim())
+      return { ok: true, value: undefined }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error('[GTasks] complete-task failed:', msg)
+      return { ok: false, error: msg }
+    }
+  })
+
+  ipcMain.handle('gtasks:delete-task', async (_event, taskListId: string, taskId: string) => {
+    try {
+      if (typeof taskListId !== 'string' || !taskListId.trim() || typeof taskId !== 'string' || !taskId.trim()) {
+        return { ok: false, error: 'taskListId and taskId are required' }
+      }
+      const creds = await loadGTasksCredentials()
+      if (!creds) return { ok: false, error: 'Not connected to Google Tasks' }
+      const client = new GTasksClient({
+        clientId: creds.clientId,
+        clientSecret: creds.clientSecret,
+        refreshToken: creds.refreshToken,
+      })
+      await client.deleteTask(taskListId.trim(), taskId.trim())
+      return { ok: true, value: undefined }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error('[GTasks] delete-task failed:', msg)
+      return { ok: false, error: msg }
+    }
+  })
+
+  ipcMain.handle('gtasks:update-task', async (_event, taskListId: string, taskId: string, updates: Record<string, unknown>) => {
+    try {
+      if (typeof taskListId !== 'string' || !taskListId.trim() || typeof taskId !== 'string' || !taskId.trim()) {
+        return { ok: false, error: 'taskListId and taskId are required' }
+      }
+      const creds = await loadGTasksCredentials()
+      if (!creds) return { ok: false, error: 'Not connected to Google Tasks' }
+
+      // Whitelist allowed update fields
+      const safeUpdates: { title?: string; notes?: string; due?: string } = {}
+      if (typeof updates?.title === 'string') safeUpdates.title = updates.title
+      if (typeof updates?.notes === 'string') safeUpdates.notes = updates.notes
+      if (typeof updates?.due === 'string') safeUpdates.due = updates.due
+
+      if (Object.keys(safeUpdates).length === 0) {
+        return { ok: false, error: 'At least one of title, notes, or due must be provided' }
+      }
+
+      const client = new GTasksClient({
+        clientId: creds.clientId,
+        clientSecret: creds.clientSecret,
+        refreshToken: creds.refreshToken,
+      })
+      await client.updateTask(taskListId.trim(), taskId.trim(), safeUpdates)
+      return { ok: true, value: undefined }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error('[GTasks] update-task failed:', msg)
+      return { ok: false, error: msg }
     }
   })
 

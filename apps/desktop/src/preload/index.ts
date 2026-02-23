@@ -55,6 +55,18 @@ const api: DomainOSAPI = {
     disconnect: () => ipcRenderer.invoke('gmail:disconnect'),
   },
 
+  gtasks: {
+    startOAuth: () => ipcRenderer.invoke('gtasks:start-oauth'),
+    checkConnected: () => ipcRenderer.invoke('gtasks:check-connected'),
+    disconnect: () => ipcRenderer.invoke('gtasks:disconnect'),
+    completeTask: (taskListId: string, taskId: string) =>
+      ipcRenderer.invoke('gtasks:complete-task', taskListId, taskId),
+    deleteTask: (taskListId: string, taskId: string) =>
+      ipcRenderer.invoke('gtasks:delete-task', taskListId, taskId),
+    updateTask: (taskListId: string, taskId: string, updates: { title?: string; notes?: string; due?: string }) =>
+      ipcRenderer.invoke('gtasks:update-task', taskListId, taskId, updates),
+  },
+
   kbUpdate: {
     apply: (domainId: string, proposal: KBUpdateProposal) =>
       ipcRenderer.invoke('kb:apply-update', domainId, proposal),

@@ -525,6 +525,286 @@ function AnalysisSection({
   )
 }
 
+// ── Overdue Google Tasks with actions ──
+
+function OverdueGTasksSection({
+  tasks,
+  onMutated,
+}: {
+  tasks: Array<{ id: string; taskListId: string; taskListTitle: string; title: string; due: string; notes: string }>
+  onMutated: () => void
+}): React.JSX.Element {
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set())
+  const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set())
+
+  // Clear stale hidden IDs when tasks list refreshes — a task that reappears
+  // in the fresh list was not actually mutated server-side
+  useEffect(() => {
+    setHiddenIds(new Set())
+  }, [tasks])
+
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editValues, setEditValues] = useState<{ title: string; notes: string; due: string }>({ title: '', notes: '', due: '' })
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  const taskKey = (t: { taskListId: string; id: string }): string => `${t.taskListId}::${t.id}`
+
+  function handleStartEdit(task: { id: string; taskListId: string; title: string; due: string; notes: string }): void {
+    const dueDate = task.due ? new Date(task.due).toISOString().slice(0, 10) : ''
+    setEditingId(taskKey(task))
+    setEditValues({ title: task.title || '', notes: task.notes || '', due: dueDate })
+    setSaveError(null)
+  }
+
+  function handleCancelEdit(): void {
+    setEditingId(null)
+    setSaveError(null)
+  }
+
+  async function handleSaveEdit(task: { id: string; taskListId: string; title: string; due: string; notes: string }): Promise<void> {
+    if (!editValues.title.trim()) return
+    const originalDue = task.due ? new Date(task.due).toISOString().slice(0, 10) : ''
+    const updates: { title?: string; notes?: string; due?: string } = {}
+    if (editValues.title !== (task.title || '')) updates.title = editValues.title
+    if (editValues.notes !== (task.notes || '')) updates.notes = editValues.notes
+    if (editValues.due !== originalDue) updates.due = editValues.due
+    if (Object.keys(updates).length === 0) {
+      setEditingId(null)
+      return
+    }
+    setSaving(true)
+    setSaveError(null)
+    try {
+      const res = await window.domainOS.gtasks.updateTask(task.taskListId, task.id, updates)
+      if (!res.ok) {
+        console.error('[GTasks] Update failed:', res.error)
+        setSaveError(res.error || 'Save failed')
+      } else {
+        setEditingId(null)
+        onMutated()
+      }
+    } catch (err) {
+      console.error('[GTasks] Update threw:', err)
+      setSaveError('Save failed — check connection')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleComplete(task: { taskListId: string; id: string }): Promise<void> {
+    const key = taskKey(task)
+    if (loadingIds.has(key)) return
+    setLoadingIds((prev) => new Set(prev).add(key))
+    setHiddenIds((prev) => new Set(prev).add(key))
+
+    try {
+      const res = await window.domainOS.gtasks.completeTask(task.taskListId, task.id)
+      if (!res.ok) {
+        setHiddenIds((prev) => { const next = new Set(prev); next.delete(key); return next })
+        console.error('[GTasks] Complete failed:', res.error)
+      } else {
+        onMutated()
+      }
+    } catch (err) {
+      setHiddenIds((prev) => { const next = new Set(prev); next.delete(key); return next })
+      console.error('[GTasks] Complete threw:', err)
+    } finally {
+      setLoadingIds((prev) => { const next = new Set(prev); next.delete(key); return next })
+    }
+  }
+
+  async function handleDelete(task: { taskListId: string; id: string }): Promise<void> {
+    const key = taskKey(task)
+    if (loadingIds.has(key)) return
+    setLoadingIds((prev) => new Set(prev).add(key))
+    setHiddenIds((prev) => new Set(prev).add(key))
+
+    try {
+      const res = await window.domainOS.gtasks.deleteTask(task.taskListId, task.id)
+      if (!res.ok) {
+        setHiddenIds((prev) => { const next = new Set(prev); next.delete(key); return next })
+        console.error('[GTasks] Delete failed:', res.error)
+      } else {
+        onMutated()
+      }
+    } catch (err) {
+      setHiddenIds((prev) => { const next = new Set(prev); next.delete(key); return next })
+      console.error('[GTasks] Delete threw:', err)
+    } finally {
+      setLoadingIds((prev) => { const next = new Set(prev); next.delete(key); return next })
+    }
+  }
+
+  const visibleTasks = tasks.filter((t) => !hiddenIds.has(taskKey(t)))
+
+  const byList = new Map<string, typeof visibleTasks>()
+  for (const task of visibleTasks) {
+    const key = task.taskListTitle || 'Untitled List'
+    if (!byList.has(key)) byList.set(key, [])
+    byList.get(key)!.push(task)
+  }
+
+  if (visibleTasks.length === 0) return <></>
+
+  return (
+    <div className="mb-6">
+      <h2 className="mb-2 text-sm font-medium text-text-secondary">
+        Overdue Google Tasks
+        <span className="ml-2 text-xs text-amber-400">{visibleTasks.length}</span>
+      </h2>
+      <div className="space-y-3">
+        {[...byList.entries()].map(([listTitle, listTasks]) => (
+          <div key={listTitle}>
+            <p className="mb-1 text-xs font-semibold text-amber-400/80 uppercase tracking-wide">{listTitle}</p>
+            <div className="space-y-1.5">
+              {listTasks.map((task) => {
+                const dueDate = task.due ? new Date(task.due) : null
+                const dueStr = dueDate ? dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''
+                const key = taskKey(task)
+                const isLoading = loadingIds.has(key)
+                const isEditing = editingId === key
+
+                if (isEditing) {
+                  return (
+                    <div
+                      key={key}
+                      className="rounded border border-accent/40 bg-surface-2 px-3 py-2 space-y-1.5"
+                      onKeyDown={(e) => { if (e.key === 'Escape') handleCancelEdit() }}
+                    >
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={editValues.title}
+                          onChange={(e) => setEditValues((v) => ({ ...v, title: e.target.value }))}
+                          className="flex-1 rounded border border-border bg-surface-1 px-2 py-1 text-xs text-text-primary placeholder:text-text-tertiary"
+                          placeholder="Title"
+                          autoFocus
+                        />
+                        <button
+                          type="button"
+                          disabled={isLoading}
+                          onClick={() => handleComplete(task)}
+                          title="Mark as complete"
+                          className="rounded px-1.5 py-0.5 text-[10px] text-green-400 hover:bg-green-500/10 disabled:opacity-50"
+                        >
+                          Done
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={editValues.notes}
+                          onChange={(e) => setEditValues((v) => ({ ...v, notes: e.target.value }))}
+                          className="flex-1 rounded border border-border bg-surface-1 px-2 py-1 text-xs text-text-primary placeholder:text-text-tertiary"
+                          placeholder="Notes"
+                        />
+                        <button
+                          type="button"
+                          disabled={isLoading}
+                          onClick={() => handleDelete(task)}
+                          title="Delete task"
+                          className="rounded px-1.5 py-0.5 text-[10px] text-red-400 hover:bg-red-500/10 disabled:opacity-50"
+                        >
+                          Del
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="date"
+                          value={editValues.due}
+                          onChange={(e) => setEditValues((v) => ({ ...v, due: e.target.value }))}
+                          className="rounded border border-border bg-surface-1 px-2 py-1 text-xs text-text-primary"
+                          style={{ colorScheme: 'dark' }}
+                        />
+                        <div className="flex-1" />
+                        <button
+                          type="button"
+                          disabled={saving || !editValues.title.trim()}
+                          onClick={() => handleSaveEdit(task)}
+                          className="rounded bg-accent/20 px-2 py-0.5 text-[10px] text-accent hover:bg-accent/30 disabled:opacity-50"
+                        >
+                          {saving ? 'Saving...' : 'Save'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={saving}
+                          onClick={handleCancelEdit}
+                          className="rounded px-2 py-0.5 text-[10px] text-text-tertiary hover:bg-surface-3"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                      {saveError && (
+                        <p className="text-[10px] text-red-400">{saveError}</p>
+                      )}
+                    </div>
+                  )
+                }
+
+                return (
+                  <div
+                    key={key}
+                    className="flex items-start gap-3 rounded border border-border/50 bg-surface-2 px-3 py-2"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p
+                        className="truncate text-xs font-medium text-text-primary cursor-pointer hover:text-accent transition-colors"
+                        onClick={() => handleStartEdit(task)}
+                        title="Click to edit"
+                      >
+                        {task.title}
+                      </p>
+                      <div className="flex items-center gap-2 text-[10px] text-text-tertiary">
+                        <span
+                          className="text-text-primary cursor-pointer hover:text-accent transition-colors"
+                          onClick={() => handleStartEdit(task)}
+                          title="Click to reschedule"
+                        >
+                          {dueStr}
+                        </span>
+                      </div>
+                      {task.notes && (
+                        <p
+                          className="mt-0.5 line-clamp-1 text-[10px] text-text-tertiary cursor-pointer hover:text-text-secondary transition-colors"
+                          onClick={() => handleStartEdit(task)}
+                          title="Click to edit"
+                        >
+                          {task.notes}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex gap-1 shrink-0">
+                      <button
+                        type="button"
+                        disabled={isLoading}
+                        onClick={() => handleComplete(task)}
+                        title="Mark as complete"
+                        className="rounded px-1.5 py-0.5 text-[10px] text-green-400 hover:bg-green-500/10 disabled:opacity-50"
+                      >
+                        Done
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isLoading}
+                        onClick={() => handleDelete(task)}
+                        title="Delete task"
+                        className="rounded px-1.5 py-0.5 text-[10px] text-red-400 hover:bg-red-500/10 disabled:opacity-50"
+                      >
+                        Del
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── Main page ──
 
 interface BriefingPageProps {
@@ -541,9 +821,23 @@ export function BriefingPage({ onViewChange }: BriefingPageProps): React.JSX.Ele
   const { setActiveDomain, domains } = useDomainStore()
   const { overdueAll, fetchOverdue, complete, snooze, cancel } = useDeadlineStore()
 
+  // GTasks connection state
+  const [gtasksConnected, setGtasksConnected] = useState(false)
+  const [gtasksEmail, setGtasksEmail] = useState<string | undefined>()
+  const [gtasksLoading, setGtasksLoading] = useState(false)
+
+  const checkGTasksStatus = useCallback(async () => {
+    const res = await window.domainOS.gtasks.checkConnected()
+    if (res.ok && res.value) {
+      setGtasksConnected(res.value.connected)
+      setGtasksEmail(res.value.email)
+    }
+  }, [])
+
   useEffect(() => {
     fetchHealth()
     fetchOverdue()
+    checkGTasksStatus()
 
     // Subscribe to unsnooze wake events
     window.domainOS.deadline.onUnsnoozeWake(() => {
@@ -553,7 +847,29 @@ export function BriefingPage({ onViewChange }: BriefingPageProps): React.JSX.Ele
     return () => {
       window.domainOS.deadline.offUnsnoozeWake()
     }
-  }, [fetchHealth, fetchOverdue])
+  }, [fetchHealth, fetchOverdue, checkGTasksStatus])
+
+  async function handleGTasksConnect(): Promise<void> {
+    setGtasksLoading(true)
+    const res = await window.domainOS.gtasks.startOAuth()
+    setGtasksLoading(false)
+    if (res.ok) {
+      await checkGTasksStatus()
+      fetchHealth() // re-fetch to get updated overdue count
+    } else {
+      console.error('[GTasks] OAuth failed:', res.error)
+      alert(`Google Tasks connect failed: ${res.error}`)
+    }
+  }
+
+  async function handleGTasksDisconnect(): Promise<void> {
+    setGtasksLoading(true)
+    await window.domainOS.gtasks.disconnect()
+    setGtasksLoading(false)
+    setGtasksConnected(false)
+    setGtasksEmail(undefined)
+    fetchHealth()
+  }
 
   const handleDeadlineCaptured = useCallback(() => {
     fetchOverdue()
@@ -620,20 +936,54 @@ export function BriefingPage({ onViewChange }: BriefingPageProps): React.JSX.Ele
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold text-text-primary">Portfolio Health</h1>
-          {health && (
-            <p className="text-xs text-text-tertiary">
-              Last computed: {formatTime(health.computedAt)}
-            </p>
-          )}
+          <div className="flex items-center gap-3">
+            {health && (
+              <p className="text-xs text-text-tertiary">
+                Last computed: {formatTime(health.computedAt)}
+              </p>
+            )}
+            {health && (health.globalOverdueGTasks ?? 0) > 0 && (
+              <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-400">
+                {health.globalOverdueGTasks} overdue GTasks
+              </span>
+            )}
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => { fetchHealth(); fetchOverdue() }}
-          disabled={healthLoading}
-          className="rounded border border-border px-3 py-1.5 text-xs text-text-secondary transition-colors hover:bg-surface-3 disabled:opacity-50"
-        >
-          {healthLoading ? 'Computing...' : 'Refresh'}
-        </button>
+        <div className="flex items-center gap-2">
+          {/* GTasks connection */}
+          {gtasksConnected ? (
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-text-tertiary">
+                Tasks: {gtasksEmail || 'connected'}
+              </span>
+              <button
+                type="button"
+                onClick={handleGTasksDisconnect}
+                disabled={gtasksLoading}
+                className="rounded border border-border px-2 py-1 text-[10px] text-text-tertiary transition-colors hover:bg-surface-3 disabled:opacity-50"
+              >
+                Disconnect
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={handleGTasksConnect}
+              disabled={gtasksLoading}
+              className="rounded border border-border px-2 py-1 text-[10px] text-text-secondary transition-colors hover:bg-surface-3 disabled:opacity-50"
+            >
+              {gtasksLoading ? 'Connecting...' : 'Connect Tasks'}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => { fetchHealth(); fetchOverdue() }}
+            disabled={healthLoading}
+            className="rounded border border-border px-3 py-1.5 text-xs text-text-secondary transition-colors hover:bg-surface-3 disabled:opacity-50"
+          >
+            {healthLoading ? 'Computing...' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
       {healthLoading && !health && (
@@ -704,6 +1054,14 @@ export function BriefingPage({ onViewChange }: BriefingPageProps): React.JSX.Ele
 
             <DeadlineCreateForm domains={domainList} onCreated={handleDeadlineCaptured} />
           </div>
+
+          {/* Overdue Google Tasks Section — grouped by list */}
+          {health.overdueGTasksList && health.overdueGTasksList.length > 0 && (
+            <OverdueGTasksSection
+              tasks={health.overdueGTasksList}
+              onMutated={() => { fetchHealth(); fetchOverdue() }}
+            />
+          )}
 
           {/* Domain Cards Grid */}
           <div className="mb-6">

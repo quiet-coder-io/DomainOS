@@ -66,6 +66,15 @@ export interface DomainOSAPI {
     disconnect(): Promise<IPCResult<void>>
   }
 
+  gtasks: {
+    startOAuth(): Promise<IPCResult<void>>
+    checkConnected(): Promise<IPCResult<{ connected: boolean; blocked?: boolean; email?: string }>>
+    disconnect(): Promise<IPCResult<void>>
+    completeTask(taskListId: string, taskId: string): Promise<IPCResult<void>>
+    deleteTask(taskListId: string, taskId: string): Promise<IPCResult<void>>
+    updateTask(taskListId: string, taskId: string, updates: { title?: string; notes?: string; due?: string }): Promise<IPCResult<void>>
+  }
+
   kbUpdate: {
     apply(
       domainId: string,
@@ -225,6 +234,8 @@ export interface ToolUseEvent {
     resultCount?: number
     messageId?: string
     subject?: string
+    taskId?: string
+    taskListTitle?: string
   }
 }
 
@@ -401,11 +412,22 @@ export interface CrossDomainAlert {
   }
 }
 
+export interface OverdueGTask {
+  id: string
+  taskListId: string
+  taskListTitle: string
+  title: string
+  due: string
+  notes: string
+}
+
 export interface PortfolioHealth {
   domains: DomainHealth[]
   alerts: CrossDomainAlert[]
   computedAt: string
   snapshotHash: string
+  globalOverdueGTasks?: number
+  overdueGTasksList?: OverdueGTask[]
 }
 
 export interface BriefingAnalysis {

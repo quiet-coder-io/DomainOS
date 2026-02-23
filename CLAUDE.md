@@ -107,21 +107,25 @@ Directed relationships with typed dependencies (`blocks`, `depends_on`, `informs
 | File | Purpose |
 |------|---------|
 | `src/gmail/` | `GmailClient` (search/read), `GmailPoller`, body parser |
+| `src/gtasks/client.ts` | `GTasksClient` (listTaskLists, search, read, completeTask, updateTask, deleteTask, getOverdue) — on-demand Google Tasks API v1, read-write |
 
 ### Desktop App (`apps/desktop/`)
 
 | File | Purpose |
 |------|---------|
-| `src/main/ipc-handlers.ts` | 52 IPC handlers: domains, KB, chat, briefing, intake, protocols, sessions, relationships, gap flags, decisions, audit, Gmail, settings |
-| `src/main/tool-loop.ts` | **Provider-agnostic** tool-use loop — works with Anthropic, OpenAI, Ollama; includes ROWYS Gmail guard, tool output sanitization, transcript validation, size guards (75KB/result, 400KB total), capability cache management |
+| `src/main/ipc-handlers.ts` | 55 IPC handlers: domains, KB, chat, briefing, intake, protocols, sessions, relationships, gap flags, decisions, audit, Gmail, GTasks, settings |
+| `src/main/tool-loop.ts` | **Provider-agnostic** tool-use loop — works with Anthropic, OpenAI, Ollama; prefix-based dispatch (`gmail_*`, `gtasks_*`), ROWYS Gmail guard, tool output sanitization, transcript validation, size guards (75KB/result, 400KB total), capability cache management |
 | `src/main/gmail-tools.ts` | `GMAIL_TOOLS` as `ToolDefinition[]` (provider-agnostic), input validation, executor |
 | `src/main/gmail-oauth.ts` | OAuth PKCE flow via system browser + loopback |
 | `src/main/gmail-credentials.ts` | Encrypted credential storage (safeStorage) |
+| `src/main/gtasks-tools.ts` | `GTASKS_TOOLS` as `ToolDefinition[]` (gtasks_search, gtasks_read, gtasks_complete, gtasks_update, gtasks_delete), input validation, executor |
+| `src/main/gtasks-oauth.ts` | Google Tasks OAuth PKCE flow — scope `tasks` (read-write), falls back to Gmail client ID/secret |
+| `src/main/gtasks-credentials.ts` | Encrypted GTasks credential storage (`gtasks-creds.enc`, safeStorage) |
 | `src/main/kb-watcher.ts` | Filesystem monitoring for KB directories — `startKBWatcher()`, `stopKBWatcher()`, debounced (500ms), sends `kb:files-changed` to renderer |
 | `src/preload/api.ts` | IPC type contract: `DomainOSAPI`, `ProviderConfig`, `ProviderKeysStatus`, `ToolTestResult`, `PortfolioHealth`, `BriefingAnalysis` |
 | `src/renderer/components/SettingsDialog.tsx` | Multi-provider settings modal (API keys, Ollama connection, model defaults, tool test) |
 | `src/renderer/pages/DomainChatPage.tsx` | Chat page with per-domain model override UI (tri-state: global default / override / clear) |
-| `src/renderer/pages/BriefingPage.tsx` | Portfolio health dashboard + LLM analysis streaming UI with alerts, actions, monitors |
+| `src/renderer/pages/BriefingPage.tsx` | Portfolio health dashboard + LLM analysis streaming UI with alerts, actions, monitors + GTasks connect/disconnect + overdue badge |
 | `src/renderer/stores/settings-store.ts` | Zustand store for provider keys (boolean+last4), global config, Ollama state |
 | `src/renderer/stores/domain-store.ts` | Zustand store for domains including `modelProvider`, `modelName`, `forceToolAttempt` |
 | `src/renderer/stores/briefing-store.ts` | Zustand store: `fetchHealth()`, `analyze()` with streaming + cancel, snapshot hash stale detection |
@@ -216,17 +220,26 @@ Decrypted keys cached in-memory after first read. Keys never cross IPC to render
 | `briefing:analyze-cancel` | renderer→main | Cancel active briefing analysis |
 | `briefing:analysis-chunk` | main→renderer | Streaming chunk event during analysis |
 | `kb:files-changed` | main→renderer | KB watcher detected file changes |
+| `gtasks:start-oauth` | renderer→main | Start Google Tasks OAuth PKCE flow |
+| `gtasks:check-connected` | renderer→main | Check GTasks connection status |
+| `gtasks:disconnect` | renderer→main | Disconnect GTasks + revoke token |
+| `gtasks:complete-task` | renderer→main | Mark a task as completed |
+| `gtasks:delete-task` | renderer→main | Delete a task |
+| `gtasks:update-task` | renderer→main | Update task title/notes/due |
 
 ## Environment Variables
 
-Gmail OAuth credentials are loaded from `apps/desktop/.env` (gitignored). Required for Gmail integration:
+Gmail/GTasks OAuth credentials are loaded from `apps/desktop/.env` (gitignored). Required for integrations:
 
 ```
 MAIN_VITE_GMAIL_CLIENT_ID=<your-gcp-oauth-client-id>
 MAIN_VITE_GMAIL_CLIENT_SECRET=<your-gcp-oauth-client-secret>
+# Optional: GTasks-specific overrides (falls back to Gmail vars if not set)
+# MAIN_VITE_GTASKS_CLIENT_ID=<your-gcp-oauth-client-id>
+# MAIN_VITE_GTASKS_CLIENT_SECRET=<your-gcp-oauth-client-secret>
 ```
 
-These come from a GCP project with a Desktop/Native app OAuth client and `gmail.readonly` scope enabled. Without these, Gmail connect will show a clear error; all other features work normally.
+These come from a GCP project with a Desktop/Native app OAuth client and `gmail.readonly` + `tasks` scopes enabled. Without these, connect will show a clear error; all other features work normally.
 
 ## Native Modules
 

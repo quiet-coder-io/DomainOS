@@ -15,6 +15,7 @@ export interface BriefingPromptContext {
   health: PortfolioHealth
   digests: Array<{ domainId: string; domainName: string; content: string }>
   currentDate: string
+  globalOverdueGTasks?: number
 }
 
 // ── Projected type for LLM consumption (versioned, stable) ──
@@ -127,7 +128,11 @@ export function buildBriefingPrompt(context: BriefingPromptContext): string {
   const projected = projectPortfolioHealthForLLM(health)
   const groundTruthJSON = JSON.stringify(projected, null, 2)
 
-  const dateSection = `=== CURRENT DATE ===\n${currentDate}\n`
+  const gtasksLine = context.globalOverdueGTasks != null && context.globalOverdueGTasks > 0
+    ? `\nGlobal: ${context.globalOverdueGTasks} overdue Google Tasks (not domain-scoped)\n`
+    : ''
+
+  const dateSection = `=== CURRENT DATE ===\n${currentDate}\n${gtasksLine}`
   const jsonSection = `=== GROUND TRUTH JSON (ProjectedHealth v1) ===\n${groundTruthJSON}\n`
   const alertsSection = buildComputedAlertsSection(health.alerts)
   const relationshipsSection = buildRelationshipsSection(health.domains)

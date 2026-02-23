@@ -14,5 +14,8 @@ export type { GmailClientConfig, GmailSearchResult, GmailMessage } from './gmail
 export { GTasksReader } from './gtasks/index.js'
 export type { GTasksReaderConfig, GTaskMeta } from './gtasks/index.js'
 
+export { GTasksClient } from './gtasks/index.js'
+export type { GTasksClientConfig, GTaskSearchResult, GTask, GTaskList } from './gtasks/index.js'
+
 export { IntakeClient } from './common/index.js'
 export type { IntakePayload, IntakeResponse, OAuthTokens, PollerConfig } from './common/index.js'

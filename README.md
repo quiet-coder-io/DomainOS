@@ -57,7 +57,7 @@ DomainOS gives each area of your professional life its own AI-powered operating 
 
 - **Three providers** — Anthropic (Claude), OpenAI (GPT-4o, o3-mini), and Ollama (local LLMs like Llama, Mistral, CodeLlama)
 - **Per-domain model selection** — each domain can override the global default provider and model; one domain can use Claude while another uses GPT-4o or a local Ollama model
-- **Tool-use across providers** — Gmail tools and AI-proposed KB updates work with all providers via a normalized tool-use abstraction
+- **Tool-use across providers** — Gmail and Google Tasks tools and AI-proposed KB updates work with all providers via a normalized tool-use abstraction
 - **Graceful tool fallback** — if a model doesn't support tool calls (common with Ollama), the system detects this automatically and falls back to plain chat with no user intervention
 - **Tool capability caching** — 4-state cache (supported / not observed / not supported / unknown) avoids wasted latency on models known to lack tool support
 - **Settings dialog** — manage API keys for Anthropic and OpenAI, test Ollama connections, browse installed Ollama models, probe tool support per model
@@ -78,6 +78,7 @@ DomainOS gives each area of your professional life its own AI-powered operating 
 - **LLM-powered analysis** — streams a briefing narrative from the health snapshot + KB digests, producing structured alerts, prioritized actions, and monitors
 - **Analysis alerts** — LLM-generated alerts surfaced as a standalone section with severity levels, domain attribution, and supporting evidence; displayed separately from computed cross-domain alerts so you can see both what the data shows and what the AI interprets
 - **Deadline management** — capture deadlines from analysis actions or create them manually; track with priority, due date, domain, and status (active / completed / snoozed / cancelled); overdue deadlines surface prominently in the briefing
+- **Google Tasks integration** — OAuth PKCE connect, overdue task detection across all lists, inline editing (click title/date to edit, reschedule, add notes), complete and delete actions with optimistic UI and error recovery
 - **Snapshot hashing** — detects when portfolio state has changed since the last analysis, prompting a re-run
 
 ### Cross-Domain
@@ -85,6 +86,7 @@ DomainOS gives each area of your professional life its own AI-powered operating 
 - **Directed domain relationships** — link domains with typed dependencies: `blocks`, `depends_on`, `informs`, `parallel`, `monitor_only`; supports reciprocal relationships with different types per direction
 - **Sibling domain relationships** — lightweight link for related domains so the AI can surface cross-domain context without mixing knowledge bases
 - **Browser-to-app intake pipeline** — Chrome extension with "Send to DomainOS" that extracts web content and routes it to the right domain via AI classification
+- **Google Tasks as AI tools** — the chat assistant can search, read, complete, update, and delete Google Tasks via tool-use, enabling conversational task management within any domain
 - **KB file watching** — automatic filesystem monitoring with debounced re-scan when KB files change on disk
 
 ## Architecture
@@ -134,9 +136,15 @@ graph TB
         OLLAMA["Ollama (Local)<br/><small>Llama · Mistral · etc.</small>"]
     end
 
+    subgraph Google["Google APIs (OAuth)"]
+        GMAIL["Gmail<br/><small>Read-only</small>"]
+        GTASKS["Google Tasks<br/><small>Read-write</small>"]
+    end
+
     EXT -- "localhost" --> INTAKESVR
     Renderer -- "IPC" --> IPC --> Main
     AGENTS -- "provider factory" --> LLM
+    Main -- "OAuth PKCE" --> Google
     Core --> SQLITE
     Core --> FS
     Core --> KEYCHAIN
@@ -179,6 +187,7 @@ flowchart LR
 | Build system | electron-vite (Vite-based) |
 | Core library | TypeScript, framework-agnostic |
 | LLM providers | Anthropic SDK, OpenAI SDK (also used for Ollama via OpenAI-compatible API) |
+| Google APIs | Gmail (read-only), Google Tasks (read-write) via OAuth PKCE |
 | Database | SQLite (better-sqlite3) |
 | Validation | Zod |
 | Package management | npm workspaces |
@@ -213,7 +222,7 @@ domain-os/
 │   │       ├── intake/       # Browser intake classification
 │   │       ├── storage/      # SQLite schema and migrations (v1–v9)
 │   │       └── common/       # Result type, shared schemas
-│   └── integrations/         # External service integrations
+│   └── integrations/         # External service integrations (Gmail, Google Tasks)
 ├── apps/
 │   └── desktop/              # Electron + React desktop app
 │       └── src/
