@@ -29,6 +29,7 @@ release/
 *.crt
 *credentials*
 !**/gmail-credentials.ts
+!**/gtasks-credentials.ts
 id_rsa*
 
 # TypeScript build info
