@@ -28,9 +28,11 @@ import {
   notObservedCounters,
 } from '@domain-os/core'
 import type { GmailClient, GTasksClient } from '@domain-os/integrations'
+import type Database from 'better-sqlite3'
 import type { WebContents } from 'electron'
 import { executeGmailTool } from './gmail-tools'
 import { executeGTasksTool } from './gtasks-tools'
+import { executeAdvisoryTool } from './advisory-tools'
 
 // ── Constants (D12) ──
 
@@ -77,6 +79,7 @@ export interface ToolLoopOptions {
   userMessages: Array<{ role: 'user' | 'assistant'; content: string }>
   systemPrompt: string
   tools: ToolDefinition[]
+  db?: Database.Database
   gmailClient?: GmailClient
   gtasksClient?: GTasksClient
   eventSender: WebContents
@@ -109,6 +112,7 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
     userMessages,
     systemPrompt,
     tools,
+    db: toolDb,
     gmailClient,
     gtasksClient,
     eventSender,
@@ -262,7 +266,7 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
 
         const toolStart = Date.now()
         let result: string
-        const errorPrefix = call.name.startsWith('gtasks_') ? 'GTASKS_ERROR' : 'GMAIL_ERROR'
+        const errorPrefix = call.name.startsWith('advisory_') ? 'ADVISORY_ERROR' : call.name.startsWith('gtasks_') ? 'GTASKS_ERROR' : 'GMAIL_ERROR'
 
         try {
           if (call.name.startsWith('gmail_') && gmailClient) {
@@ -295,6 +299,8 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
             }
           } else if (call.name.startsWith('gtasks_') && gtasksClient) {
             result = await executeGTasksTool(gtasksClient, call.name, input)
+          } else if (call.name.startsWith('advisory_') && toolDb) {
+            result = executeAdvisoryTool(toolDb, call.name, input)
           } else {
             result = `${errorPrefix}: executor — No client available for tool ${call.name}`
           }
@@ -313,7 +319,7 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
         }
 
         const toolLatency = Date.now() - toolStart
-        const isError = result.startsWith('GMAIL_ERROR:') || result.startsWith('GTASKS_ERROR:')
+        const isError = result.startsWith('GMAIL_ERROR:') || result.startsWith('GTASKS_ERROR:') || result.startsWith('ADVISORY_ERROR:')
         console.info(`[tool-loop] tool_execution toolName=${call.name} toolCallId=${call.id} success=${!isError} latencyMs=${toolLatency}`)
 
         messages.push({

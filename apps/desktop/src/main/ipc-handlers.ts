@@ -42,6 +42,9 @@ import {
   buildBriefingPrompt,
   parseBriefingAnalysis,
   DeadlineRepository,
+  AdvisoryRepository,
+  parseAdvisoryBlocks,
+  extractTasksFromArtifact,
 } from '@domain-os/core'
 import type {
   CreateDomainInput,
@@ -54,12 +57,16 @@ import type {
   AddRelationshipOptions,
   CreateDeadlineInput,
   DeadlineStatus,
+  AdvisoryType,
+  AdvisoryStatus,
+  SaveDraftBlockInput,
 } from '@domain-os/core'
 import { getIntakeToken } from './intake-token'
 import { startKBWatcher, stopKBWatcher } from './kb-watcher'
 import { loadGmailCredentials, checkGmailConnected } from './gmail-credentials'
 import { startGmailOAuth, disconnectGmail } from './gmail-oauth'
 import { GMAIL_TOOLS } from './gmail-tools'
+import { ADVISORY_TOOLS } from './advisory-tools'
 import { loadGTasksCredentials, checkGTasksConnected } from './gtasks-credentials'
 import { startGTasksOAuth, disconnectGTasks } from './gtasks-oauth'
 import { GTASKS_TOOLS } from './gtasks-tools'
@@ -97,6 +104,7 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
   const sessionRepo = new SessionRepository(db)
   const gapFlagRepo = new GapFlagRepository(db)
   const deadlineRepo = new DeadlineRepository(db)
+  const advisoryRepo = new AdvisoryRepository(db)
 
   // Seed default shared protocols (STOP + Gap Detection) — idempotent
   seedDefaultProtocols(sharedProtocolRepo)
@@ -415,13 +423,14 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
 
         let fullResponse = ''
 
-        // --- Tool-use branch (Gmail + GTasks, uses unified shouldUseTools routing) ---
+        // --- Tool-use branch (Advisory + Gmail + GTasks, uses unified shouldUseTools routing) ---
         const gmailCreds = await loadGmailCredentials()
         const gmailEnabled = gmailCreds && domain.value.allowGmail
         const gtasksCreds = await loadGTasksCredentials()
         const gtasksEnabled = !!gtasksCreds // global, no per-domain flag
 
-        const toolsAvailable = gmailEnabled || gtasksEnabled
+        // Advisory tools are always available; Gmail/GTasks depend on credentials
+        const toolsAvailable = true
 
         if (toolsAvailable && shouldUseTools(provider, resolvedProvider, resolvedModel, domain.value, ollamaBaseUrl)) {
           const tools: Array<{ name: string; description: string; inputSchema: Record<string, unknown> }> = []
@@ -467,8 +476,12 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
             }
           }
 
-          if (tools.length === 0) {
-            // Both preflights failed — fall through to streaming
+          // Advisory tools are always available (read-only, no external credentials)
+          tools.push(...ADVISORY_TOOLS)
+          toolsHint += '\n\n## Advisory Tools\nYou have tools to search decisions, deadlines, cross-domain context, and risk snapshots. Use them when providing strategic advice, assessing risk, or referencing prior decisions. When quoting cross-domain data, always attribute the source domain name.'
+
+          if (tools.length === ADVISORY_TOOLS.length) {
+            // Only advisory tools available (Gmail + GTasks preflights failed) — still useful
             gmailClient = undefined
             gtasksClient = undefined
           }
@@ -482,6 +495,7 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
               userMessages: payload.messages,
               systemPrompt: systemPrompt + toolsHint,
               tools,
+              db,
               gmailClient,
               gtasksClient,
               eventSender: event.sender,
@@ -530,6 +544,25 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           })
         }
 
+        // Parse advisory fence blocks from LLM response (runs on final assistant text only)
+        const advisoryResult = parseAdvisoryBlocks(
+          fullResponse,
+          payload.domainId,
+          sessionId,
+          undefined, // messageId — set after message is persisted if needed
+          { db },
+        )
+
+        // Render system notes as inline feedback
+        for (const note of advisoryResult.systemNotes) {
+          console.log(`[advisory] ${note}`)
+        }
+
+        // Log rejects for telemetry
+        for (const reject of advisoryResult.rejects) {
+          console.warn(`[advisory-parser] reject: ${reject.reason} | detail=${reject.detail ?? ''} | type=${reject.fenceType} | domain=${reject.domainId} | size=${reject.sizeBytes}`)
+        }
+
         // End session on wrap-up
         if (isWrapUp && sessionId) {
           sessionRepo.end(sessionId)
@@ -554,6 +587,12 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
             stopBlocks,
             gapFlags: parsedGapFlags,
             decisions: parsedDecisions,
+            advisory: {
+              classifiedMode: advisoryResult.classifiedMode,
+              persisted: advisoryResult.persisted,
+              draftBlocks: advisoryResult.draftBlocks,
+              systemNotes: advisoryResult.systemNotes,
+            },
           },
         }
       } catch (err) {
@@ -1185,6 +1224,64 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
   ipcMain.handle('decision:reject', (_event, id: string) => {
     return decisionRepo.reject(id)
   })
+
+  // --- Advisory Artifacts ---
+
+  ipcMain.handle('advisory:list', (_event, domainId: string, options?: { status?: AdvisoryStatus; type?: AdvisoryType; limit?: number }) => {
+    return advisoryRepo.getByDomain(domainId, options)
+  })
+
+  ipcMain.handle('advisory:get', (_event, id: string) => {
+    return advisoryRepo.getById(id)
+  })
+
+  ipcMain.handle('advisory:archive', (_event, id: string) => {
+    return advisoryRepo.archive(id)
+  })
+
+  ipcMain.handle('advisory:unarchive', (_event, id: string) => {
+    return advisoryRepo.unarchive(id)
+  })
+
+  ipcMain.handle('advisory:rename', (_event, id: string, title: string) => {
+    return advisoryRepo.renameTitle(id, title)
+  })
+
+  ipcMain.handle(
+    'advisory:save-draft-block',
+    (_event, input: SaveDraftBlockInput) => {
+      // 1-click save: re-validate stored draft block and persist as active artifact
+      // In production, this reads from message.metadata.advisoryDraftBlocks[blockIndex]
+      // For now, the IPC contract is defined — renderer will supply the draft data
+      try {
+        // The renderer will pass the full draft block data via the input
+        // This handler delegates to the repository after re-validation
+        return { ok: false, error: 'Save draft block requires message metadata integration (Phase C UI)' }
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    },
+  )
+
+  ipcMain.handle(
+    'advisory:extract-tasks',
+    (_event, artifactId: string, domainId: string) => {
+      try {
+        const artifact = advisoryRepo.getById(artifactId)
+        if (!artifact.ok) return artifact
+
+        // Verify domain match
+        if (artifact.value.domainId !== domainId) {
+          return { ok: false, error: 'Artifact does not belong to the specified domain' }
+        }
+
+        const result = extractTasksFromArtifact(artifact.value)
+        return { ok: true, value: result }
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    },
+  )
 
   // --- Gmail ---
 

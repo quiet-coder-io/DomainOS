@@ -45,6 +45,18 @@ export interface DomainOSAPI {
       stopBlocks?: Array<{ reason: string; actionNeeded: string }>
       gapFlags?: Array<{ category: string; description: string }>
       decisions?: Array<{ decisionId: string; decision: string }>
+      advisory?: {
+        classifiedMode: string
+        persisted: Array<{ artifactId: string; type: AdvisoryType; status: AdvisoryStatus }>
+        draftBlocks: Array<{
+          fenceType: string
+          rawJson: string
+          normalizedControl: { schemaVersion: number; type: string; persist: string; title: string }
+          payload: Record<string, unknown>
+          savedArtifactId?: string
+        }>
+        systemNotes: string[]
+      }
     }>>
     extractKbUpdates(payload: {
       domainId: string
@@ -181,6 +193,16 @@ export interface DomainOSAPI {
     list(domainId: string, limit?: number): Promise<IPCResult<Decision[]>>
     active(domainId: string): Promise<IPCResult<Decision[]>>
     reject(id: string): Promise<IPCResult<Decision>>
+  }
+
+  advisory: {
+    list(domainId: string, options?: { status?: AdvisoryStatus; type?: AdvisoryType; limit?: number }): Promise<IPCResult<AdvisoryArtifact[]>>
+    get(id: string): Promise<IPCResult<AdvisoryArtifact>>
+    archive(id: string): Promise<IPCResult<AdvisoryArtifact>>
+    unarchive(id: string): Promise<IPCResult<AdvisoryArtifact>>
+    rename(id: string, title: string): Promise<IPCResult<AdvisoryArtifact>>
+    saveDraftBlock(input: SaveDraftBlockInput): Promise<IPCResult<SaveDraftBlockResult>>
+    extractTasks(artifactId: string, domainId: string): Promise<IPCResult<TurnIntoTasksOutput>>
   }
 
   settings: {
@@ -478,6 +500,11 @@ export interface Decision {
   status: string
   supersedesDecisionId: string | null
   linkedFiles: string[]
+  confidence: string | null
+  horizon: string | null
+  reversibilityClass: string | null
+  reversibilityNotes: string | null
+  category: string | null
   createdAt: string
   updatedAt: string
 }
@@ -527,4 +554,59 @@ export interface ProviderConfig {
 export interface ToolTestResult {
   status: 'supported' | 'not_observed' | 'not_supported'
   message: string
+}
+
+// ── Advisory types ──
+
+export type AdvisoryType = 'brainstorm' | 'risk_assessment' | 'scenario' | 'strategic_review'
+export type AdvisoryStatus = 'active' | 'archived'
+
+export interface AdvisoryArtifact {
+  id: string
+  domainId: string
+  sessionId: string | null
+  type: AdvisoryType
+  title: string
+  llmTitle: string
+  schemaVersion: number
+  content: string
+  fingerprint: string
+  source: 'llm' | 'user' | 'import'
+  sourceMessageId: string | null
+  status: AdvisoryStatus
+  archivedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SaveDraftBlockInput {
+  messageId: string
+  blockIndex: number
+  domainId: string
+  sessionId?: string
+}
+
+export type SaveDraftBlockResult =
+  | { ok: true; artifactId: string; message: string; idempotent?: boolean }
+  | { ok: false; message: string }
+
+export interface ExtractedTask {
+  title: string
+  priority: 'high' | 'medium' | 'low'
+  dueOffset?: number
+  sourceField: string
+}
+
+export interface NeedsEditingTask {
+  title: string
+  reason: 'too_short' | 'too_long' | 'no_action_indicator'
+  suggestion?: string
+  sourceField: string
+}
+
+export interface TurnIntoTasksOutput {
+  tasks: ExtractedTask[]
+  needsEditing?: NeedsEditingTask[]
+  artifactId: string
+  artifactTitle: string
 }

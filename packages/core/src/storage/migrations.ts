@@ -358,6 +358,53 @@ const migrations: Migration[] = [
       )
     },
   },
+  {
+    version: 11,
+    description: 'Decision metadata — confidence, horizon, reversibility, category',
+    up(db) {
+      runSQL(
+        db,
+        `
+        ALTER TABLE decisions ADD COLUMN confidence TEXT CHECK(confidence IN ('high','medium','low'));
+        ALTER TABLE decisions ADD COLUMN horizon TEXT CHECK(horizon IN ('immediate','near_term','strategic'));
+        ALTER TABLE decisions ADD COLUMN reversibility_class TEXT CHECK(reversibility_class IN ('reversible','irreversible'));
+        ALTER TABLE decisions ADD COLUMN reversibility_notes TEXT;
+        ALTER TABLE decisions ADD COLUMN category TEXT CHECK(category IN ('strategic','tactical','operational'));
+        `,
+      )
+    },
+  },
+  {
+    version: 12,
+    description: 'Advisory artifacts — structured strategic reasoning storage',
+    up(db) {
+      runSQL(
+        db,
+        `
+        CREATE TABLE IF NOT EXISTS advisory_artifacts (
+          id TEXT PRIMARY KEY,
+          domain_id TEXT NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
+          session_id TEXT,
+          type TEXT NOT NULL CHECK(type IN ('brainstorm','risk_assessment','scenario','strategic_review')),
+          title TEXT NOT NULL,
+          llm_title TEXT NOT NULL DEFAULT '',
+          schema_version INTEGER NOT NULL DEFAULT 1,
+          content TEXT NOT NULL DEFAULT '{}',
+          fingerprint TEXT NOT NULL DEFAULT '',
+          source TEXT NOT NULL DEFAULT 'llm' CHECK(source IN ('llm','user','import')),
+          source_message_id TEXT DEFAULT NULL,
+          status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','archived')),
+          archived_at TEXT DEFAULT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_artifact_domain_type ON advisory_artifacts(domain_id, type);
+        CREATE INDEX idx_artifact_domain_created ON advisory_artifacts(domain_id, created_at);
+        CREATE UNIQUE INDEX idx_artifact_fingerprint ON advisory_artifacts(domain_id, fingerprint) WHERE fingerprint != '';
+        `,
+      )
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

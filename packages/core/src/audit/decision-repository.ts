@@ -23,6 +23,11 @@ interface DecisionRow {
   status: string
   supersedes_decision_id: string | null
   linked_files: string
+  confidence: string | null
+  horizon: string | null
+  reversibility_class: string | null
+  reversibility_notes: string | null
+  category: string | null
   created_at: string
   updated_at: string
 }
@@ -47,6 +52,11 @@ function rowToDecision(row: DecisionRow): Decision {
     status: row.status as DecisionStatus,
     supersedesDecisionId: row.supersedes_decision_id,
     linkedFiles,
+    confidence: row.confidence as Decision['confidence'],
+    horizon: row.horizon as Decision['horizon'],
+    reversibilityClass: row.reversibility_class as Decision['reversibilityClass'],
+    reversibilityNotes: row.reversibility_notes,
+    category: row.category as Decision['category'],
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -68,7 +78,7 @@ export class DecisionRepository {
     try {
       this.db
         .prepare(
-          'INSERT INTO decisions (id, domain_id, session_id, decision_id, decision, rationale, downside, revisit_trigger, status, linked_files, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO decisions (id, domain_id, session_id, decision_id, decision, rationale, downside, revisit_trigger, status, linked_files, confidence, horizon, reversibility_class, reversibility_notes, category, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         )
         .run(
           id,
@@ -81,6 +91,11 @@ export class DecisionRepository {
           parsed.data.revisitTrigger,
           'active',
           linkedFilesJson,
+          parsed.data.confidence ?? null,
+          parsed.data.horizon ?? null,
+          parsed.data.reversibilityClass ?? null,
+          parsed.data.reversibilityNotes ?? null,
+          parsed.data.category ?? null,
           now,
           now,
         )
@@ -97,6 +112,11 @@ export class DecisionRepository {
         status: 'active',
         supersedesDecisionId: null,
         linkedFiles: parsed.data.linkedFiles,
+        confidence: parsed.data.confidence ?? null,
+        horizon: parsed.data.horizon ?? null,
+        reversibilityClass: parsed.data.reversibilityClass ?? null,
+        reversibilityNotes: parsed.data.reversibilityNotes ?? null,
+        category: parsed.data.category ?? null,
         createdAt: now,
         updatedAt: now,
       })
@@ -158,7 +178,7 @@ export class DecisionRepository {
         // Create new with chain
         this.db
           .prepare(
-            'INSERT INTO decisions (id, domain_id, session_id, decision_id, decision, rationale, downside, revisit_trigger, status, supersedes_decision_id, linked_files, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO decisions (id, domain_id, session_id, decision_id, decision, rationale, downside, revisit_trigger, status, supersedes_decision_id, linked_files, confidence, horizon, reversibility_class, reversibility_notes, category, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
           )
           .run(
             newId,
@@ -172,6 +192,11 @@ export class DecisionRepository {
             'active',
             oldDecisionId,
             linkedFilesJson,
+            parsed.data.confidence ?? null,
+            parsed.data.horizon ?? null,
+            parsed.data.reversibilityClass ?? null,
+            parsed.data.reversibilityNotes ?? null,
+            parsed.data.category ?? null,
             now,
             now,
           )
@@ -189,6 +214,11 @@ export class DecisionRepository {
         status: 'active',
         supersedesDecisionId: oldDecisionId,
         linkedFiles: parsed.data.linkedFiles,
+        confidence: parsed.data.confidence ?? null,
+        horizon: parsed.data.horizon ?? null,
+        reversibilityClass: parsed.data.reversibilityClass ?? null,
+        reversibilityNotes: parsed.data.reversibilityNotes ?? null,
+        category: parsed.data.category ?? null,
         createdAt: now,
         updatedAt: now,
       })

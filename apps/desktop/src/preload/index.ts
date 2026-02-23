@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { DomainOSAPI, KBUpdateProposal, ToolUseEvent, ProviderConfig, DependencyType, DeadlineStatus, DeadlineSource } from './api'
+import type { DomainOSAPI, KBUpdateProposal, ToolUseEvent, ProviderConfig, DependencyType, DeadlineStatus, DeadlineSource, AdvisoryType, AdvisoryStatus, SaveDraftBlockInput } from './api'
 
 const api: DomainOSAPI = {
   platform: process.platform,
@@ -194,6 +194,18 @@ const api: DomainOSAPI = {
     list: (domainId: string, limit?: number) => ipcRenderer.invoke('decision:list', domainId, limit),
     active: (domainId: string) => ipcRenderer.invoke('decision:active', domainId),
     reject: (id: string) => ipcRenderer.invoke('decision:reject', id),
+  },
+
+  advisory: {
+    list: (domainId: string, options?: { status?: AdvisoryStatus; type?: AdvisoryType; limit?: number }) =>
+      ipcRenderer.invoke('advisory:list', domainId, options),
+    get: (id: string) => ipcRenderer.invoke('advisory:get', id),
+    archive: (id: string) => ipcRenderer.invoke('advisory:archive', id),
+    unarchive: (id: string) => ipcRenderer.invoke('advisory:unarchive', id),
+    rename: (id: string, title: string) => ipcRenderer.invoke('advisory:rename', id, title),
+    saveDraftBlock: (input: SaveDraftBlockInput) => ipcRenderer.invoke('advisory:save-draft-block', input),
+    extractTasks: (artifactId: string, domainId: string) =>
+      ipcRenderer.invoke('advisory:extract-tasks', artifactId, domainId),
   },
 
   settings: {

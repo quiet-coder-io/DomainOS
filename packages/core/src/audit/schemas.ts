@@ -60,6 +60,11 @@ export const CreateDecisionInputSchema = z.object({
   downside: z.string().default(''),
   revisitTrigger: z.string().default(''),
   linkedFiles: z.array(z.string()).default([]),
+  confidence: z.enum(['high', 'medium', 'low']).optional(),
+  horizon: z.enum(['immediate', 'near_term', 'strategic']).optional(),
+  reversibilityClass: z.enum(['reversible', 'irreversible']).optional(),
+  reversibilityNotes: z.string().optional(),
+  category: z.enum(['strategic', 'tactical', 'operational']).optional(),
 })
 
 export type CreateDecisionInput = z.input<typeof CreateDecisionInputSchema>
@@ -76,6 +81,11 @@ export const DecisionSchema = z.object({
   status: DecisionStatusSchema,
   supersedesDecisionId: z.string().nullable(),
   linkedFiles: z.array(z.string()),
+  confidence: z.enum(['high', 'medium', 'low']).nullable(),
+  horizon: z.enum(['immediate', 'near_term', 'strategic']).nullable(),
+  reversibilityClass: z.enum(['reversible', 'irreversible']).nullable(),
+  reversibilityNotes: z.string().nullable(),
+  category: z.enum(['strategic', 'tactical', 'operational']).nullable(),
   createdAt: TimestampSchema,
   updatedAt: TimestampSchema,
 })
