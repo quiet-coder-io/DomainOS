@@ -17,6 +17,9 @@ import { DomainRelationshipRepository } from '../domains/relationships.js'
 import { DomainRepository } from '../domains/repository.js'
 import { KBRepository } from '../kb/repository.js'
 import { GapFlagRepository } from '../agents/gap-flag-repository.js'
+import { DeadlineRepository } from '../deadlines/repository.js'
+import { todayISO, deadlineSeverityWeight } from '../deadlines/evaluation.js'
+import type { Deadline } from '../deadlines/schemas.js'
 import type { Result } from '../common/index.js'
 import { Ok, Err, DomainOSError } from '../common/index.js'
 
@@ -42,6 +45,7 @@ export interface DomainHealth {
   fileCountStatChecked: number
   staleSummary: StaleSummary
   openGapFlags: number
+  overdueDeadlines: number
   severityScore: number
   lastTouchedAt: string | null
   outgoingDeps: Array<{
@@ -199,6 +203,10 @@ export async function computePortfolioHealth(
     const kbRepo = new KBRepository(db)
     const gapRepo = new GapFlagRepository(db)
     const relRepo = new DomainRelationshipRepository(db)
+    const deadlineRepo = new DeadlineRepository(db)
+
+    // Freeze "today" for consistent overdue evaluation across the computation
+    const today = todayISO()
 
     // 1. Load all domains
     const domainsResult = domainRepo.list()
@@ -221,6 +229,16 @@ export async function computePortfolioHealth(
       outgoingByDomain.get(rel.domainId)!.push(rel)
       if (!incomingByDomain.has(rel.siblingDomainId)) incomingByDomain.set(rel.siblingDomainId, [])
       incomingByDomain.get(rel.siblingDomainId)!.push(rel)
+    }
+
+    // 2b. Load all overdue deadlines once, group by domain
+    const overdueByDomain = new Map<string, Deadline[]>()
+    const overdueResult = deadlineRepo.getOverdue(undefined, today)
+    if (overdueResult.ok) {
+      for (const d of overdueResult.value) {
+        if (!overdueByDomain.has(d.domainId)) overdueByDomain.set(d.domainId, [])
+        overdueByDomain.get(d.domainId)!.push(d)
+      }
     }
 
     // 3. Compute per-domain health
@@ -289,6 +307,14 @@ export async function computePortfolioHealth(
       // Add gap flag weight
       severityScore += openGaps.length * GAP_FLAG_WEIGHT
 
+      // Add overdue deadline weight (capped at 12)
+      const domainOverdue = overdueByDomain.get(domain.id) ?? []
+      let deadlineSeverity = 0
+      for (const dl of domainOverdue) {
+        deadlineSeverity += deadlineSeverityWeight(dl, today)
+      }
+      severityScore += Math.min(deadlineSeverity, 12)
+
       // Derive aggregates
       const fresh = Object.values(freshByTier).reduce((a, b) => a + b, 0)
       const stale = Object.values(staleByTier).reduce((a, b) => a + b, 0)
@@ -339,6 +365,7 @@ export async function computePortfolioHealth(
           worstFile,
         },
         openGapFlags: openGaps.length,
+        overdueDeadlines: domainOverdue.length,
         severityScore,
         lastTouchedAt,
         outgoingDeps: outgoing,
@@ -503,6 +530,7 @@ export function computeSnapshotHash(domainHealths: DomainHealth[]): string {
       id: d.domainId,
       staleSummary: d.staleSummary,
       openGapFlags: d.openGapFlags,
+      overdueDeadlines: d.overdueDeadlines,
       outgoingDeps: d.outgoingDeps
         .slice()
         .sort(

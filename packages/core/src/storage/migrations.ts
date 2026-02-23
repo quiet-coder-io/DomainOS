@@ -295,6 +295,69 @@ const migrations: Migration[] = [
       )
     },
   },
+  {
+    version: 10,
+    description: 'Deadlines — per-domain triggered deadline tracking + audit event type expansion',
+    up(db) {
+      // Expand audit_log CHECK constraint to include 'deadline_lifecycle'.
+      // SQLite cannot ALTER CHECK constraints, so recreate the table.
+      runSQL(
+        db,
+        `
+        CREATE TABLE IF NOT EXISTS audit_log_new (
+          id TEXT PRIMARY KEY,
+          domain_id TEXT NOT NULL,
+          session_id TEXT,
+          agent_name TEXT NOT NULL DEFAULT '',
+          file_path TEXT NOT NULL DEFAULT '',
+          change_description TEXT NOT NULL,
+          content_hash TEXT NOT NULL DEFAULT '',
+          event_type TEXT NOT NULL DEFAULT 'kb_write',
+          source TEXT NOT NULL DEFAULT 'agent',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (domain_id) REFERENCES domains(id) ON DELETE CASCADE,
+          CHECK(event_type IN ('kb_write','cross_domain_read','decision_created','session_start','session_wrap','deadline_lifecycle'))
+        );
+        INSERT INTO audit_log_new SELECT * FROM audit_log;
+        DROP TABLE audit_log;
+        ALTER TABLE audit_log_new RENAME TO audit_log;
+        CREATE INDEX IF NOT EXISTS idx_audit_log_domain ON audit_log(domain_id, created_at);
+        `,
+      )
+
+      runSQL(
+        db,
+        `
+        CREATE TABLE IF NOT EXISTS deadlines (
+          id TEXT PRIMARY KEY,
+          domain_id TEXT NOT NULL,
+          text TEXT NOT NULL,
+          due_date TEXT NOT NULL,
+          priority INTEGER NOT NULL DEFAULT 4,
+          status TEXT NOT NULL DEFAULT 'active',
+          source TEXT NOT NULL DEFAULT 'manual',
+          source_ref TEXT NOT NULL DEFAULT '',
+          snoozed_until TEXT,
+          completed_at TEXT,
+          cancelled_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (domain_id) REFERENCES domains(id) ON DELETE CASCADE,
+          CHECK(status IN ('active','snoozed','completed','cancelled')),
+          CHECK(priority >= 1 AND priority <= 7),
+          CHECK(due_date GLOB '????-??-??'),
+          CHECK(snoozed_until IS NULL OR snoozed_until GLOB '????-??-??')
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_deadlines_domain_status ON deadlines(domain_id, status);
+        CREATE INDEX IF NOT EXISTS idx_deadlines_due ON deadlines(due_date, status);
+        CREATE INDEX IF NOT EXISTS idx_deadlines_domain_due_status ON deadlines(domain_id, status, due_date);
+        CREATE INDEX IF NOT EXISTS idx_deadlines_active_due ON deadlines(due_date) WHERE status = 'active';
+        `,
+      )
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

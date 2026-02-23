@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { DomainOSAPI, KBUpdateProposal, ToolUseEvent, ProviderConfig, DependencyType } from './api'
+import type { DomainOSAPI, KBUpdateProposal, ToolUseEvent, ProviderConfig, DependencyType, DeadlineStatus, DeadlineSource } from './api'
 
 const api: DomainOSAPI = {
   platform: process.platform,
@@ -127,6 +127,30 @@ const api: DomainOSAPI = {
       ipcRenderer.invoke('relationship:remove-relationship', fromDomainId, toDomainId),
     removeSibling: (domainId: string, siblingDomainId: string) =>
       ipcRenderer.invoke('relationship:remove-sibling', domainId, siblingDomainId),
+  },
+
+  deadline: {
+    create: (input: {
+      domainId: string; text: string; dueDate: string; priority?: number
+      source?: DeadlineSource; sourceRef?: string
+    }) => ipcRenderer.invoke('deadline:create', input),
+    list: (domainId: string, status?: DeadlineStatus) =>
+      ipcRenderer.invoke('deadline:list', domainId, status),
+    active: (domainId: string) => ipcRenderer.invoke('deadline:active', domainId),
+    overdue: (domainId?: string) => ipcRenderer.invoke('deadline:overdue', domainId),
+    upcoming: (domainId: string, days: number) =>
+      ipcRenderer.invoke('deadline:upcoming', domainId, days),
+    snooze: (id: string, until: string) => ipcRenderer.invoke('deadline:snooze', id, until),
+    complete: (id: string) => ipcRenderer.invoke('deadline:complete', id),
+    cancel: (id: string) => ipcRenderer.invoke('deadline:cancel', id),
+    findBySourceRef: (domainId: string, sourceRef: string) =>
+      ipcRenderer.invoke('deadline:find-by-source-ref', domainId, sourceRef),
+    onUnsnoozeWake(callback: () => void) {
+      ipcRenderer.on('deadline:unsnooze-wake', () => callback())
+    },
+    offUnsnoozeWake() {
+      ipcRenderer.removeAllListeners('deadline:unsnooze-wake')
+    },
   },
 
   briefing: {

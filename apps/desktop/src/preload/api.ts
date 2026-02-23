@@ -131,6 +131,23 @@ export interface DomainOSAPI {
     removeSibling(domainId: string, siblingDomainId: string): Promise<IPCResult<void>>
   }
 
+  deadline: {
+    create(input: {
+      domainId: string; text: string; dueDate: string; priority?: number
+      source?: DeadlineSource; sourceRef?: string
+    }): Promise<IPCResult<Deadline>>
+    list(domainId: string, status?: DeadlineStatus): Promise<IPCResult<Deadline[]>>
+    active(domainId: string): Promise<IPCResult<Deadline[]>>
+    overdue(domainId?: string): Promise<IPCResult<Deadline[]>>
+    upcoming(domainId: string, days: number): Promise<IPCResult<Deadline[]>>
+    snooze(id: string, until: string): Promise<IPCResult<Deadline>>
+    complete(id: string): Promise<IPCResult<Deadline>>
+    cancel(id: string): Promise<IPCResult<Deadline>>
+    findBySourceRef(domainId: string, sourceRef: string): Promise<IPCResult<Deadline | null>>
+    onUnsnoozeWake(callback: () => void): void
+    offUnsnoozeWake(): void
+  }
+
   briefing: {
     portfolioHealth(): Promise<IPCResult<PortfolioHealth>>
     analyze(requestId: string): Promise<IPCResult<BriefingAnalysis>>
@@ -347,6 +364,7 @@ export interface DomainHealth {
     worstFile?: { path: string; tier: string; daysSinceUpdate: number }
   }
   openGapFlags: number
+  overdueDeadlines: number
   severityScore: number
   lastTouchedAt: string | null
   outgoingDeps: Array<{
@@ -438,6 +456,27 @@ export interface Decision {
   status: string
   supersedesDecisionId: string | null
   linkedFiles: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+// ── Deadline types ──
+
+export type DeadlineStatus = 'active' | 'snoozed' | 'completed' | 'cancelled'
+export type DeadlineSource = 'manual' | 'briefing'
+
+export interface Deadline {
+  id: string
+  domainId: string
+  text: string
+  dueDate: string
+  priority: number
+  status: DeadlineStatus
+  source: DeadlineSource
+  sourceRef: string
+  snoozedUntil: string | null
+  completedAt: string | null
+  cancelledAt: string | null
   createdAt: string
   updatedAt: string
 }

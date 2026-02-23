@@ -44,6 +44,7 @@ function makeDomainHealth(overrides: Partial<DomainHealth> = {}): DomainHealth {
       critical: 0,
     },
     openGapFlags: 0,
+    overdueDeadlines: 0,
     severityScore: 0,
     lastTouchedAt: null,
     outgoingDeps: [],

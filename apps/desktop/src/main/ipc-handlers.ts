@@ -41,6 +41,7 @@ import {
   computePortfolioHealth,
   buildBriefingPrompt,
   parseBriefingAnalysis,
+  DeadlineRepository,
 } from '@domain-os/core'
 import type {
   CreateDomainInput,
@@ -51,6 +52,8 @@ import type {
   ProviderName,
   ToolCapableProvider,
   AddRelationshipOptions,
+  CreateDeadlineInput,
+  DeadlineStatus,
 } from '@domain-os/core'
 import { getIntakeToken } from './intake-token'
 import { startKBWatcher, stopKBWatcher } from './kb-watcher'
@@ -90,9 +93,33 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
   const decisionRepo = new DecisionRepository(db)
   const sessionRepo = new SessionRepository(db)
   const gapFlagRepo = new GapFlagRepository(db)
+  const deadlineRepo = new DeadlineRepository(db)
 
   // Seed default shared protocols (STOP + Gap Detection) — idempotent
   seedDefaultProtocols(sharedProtocolRepo)
+
+  // ── Deadline snooze wake — unsnooze on startup + hourly ──
+  {
+    const wakeResult = deadlineRepo.unsnoozeDue()
+    if (wakeResult.ok && wakeResult.value > 0) {
+      console.log(`[deadlines] Startup unsnooze: ${wakeResult.value} deadline(s) woken`)
+    }
+  }
+
+  const unsnoozeIntervalId = setInterval(() => {
+    const wakeResult = deadlineRepo.unsnoozeDue()
+    if (wakeResult.ok && wakeResult.value > 0) {
+      console.log(`[deadlines] Hourly unsnooze: ${wakeResult.value} deadline(s) woken`)
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('deadline:unsnooze-wake')
+      }
+    }
+  }, 3_600_000) // 1 hour
+
+  // Clean up interval on app quit
+  app.on('before-quit', () => {
+    clearInterval(unsnoozeIntervalId)
+  })
 
   // ── Multi-key storage helpers (D7) ──
 
@@ -834,6 +861,62 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
 
   ipcMain.handle('relationship:remove-sibling', (_event, domainId: string, siblingDomainId: string) => {
     return relationshipRepo.removeSibling(domainId, siblingDomainId)
+  })
+
+  // --- Deadlines ---
+
+  ipcMain.handle('deadline:create', (_event, input: CreateDeadlineInput) => {
+    return deadlineRepo.create(input)
+  })
+
+  ipcMain.handle('deadline:list', (_event, domainId: string, status?: DeadlineStatus) => {
+    return deadlineRepo.getByDomain(domainId, status ? { status } : undefined)
+  })
+
+  ipcMain.handle('deadline:active', (_event, domainId: string) => {
+    return deadlineRepo.getActive(domainId)
+  })
+
+  ipcMain.handle('deadline:overdue', (_event, domainId?: string) => {
+    return deadlineRepo.getOverdue(domainId)
+  })
+
+  ipcMain.handle('deadline:upcoming', (_event, domainId: string, days: number) => {
+    return deadlineRepo.getUpcoming(domainId, days)
+  })
+
+  ipcMain.handle('deadline:snooze', (_event, id: string, until: string) => {
+    return deadlineRepo.snooze(id, until)
+  })
+
+  ipcMain.handle('deadline:complete', (_event, id: string) => {
+    const result = deadlineRepo.complete(id)
+    if (result.ok) {
+      auditRepo.logChange({
+        domainId: result.value.domainId,
+        changeDescription: `Deadline completed: "${result.value.text}"`,
+        eventType: 'deadline_lifecycle',
+        source: 'user',
+      })
+    }
+    return result
+  })
+
+  ipcMain.handle('deadline:cancel', (_event, id: string) => {
+    const result = deadlineRepo.cancel(id)
+    if (result.ok) {
+      auditRepo.logChange({
+        domainId: result.value.domainId,
+        changeDescription: `Deadline cancelled: "${result.value.text}"`,
+        eventType: 'deadline_lifecycle',
+        source: 'user',
+      })
+    }
+    return result
+  })
+
+  ipcMain.handle('deadline:find-by-source-ref', (_event, domainId: string, sourceRef: string) => {
+    return deadlineRepo.findBySourceRef(domainId, sourceRef)
   })
 
   // --- Briefing ---

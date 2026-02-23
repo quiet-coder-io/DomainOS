@@ -76,6 +76,8 @@ DomainOS gives each area of your professional life its own AI-powered operating 
 - **Computed portfolio health** — scores each domain's health based on KB staleness, open gap flags, and cross-domain dependencies; status tiers: active, quiet, stale-risk, blocked
 - **Cross-domain alerts** — automatically detects when a stale or blocked domain affects a dependent domain (e.g., a stale PCA report blocking a refinance closing)
 - **LLM-powered analysis** — streams a briefing narrative from the health snapshot + KB digests, producing structured alerts, prioritized actions, and monitors
+- **Analysis alerts** — LLM-generated alerts surfaced as a standalone section with severity levels, domain attribution, and supporting evidence; displayed separately from computed cross-domain alerts so you can see both what the data shows and what the AI interprets
+- **Deadline management** — capture deadlines from analysis actions or create them manually; track with priority, due date, domain, and status (active / completed / snoozed / cancelled); overdue deadlines surface prominently in the briefing
 - **Snapshot hashing** — detects when portfolio state has changed since the last analysis, prompting a re-run
 
 ### Cross-Domain
