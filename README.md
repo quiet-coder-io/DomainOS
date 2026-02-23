@@ -1,6 +1,6 @@
 # DomainOS
 
-[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![AGPL-3.0 License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Local-First](https://img.shields.io/badge/data-local--first-green.svg)](#security--privacy)
 [![BYOK](https://img.shields.io/badge/AI-bring--your--own--key-orange.svg)](#security--privacy)
 [![Multi-Provider](https://img.shields.io/badge/LLM-Anthropic%20%7C%20OpenAI%20%7C%20Ollama-purple.svg)](#multi-provider-llm-support)
@@ -250,4 +250,4 @@ Looking for a place to start? Check issues labeled [`good-first-issue`](https://
 
 ## License
 
-MIT
+[AGPL-3.0](LICENSE) — you can use, modify, and distribute this software, but any modified version must also be open-sourced under AGPL-3.0, including when served over a network.

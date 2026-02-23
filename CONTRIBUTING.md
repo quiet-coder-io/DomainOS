@@ -77,3 +77,7 @@ Before submitting your PR, verify:
 - [ ] No secrets, credentials, or `.env` files included
 - [ ] PR description clearly explains the change and motivation
 - [ ] Changes align with the [privacy expectations](#privacy-expectations) above
+
+## License
+
+By contributing to DomainOS, you agree that your contributions will be licensed under the [AGPL-3.0](LICENSE) license.
