@@ -6,6 +6,7 @@
 [![Multi-Provider](https://img.shields.io/badge/LLM-Anthropic%20%7C%20OpenAI%20%7C%20Ollama-purple.svg)](#multi-provider-llm-support)
 [![Open Source](https://img.shields.io/badge/open-source-brightgreen.svg)](LICENSE)
 [![Release](https://img.shields.io/badge/release-early--alpha-yellow.svg)](#project-status)
+[![Roadmap](https://img.shields.io/badge/roadmap-view-informational.svg)](ROADMAP.md)
 
 **DomainOS is a local-first AI knowledge management desktop app for managing multiple domains with domain-scoped assistants, RAG-ready knowledge bases, and bring-your-own-key (BYOK) privacy. Choose hosted or local LLM providers per domain, keep your work separated by context, and organize durable domain protocols and files — all on your machine.**
 
