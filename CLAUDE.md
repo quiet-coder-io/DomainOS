@@ -63,6 +63,8 @@ This loop validates the core value prop: domain-scoped AI that reads and writes 
 - **Portfolio health briefing** — computed health scoring, cross-domain alerts, LLM-powered analysis with streaming, snapshot hashing for stale detection
 - **Browser ingestion pipeline** — Chrome extension → localhost intake server → AI classification
 - **KB file watching** — filesystem monitoring with debounced auto-scan on domain switch
+- **Strategic advisory system** — mode-classified responses (brainstorm/challenge/review/scenario/general), persistent advisory artifacts with strict Zod-validated JSON fence blocks, 4 read-only advisory tools, deterministic task extraction, cross-domain contamination guard
+- **Decision quality gates** — confidence, horizon, reversibility class, category, authority source tier on decision records
 
 ### Out of scope (future)
 - Protocol marketplace/sharing
@@ -98,8 +100,14 @@ Directed relationships with typed dependencies (`blocks`, `depends_on`, `informs
 | `src/agents/openai-provider.ts` | OpenAI (GPT-4o, o3-mini) implementation — streaming chat + tool-use; base class for Ollama |
 | `src/agents/ollama-provider.ts` | Ollama (local LLMs) — extends OpenAI provider with custom baseURL + native `/api/tags` for model listing |
 | `src/agents/provider-factory.ts` | `createProvider()` factory, `KNOWN_MODELS`, `DEFAULT_MODELS`, `ProviderName` type |
-| `src/agents/prompt-builder.ts` | System prompt construction from domain config + KB digest + protocols |
-| `src/storage/` | SQLite schema, migrations (v1–v9), queries. v8: per-domain model override. v9: directed relationships with dependency type |
+| `src/agents/prompt-builder.ts` | System prompt construction from domain config + KB digest + protocols + advisory mini-protocol |
+| `src/advisory/` | Advisory system: parser, repository, schemas, task extractor, enum normalization |
+| `src/advisory/parser.ts` | Strict JSON fence block parser — multi-block extraction, Zod `.strict()` validation, control/payload split, layered rate limiting, fingerprint dedup, parser telemetry |
+| `src/advisory/repository.ts` | Advisory artifact CRUD — create (with fingerprint idempotency + rate limits), getByDomain, archive/unarchive, rename, countTodayByDomain, countThisHourByDomain |
+| `src/advisory/schemas.ts` | Zod schemas for 4 advisory types (brainstorm, risk_assessment, scenario, strategic_review) with nested `.strict()` on array items |
+| `src/advisory/task-extractor.ts` | Deterministic task extraction from artifacts — type-specific field mapping, title validation (6-120 chars, verb check), `needsEditing[]` for rejected candidates |
+| `src/advisory/normalize.ts` | Centralized `normalizeEnum()`, `normalizePersist()`, `normalizeType()`, `validateEnum()` — shared by advisory and decision parsers |
+| `src/storage/` | SQLite schema, migrations (v1–v12). v8: per-domain model override. v9: directed relationships. v11: decision quality columns. v12: advisory_artifacts table |
 | `src/common/` | Result type, shared Zod schemas |
 
 ### Integrations (`packages/integrations/`)
@@ -113,8 +121,9 @@ Directed relationships with typed dependencies (`blocks`, `depends_on`, `informs
 
 | File | Purpose |
 |------|---------|
-| `src/main/ipc-handlers.ts` | 55 IPC handlers: domains, KB, chat, briefing, intake, protocols, sessions, relationships, gap flags, decisions, audit, Gmail, GTasks, settings |
-| `src/main/tool-loop.ts` | **Provider-agnostic** tool-use loop — works with Anthropic, OpenAI, Ollama; prefix-based dispatch (`gmail_*`, `gtasks_*`), ROWYS Gmail guard, tool output sanitization, transcript validation, size guards (75KB/result, 400KB total), capability cache management |
+| `src/main/ipc-handlers.ts` | 60+ IPC handlers: domains, KB, chat, briefing, intake, protocols, sessions, relationships, gap flags, decisions, audit, advisory, Gmail, GTasks, settings |
+| `src/main/tool-loop.ts` | **Provider-agnostic** tool-use loop — works with Anthropic, OpenAI, Ollama; prefix-based dispatch (`gmail_*`, `gtasks_*`, `advisory_*`), ROWYS Gmail guard, tool output sanitization, transcript validation, size guards (75KB/result, 400KB total), capability cache management |
+| `src/main/advisory-tools.ts` | `ADVISORY_TOOLS` as `ToolDefinition[]` (advisory_search_decisions, advisory_search_deadlines, advisory_cross_domain_context, advisory_risk_snapshot), executors with output caps (10 items, 300 char truncation), `schemaVersion` wrapper |
 | `src/main/gmail-tools.ts` | `GMAIL_TOOLS` as `ToolDefinition[]` (provider-agnostic), input validation, executor |
 | `src/main/gmail-oauth.ts` | OAuth PKCE flow via system browser + loopback |
 | `src/main/gmail-credentials.ts` | Encrypted credential storage (safeStorage) |
@@ -128,7 +137,9 @@ Directed relationships with typed dependencies (`blocks`, `depends_on`, `informs
 | `src/renderer/pages/BriefingPage.tsx` | Portfolio health dashboard + LLM analysis streaming UI with alerts, actions, monitors + GTasks connect/disconnect + overdue badge |
 | `src/renderer/stores/settings-store.ts` | Zustand store for provider keys (boolean+last4), global config, Ollama state |
 | `src/renderer/stores/domain-store.ts` | Zustand store for domains including `modelProvider`, `modelName`, `forceToolAttempt` |
+| `src/renderer/stores/advisory-store.ts` | Zustand store for advisory artifacts: fetch, filter (status/type), archive/unarchive, rename |
 | `src/renderer/stores/briefing-store.ts` | Zustand store: `fetchHealth()`, `analyze()` with streaming + cancel, snapshot hash stale detection |
+| `src/renderer/components/AdvisoryPanel.tsx` | Strategic History panel — status/type filters, expandable artifact cards, type-specific content renderers, archive/unarchive actions |
 
 ## Multi-Provider LLM Architecture
 
@@ -174,7 +185,7 @@ Key: ${providerName}:${model} (or ${providerName}:${model}:${ollamaBaseUrl} for 
 
 ### Per-Domain Model Override
 
-Database columns (migration v8): `model_provider TEXT`, `model_name TEXT`, `force_tool_attempt INTEGER` (latest migration: v9 — directed relationships)
+Database columns (migration v8): `model_provider TEXT`, `model_name TEXT`, `force_tool_attempt INTEGER` (latest migration: v12 — advisory artifacts)
 - NULL = use global default
 - Override = specific provider + model
 - `forceToolAttempt` = try tools even when cache says `not_observed`
@@ -226,6 +237,12 @@ Decrypted keys cached in-memory after first read. Keys never cross IPC to render
 | `gtasks:complete-task` | renderer→main | Mark a task as completed |
 | `gtasks:delete-task` | renderer→main | Delete a task |
 | `gtasks:update-task` | renderer→main | Update task title/notes/due |
+| `advisory:list` | renderer→main | List advisory artifacts by domain with status/type filters |
+| `advisory:archive` | renderer→main | Archive an advisory artifact |
+| `advisory:unarchive` | renderer→main | Unarchive an advisory artifact |
+| `advisory:rename` | renderer→main | Rename an advisory artifact title |
+| `advisory:save-draft-block` | renderer→main | 1-click save of a `persist:"no"` draft block from message metadata |
+| `advisory:extract-tasks` | renderer→main | Deterministic task extraction from an artifact |
 
 ## Environment Variables
 

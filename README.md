@@ -63,6 +63,15 @@ DomainOS gives each area of your professional life its own AI-powered operating 
 - **Settings dialog** — manage API keys for Anthropic and OpenAI, test Ollama connections, browse installed Ollama models, probe tool support per model
 - **Encrypted key storage** — per-provider API keys stored via Electron `safeStorage`, encrypted by your OS keychain; keys never reach the renderer process
 
+### Strategic Advisory
+
+- **Mode-classified responses** — the AI classifies each interaction as brainstorm, challenge, review, scenario, or general, and structures its output accordingly
+- **Advisory artifacts** — strategic outputs (brainstorms, risk assessments, scenario analyses, strategic reviews) can be persisted to a "Strategic History" panel with schema-validated JSON fence blocks
+- **Decision quality gates** — decisions include confidence level, time horizon, reversibility class, category, and authority source tier for richer audit trails
+- **Advisory tools** — 4 read-only tools (`advisory_search_decisions`, `advisory_search_deadlines`, `advisory_cross_domain_context`, `advisory_risk_snapshot`) give the AI data-aware strategic reasoning
+- **Cross-domain contamination guard** — cross-domain facts are labeled with source domain in tool outputs and enforced by protocol
+- **Deterministic task extraction** — "Turn into tasks" converts advisory artifacts into actionable deadlines without an LLM call
+
 ### Safety & Governance
 
 - **Stop blocks** — the AI escalates to you with a red alert when it encounters situations requiring human judgment, based on configurable escalation triggers
@@ -100,7 +109,7 @@ graph TB
     subgraph Electron["Desktop App (Electron)"]
         subgraph Renderer["Renderer Process — React 19 + Tailwind CSS 4"]
             CHAT["Chat Panel"]
-            SIDEBAR["Sidebar Panels<br/><small>Gap Flags · Decisions · Audit Log</small>"]
+            SIDEBAR["Sidebar Panels<br/><small>Gap Flags · Decisions · Strategic History · Audit Log</small>"]
             BRIEFING["Portfolio Briefing<br/><small>Health · Alerts · Analysis</small>"]
             INTAKE["Intake Panel"]
             SETTINGS["Domain Settings<br/><small>Protocols · Dependencies · KB</small>"]
@@ -114,6 +123,7 @@ graph TB
                 KB[Knowledge Base]
                 PROTOCOLS[Protocols]
                 AGENTS[Agents]
+                ADVISORY["Advisory<br/><small>Parser · Artifacts · Tasks</small>"]
                 BRIEFMOD["Briefing<br/><small>Health · Alerts</small>"]
                 SESSIONS[Sessions]
                 AUDIT[Audit Trail]
@@ -160,6 +170,7 @@ flowchart LR
     D -- "Stop block" --> E["🛑 Stop Alert<br/><small>Human approval required</small>"]
     D -- "Gap flag" --> F["⚠️ Gap Flag<br/><small>KB gap detected</small>"]
     D -- "Decision" --> G["📋 Decision Card<br/><small>Logged with rationale</small>"]
+    D -- "Advisory block" --> G2["🎯 Advisory Artifact<br/><small>Persisted to Strategic History</small>"]
     D -- "KB proposal" --> H["📝 KB Update<br/><small>User reviews & approves</small>"]
     D -- "Content" --> I["💬 Chat response"]
     H -- "Approved" --> J["Update KB files"]
@@ -216,17 +227,18 @@ domain-os/
 │   │       ├── kb/           # KB indexing, digests, tiering
 │   │       ├── protocols/    # Per-domain and shared protocols
 │   │       ├── agents/       # Multi-provider LLM (Anthropic, OpenAI, Ollama), prompt builder
+│   │       ├── advisory/     # Advisory parser, artifact repository, task extractor, schemas
 │   │       ├── briefing/     # Portfolio health computation, LLM analysis, output parsing
 │   │       ├── sessions/     # Session lifecycle management
 │   │       ├── audit/        # Event audit trail
 │   │       ├── intake/       # Browser intake classification
-│   │       ├── storage/      # SQLite schema and migrations (v1–v9)
+│   │       ├── storage/      # SQLite schema and migrations (v1–v12)
 │   │       └── common/       # Result type, shared schemas
 │   └── integrations/         # External service integrations (Gmail, Google Tasks)
 ├── apps/
 │   └── desktop/              # Electron + React desktop app
 │       └── src/
-│           ├── main/         # Main process, IPC handlers, intake server
+│           ├── main/         # Main process, IPC handlers, advisory tools, intake server
 │           ├── preload/      # contextBridge API surface
 │           └── renderer/     # React UI
 │               ├── components/  # Shared UI components
