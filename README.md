@@ -254,6 +254,10 @@ domain-os/
 - **No telemetry** — zero analytics, tracking, or phone-home behavior.
 - **Localhost intake** — the Chrome extension communicates with the desktop app over `127.0.0.1` with token authentication. No external servers.
 
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for completed features, planned work, and future considerations.
+
 ## Contributing
 
 Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, development philosophy, PR workflow, and privacy expectations.
