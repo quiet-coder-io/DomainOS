@@ -64,6 +64,17 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
   async runAutomation(id) {
     const requestId = crypto.randomUUID()
     await window.domainOS.automation.run(id, requestId)
+    // Refresh automation (updates runCount, lastRunAt) and runs after a short delay
+    // to allow the async engine execution to complete
+    setTimeout(async () => {
+      const automation = get().automations.find((a) => a.id === id)
+      if (automation) {
+        const result = await window.domainOS.automation.list(automation.domainId)
+        if (result.ok && result.value) set({ automations: result.value })
+      }
+      const runsResult = await window.domainOS.automation.runs(id, 20)
+      if (runsResult.ok && runsResult.value) set({ runs: runsResult.value })
+    }, 2000)
   },
 
   async fetchRuns(automationId, limit) {

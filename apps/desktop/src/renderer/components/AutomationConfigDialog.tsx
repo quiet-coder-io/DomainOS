@@ -103,6 +103,7 @@ export function AutomationConfigDialog({ domainId, onClose }: Props): React.JSX.
   const [editingId, setEditingId] = useState<string | null>(null)
   const [expandedRunsId, setExpandedRunsId] = useState<string | null>(null)
   const [confirmRunId, setConfirmRunId] = useState<string | null>(null)
+  const [runningId, setRunningId] = useState<string | null>(null)
 
   useEffect(() => {
     fetchAutomations(domainId)
@@ -132,7 +133,10 @@ export function AutomationConfigDialog({ domainId, onClose }: Props): React.JSX.
       setConfirmRunId(a.id)
       return
     }
+    setRunningId(a.id)
     await runAutomation(a.id)
+    // Keep spinner for a bit while the async engine executes
+    setTimeout(() => setRunningId(null), 3000)
   }, [runAutomation])
 
   const handleConfirmRun = useCallback(async () => {
@@ -179,6 +183,7 @@ export function AutomationConfigDialog({ domainId, onClose }: Props): React.JSX.
               automations={automations}
               runs={runs}
               expandedRunsId={expandedRunsId}
+              runningId={runningId}
               loading={loading}
               onEdit={handleEdit}
               onDelete={handleDelete}
@@ -247,6 +252,7 @@ interface ListProps {
   automations: Automation[]
   runs: AutomationRun[]
   expandedRunsId: string | null
+  runningId: string | null
   loading: boolean
   onEdit(a: Automation): void
   onDelete(id: string): void
@@ -259,7 +265,7 @@ interface ListProps {
 }
 
 function AutomationList({
-  automations, runs, expandedRunsId, loading,
+  automations, runs, expandedRunsId, runningId, loading,
   onEdit, onDelete, onToggle, onRunNow, onToggleRuns, onResetFailures,
   starters, onStarterClick,
 }: ListProps): React.JSX.Element {
@@ -324,13 +330,23 @@ function AutomationList({
             <div className="flex-1" />
 
             {/* Actions */}
-            <button onClick={() => onRunNow(a)} className="text-xs text-accent hover:text-accent-hover" title="Run now">
-              Run
+            <button
+              onClick={() => onRunNow(a)}
+              disabled={runningId === a.id}
+              className="text-xs text-accent hover:bg-accent hover:text-white px-2 py-0.5 rounded transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              title="Run now"
+            >
+              {runningId === a.id ? (
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border border-accent border-t-transparent" />
+                  Running…
+                </span>
+              ) : 'Run'}
             </button>
-            <button onClick={() => onEdit(a)} className="text-xs text-text-tertiary hover:text-text-secondary">
+            <button onClick={() => onEdit(a)} className="text-xs text-text-tertiary hover:bg-surface-2 hover:text-text-primary px-2 py-0.5 rounded transition-colors">
               Edit
             </button>
-            <button onClick={() => onDelete(a.id)} className="text-xs text-text-tertiary hover:text-danger">
+            <button onClick={() => onDelete(a.id)} className="text-xs text-text-tertiary hover:bg-danger hover:text-white px-2 py-0.5 rounded transition-colors">
               Delete
             </button>
           </div>

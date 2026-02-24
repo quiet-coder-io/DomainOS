@@ -1,5 +1,6 @@
-import { app, BrowserWindow, shell } from 'electron'
-import { join } from 'node:path'
+import { app, BrowserWindow, shell, safeStorage } from 'electron'
+import { join, resolve } from 'node:path'
+import { readFile } from 'node:fs/promises'
 import { is } from '@electron-toolkit/utils'
 import { initDatabase, closeDatabase } from './database'
 import { registerIPCHandlers } from './ipc-handlers'
@@ -7,6 +8,10 @@ import { generateIntakeToken } from './intake-token'
 import { startIntakeServer, stopIntakeServer } from './intake-server'
 import { stopAllKBWatchers } from './kb-watcher'
 import { startAutomationEngine, stopAutomationEngine } from './automation-engine'
+import { DomainRepository, createProvider, DEFAULT_MODELS } from '@domain-os/core'
+import type { ProviderName } from '@domain-os/core'
+import { GTasksClient } from '@domain-os/integrations'
+import { loadGTasksCredentials } from './gtasks-credentials'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -56,16 +61,62 @@ app.whenReady().then(() => {
     mainWindow?.webContents.send('intake:new-item', item.id)
   })
 
-  // Start automation engine after DB init
+  // ── Provider resolution for automation engine ──
+
+  const userDataPath = app.getPath('userData')
+
+  async function loadProviderKey(provider: string): Promise<string> {
+    try {
+      const encrypted = await readFile(resolve(userDataPath, `api-key-${provider}.enc`))
+      if (safeStorage.isEncryptionAvailable()) {
+        return safeStorage.decryptString(encrypted)
+      }
+      return encrypted.toString('utf-8')
+    } catch {
+      return ''
+    }
+  }
+
+  async function loadProviderConfig(): Promise<{ defaultProvider: ProviderName; defaultModel: string; ollamaBaseUrl: string }> {
+    try {
+      const raw = await readFile(resolve(userDataPath, 'provider-config.json'), 'utf-8')
+      const parsed = JSON.parse(raw)
+      return {
+        defaultProvider: parsed.defaultProvider ?? 'anthropic',
+        defaultModel: parsed.defaultModel ?? 'claude-sonnet-4-20250514',
+        ollamaBaseUrl: parsed.ollamaBaseUrl ?? 'http://localhost:11434',
+      }
+    } catch {
+      return { defaultProvider: 'anthropic', defaultModel: 'claude-sonnet-4-20250514', ollamaBaseUrl: 'http://localhost:11434' }
+    }
+  }
+
+  const domainRepo = new DomainRepository(db)
+
   startAutomationEngine({
     db,
     mainWindow,
-    getProvider: async () => null, // Resolved dynamically via IPC handler's provider factory
+    getProvider: async (domainId: string) => {
+      const domain = domainRepo.getById(domainId)
+      if (!domain.ok) return null
+
+      const globalConfig = await loadProviderConfig()
+      const resolvedProvider = (domain.value.modelProvider ?? globalConfig.defaultProvider) as ProviderName
+      const resolvedModel = domain.value.modelName ?? globalConfig.defaultModel ?? DEFAULT_MODELS[resolvedProvider]
+      const apiKey = resolvedProvider !== 'ollama' ? await loadProviderKey(resolvedProvider) : undefined
+      if (resolvedProvider !== 'ollama' && !apiKey) return null
+
+      return createProvider({ provider: resolvedProvider, model: resolvedModel, apiKey, ollamaBaseUrl: globalConfig.ollamaBaseUrl })
+    },
     actionDeps: {
       mainWindow,
-      getGTasksClient: async () => null, // Resolved dynamically via credentials
-      checkGmailComposeScope: async () => false,
-      createGmailDraft: async () => { throw new Error('Gmail draft not configured') },
+      getGTasksClient: async () => {
+        const creds = await loadGTasksCredentials()
+        if (!creds) return null
+        return new GTasksClient({ clientId: creds.clientId, clientSecret: creds.clientSecret, refreshToken: creds.refreshToken })
+      },
+      checkGmailComposeScope: async () => false, // gmail.compose not yet authorized by default
+      createGmailDraft: async () => { throw new Error('Gmail compose scope not authorized') },
     },
   })
 

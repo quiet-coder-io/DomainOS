@@ -142,8 +142,11 @@ function currentMinuteKey(): string {
 
 // ── Guard checks ──
 
-function guardCheck(automation: Automation): AutomationErrorCode | null {
+function guardCheck(automation: Automation, isManual = false): AutomationErrorCode | null {
   if (!automation.enabled) return 'automation_disabled'
+
+  // Manual triggers skip cooldown and rate limit — user explicitly clicked "Run Now"
+  if (isManual) return null
 
   // Cooldown
   if (automation.cooldownUntil) {
@@ -168,8 +171,9 @@ async function executeAutomation(
   minuteKey: string,
   requestId?: string,
 ): Promise<void> {
-  // 1. Guard checks
-  const guardError = guardCheck(automation)
+  // 1. Guard checks (manual triggers skip per-automation rate limit)
+  const isManual = triggerType === 'manual'
+  const guardError = guardCheck(automation, isManual)
   if (guardError) {
     const now = new Date().toISOString()
     const guardRunResult = repo.tryInsertRun({
