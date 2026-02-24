@@ -33,6 +33,7 @@ import type { WebContents } from 'electron'
 import { executeGmailTool } from './gmail-tools'
 import { executeGTasksTool } from './gtasks-tools'
 import { executeAdvisoryTool } from './advisory-tools'
+import { executeBrainstormTool } from './brainstorm-tools'
 
 // ── Constants (D12) ──
 
@@ -266,7 +267,7 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
 
         const toolStart = Date.now()
         let result: string
-        const errorPrefix = call.name.startsWith('advisory_') ? 'ADVISORY_ERROR' : call.name.startsWith('gtasks_') ? 'GTASKS_ERROR' : 'GMAIL_ERROR'
+        const errorPrefix = call.name.startsWith('advisory_') ? 'ADVISORY_ERROR' : call.name.startsWith('brainstorm_') ? 'BRAINSTORM_ERROR' : call.name.startsWith('gtasks_') ? 'GTASKS_ERROR' : 'GMAIL_ERROR'
 
         try {
           if (call.name.startsWith('gmail_') && gmailClient) {
@@ -301,6 +302,8 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
             result = await executeGTasksTool(gtasksClient, call.name, input)
           } else if (call.name.startsWith('advisory_') && toolDb) {
             result = executeAdvisoryTool(toolDb, call.name, input)
+          } else if (call.name.startsWith('brainstorm_') && toolDb) {
+            result = executeBrainstormTool(toolDb, call.name, input, domainId)
           } else {
             result = `${errorPrefix}: executor — No client available for tool ${call.name}`
           }
@@ -319,7 +322,7 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
         }
 
         const toolLatency = Date.now() - toolStart
-        const isError = result.startsWith('GMAIL_ERROR:') || result.startsWith('GTASKS_ERROR:') || result.startsWith('ADVISORY_ERROR:')
+        const isError = result.startsWith('GMAIL_ERROR:') || result.startsWith('GTASKS_ERROR:') || result.startsWith('ADVISORY_ERROR:') || result.startsWith('BRAINSTORM_ERROR:')
         console.info(`[tool-loop] tool_execution toolName=${call.name} toolCallId=${call.id} success=${!isError} latencyMs=${toolLatency}`)
 
         messages.push({

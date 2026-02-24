@@ -49,6 +49,7 @@ import {
   computeDomainStatusSnapshot,
   STATUS_CAPS,
   AutomationRepository,
+  BrainstormSessionRepository,
 } from '@domain-os/core'
 import type {
   CreateDomainInput,
@@ -74,6 +75,7 @@ import { loadGmailCredentials, checkGmailConnected } from './gmail-credentials'
 import { startGmailOAuth, disconnectGmail } from './gmail-oauth'
 import { GMAIL_TOOLS } from './gmail-tools'
 import { ADVISORY_TOOLS } from './advisory-tools'
+import { BRAINSTORM_TOOLS } from './brainstorm-tools'
 import { loadGTasksCredentials, checkGTasksConnected } from './gtasks-credentials'
 import { startGTasksOAuth, disconnectGTasks } from './gtasks-oauth'
 import { GTASKS_TOOLS } from './gtasks-tools'
@@ -444,6 +446,27 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           timeZoneName: 'short',
         }).format(new Date())
 
+        // Detect active brainstorm session for prompt context
+        let brainstormContext: { topic: string; ideaCount: number; phase: 'divergent' | 'convergent'; currentTechnique: string; step: string; isPaused: boolean } | undefined
+        try {
+          const brainstormRepo = new BrainstormSessionRepository(db)
+          const activeBrainstorm = brainstormRepo.getActive(payload.domainId)
+          if (activeBrainstorm.ok && activeBrainstorm.value) {
+            const bs = activeBrainstorm.value
+            const currentTech = bs.selectedTechniques.length > 0 ? bs.selectedTechniques[bs.selectedTechniques.length - 1] : 'none'
+            brainstormContext = {
+              topic: bs.topic,
+              ideaCount: bs.ideaCount,
+              phase: bs.phase,
+              currentTechnique: currentTech,
+              step: bs.step,
+              isPaused: bs.isPaused,
+            }
+          }
+        } catch {
+          // brainstorm_sessions table might not exist yet (pre-migration)
+        }
+
         const promptResult = buildSystemPrompt({
           domain: {
             name: domain.value.name,
@@ -457,6 +480,7 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           siblingContext,
           sessionContext,
           statusBriefing,
+          brainstormContext,
           currentDate,
         })
         const systemPrompt = promptResult.prompt
@@ -519,6 +543,10 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           // Advisory tools are always available (read-only, no external credentials)
           tools.push(...ADVISORY_TOOLS)
           toolsHint += '\n\n## Advisory Tools\nYou have tools to search decisions, deadlines, cross-domain context, and risk snapshots. Use them when providing strategic advice, assessing risk, or referencing prior decisions. When quoting cross-domain data, always attribute the source domain name.'
+
+          // Brainstorm tools are always available (DB-only, sync)
+          tools.push(...BRAINSTORM_TOOLS)
+          toolsHint += '\n\n## Brainstorm Tools\nYou have tools for deep brainstorming sessions: start sessions, browse techniques, capture ideas, check status, synthesize results, and control session lifecycle. Use these for extensive creative exploration with 10+ ideas and technique-guided facilitation.'
 
           if (isStatusBriefing) {
             toolsHint += '\n\n## Status Briefing Mode\nThis is a status update request. You SHOULD use available tools to enrich the briefing. Use the search hints provided in the DOMAIN STATUS BRIEFING section for Gmail/GTasks queries.'
@@ -1333,6 +1361,30 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
       }
     },
   )
+
+  // --- Brainstorm ---
+
+  ipcMain.handle('brainstorm:get-session', (_event, domainId: string) => {
+    try {
+      const brainstormRepo = new BrainstormSessionRepository(db)
+      return brainstormRepo.getActive(domainId)
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('brainstorm:get-ideas', (_event, domainId: string) => {
+    try {
+      const brainstormRepo = new BrainstormSessionRepository(db)
+      const active = brainstormRepo.getActive(domainId)
+      if (!active.ok || !active.value) {
+        return { ok: true, value: [] }
+      }
+      return { ok: true, value: active.value.rawIdeas }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
 
   // --- Gmail ---
 

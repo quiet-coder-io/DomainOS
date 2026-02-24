@@ -28,6 +28,7 @@ export type {
   PromptProtocol,
   PromptSiblingContext,
   PromptSessionContext,
+  PromptBrainstormContext,
   PromptContext,
   PromptResult,
   PromptManifest,
@@ -50,5 +51,6 @@ export type { ParsedStop } from './stop-parser.js'
 export { STOP_PROTOCOL_NAME, STOP_PROTOCOL_CONTENT } from './stop-protocol.js'
 export { GAP_DETECTION_PROTOCOL_NAME, GAP_DETECTION_PROTOCOL_CONTENT } from './gap-detection-protocol.js'
 export { seedDefaultProtocols } from './seed-defaults.js'
+export { BRAINSTORM_PROTOCOL_NAME, BRAINSTORM_PROTOCOL_CONTENT } from './brainstorm-protocol.js'
 export { estimateTokens, TOKEN_BUDGETS } from './token-budgets.js'
 export { detectStatusIntent } from './status-intent.js'

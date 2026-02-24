@@ -6,6 +6,7 @@
 import type { SharedProtocolRepository } from '../protocols/shared-repository.js'
 import { STOP_PROTOCOL_NAME, STOP_PROTOCOL_CONTENT } from './stop-protocol.js'
 import { GAP_DETECTION_PROTOCOL_NAME, GAP_DETECTION_PROTOCOL_CONTENT } from './gap-detection-protocol.js'
+import { BRAINSTORM_PROTOCOL_NAME, BRAINSTORM_PROTOCOL_CONTENT } from './brainstorm-protocol.js'
 
 export function seedDefaultProtocols(sharedProtocolRepo: SharedProtocolRepository): void {
   const existing = sharedProtocolRepo.list()
@@ -28,6 +29,17 @@ export function seedDefaultProtocols(sharedProtocolRepo: SharedProtocolRepositor
       content: GAP_DETECTION_PROTOCOL_CONTENT,
       priority: 90,
       sortOrder: 1,
+      isEnabled: true,
+      scope: 'chat',
+    })
+  }
+
+  if (!existingNames.includes(BRAINSTORM_PROTOCOL_NAME)) {
+    sharedProtocolRepo.create({
+      name: BRAINSTORM_PROTOCOL_NAME,
+      content: BRAINSTORM_PROTOCOL_CONTENT,
+      priority: 80,
+      sortOrder: 2,
       isEnabled: true,
       scope: 'chat',
     })

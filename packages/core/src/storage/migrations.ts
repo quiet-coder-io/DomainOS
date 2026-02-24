@@ -498,6 +498,38 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    version: 14,
+    description: 'Brainstorm sessions — deep technique-driven creative sessions with structured synthesis',
+    up(db) {
+      runSQL(db, `
+        CREATE TABLE IF NOT EXISTS brainstorm_sessions (
+          id TEXT PRIMARY KEY,
+          session_id TEXT REFERENCES sessions(id),
+          domain_id TEXT NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
+          schema_version INTEGER NOT NULL DEFAULT 1,
+          step TEXT NOT NULL DEFAULT 'setup' CHECK(step IN ('setup','technique_selection','execution','synthesis','completed')),
+          phase TEXT NOT NULL DEFAULT 'divergent' CHECK(phase IN ('divergent','convergent')),
+          is_paused INTEGER NOT NULL DEFAULT 0 CHECK(is_paused IN (0,1)),
+          topic TEXT NOT NULL DEFAULT '',
+          goals TEXT NOT NULL DEFAULT '',
+          selected_techniques TEXT NOT NULL DEFAULT '[]',
+          rounds TEXT NOT NULL DEFAULT '[]',
+          raw_ideas TEXT NOT NULL DEFAULT '[]',
+          idea_count INTEGER NOT NULL DEFAULT 0,
+          -- synthesis_preview stores JSON {schemaVersion, payload, hash}; kept as TEXT for portability/migrations.
+          synthesis_preview TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_brainstorm_domain ON brainstorm_sessions(domain_id);
+        CREATE INDEX idx_brainstorm_session ON brainstorm_sessions(session_id);
+        -- Paused sessions hold the slot intentionally; resume/close required before starting a new session.
+        CREATE UNIQUE INDEX idx_brainstorm_one_active_per_domain
+          ON brainstorm_sessions(domain_id) WHERE step != 'completed';
+      `)
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

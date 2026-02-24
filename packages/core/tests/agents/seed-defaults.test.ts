@@ -19,10 +19,11 @@ describe('seedDefaultProtocols', () => {
     const all = sharedProtocolRepo.list()
     expect(all.ok).toBe(true)
     if (all.ok) {
-      expect(all.value.length).toBe(2)
+      expect(all.value.length).toBe(3)
       const names = all.value.map((p) => p.name)
       expect(names).toContain('STOP Protocol')
       expect(names).toContain('Gap Detection')
+      expect(names).toContain('Brainstorm Facilitation')
     }
   })
 
@@ -56,7 +57,7 @@ describe('seedDefaultProtocols', () => {
     const all = sharedProtocolRepo.list()
     expect(all.ok).toBe(true)
     if (all.ok) {
-      expect(all.value.length).toBe(2)
+      expect(all.value.length).toBe(3)
     }
   })
 })

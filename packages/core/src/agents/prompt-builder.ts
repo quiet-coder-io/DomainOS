@@ -44,6 +44,15 @@ export interface PromptSessionContext {
   startupReport: string
 }
 
+export interface PromptBrainstormContext {
+  topic: string
+  ideaCount: number
+  phase: 'divergent' | 'convergent'
+  currentTechnique: string
+  step: string
+  isPaused: boolean
+}
+
 export interface PromptContext {
   domain: PromptDomain
   kbContext: PromptKBContext
@@ -52,6 +61,7 @@ export interface PromptContext {
   siblingContext?: PromptSiblingContext
   sessionContext?: PromptSessionContext
   statusBriefing?: DomainStatusSnapshot
+  brainstormContext?: PromptBrainstormContext
   currentDate?: string
   debug?: boolean
 }
@@ -253,6 +263,19 @@ Scenario payload: variables (string array), scenarios (array of {name, descripti
 Strategic review payload: posture, highest_leverage_action, trajectory?, tensions? (string array), assumptions_to_check? (string array)`
   addSection('KB Update Instructions', kbInstructions)
 
+  // === ACTIVE BRAINSTORM SESSION ===
+  if (context.brainstormContext) {
+    const bc = context.brainstormContext
+    const lines = [
+      `=== ACTIVE BRAINSTORM SESSION ===`,
+      `Topic: ${bc.topic} | Phase: ${bc.phase} | Ideas: ${bc.ideaCount} | Technique: ${bc.currentTechnique} | Step: ${bc.step} | Paused: ${bc.isPaused}`,
+    ]
+    if (bc.isPaused) {
+      lines.push('Session is paused. Ask user: resume or close?')
+    }
+    addSection('Active Brainstorm Session', lines.join('\n'))
+  }
+
   // === ADVISORY MINI-PROTOCOL (always-on) ===
   const advisoryMiniProtocol = `=== ADVISORY PROTOCOL ===
 Mode classification: Before each response, classify user intent as one of: brainstorm | challenge | review | scenario | general.
@@ -260,7 +283,7 @@ Classification considers conversational context, not just trigger words. Ambiguo
 Emit <!-- advisory_mode: <mode> --> as a hidden comment at the start of your response.
 
 Mode formatting:
-- brainstorm: 3-5 options with pros/cons and a recommendation
+- brainstorm: For quick strategic brainstorms, use 3-5 options with pros/cons. For deep creative sessions (>10 ideas, technique-guided), use brainstorm_start_session tool.
 - challenge: weakest link, opposing argument, unstated assumptions, failure modes
 - review: posture assessment, trajectory, highest-leverage action
 - scenario: key variables, 3 scenarios (best/base/worst), triggers
