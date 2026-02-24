@@ -7,6 +7,7 @@
 [![Open Source](https://img.shields.io/badge/open-source-brightgreen.svg)](LICENSE)
 [![Release](https://img.shields.io/badge/release-early--alpha-yellow.svg)](#project-status)
 [![Roadmap](https://img.shields.io/badge/roadmap-view-informational.svg)](ROADMAP.md)
+[![Discussions](https://img.shields.io/badge/discussions-join-brightgreen.svg)](https://github.com/quiet-coder-io/DomainOS/discussions)
 
 **DomainOS is a local-first AI knowledge management desktop app for managing multiple domains with domain-scoped assistants, RAG-ready knowledge bases, and bring-your-own-key (BYOK) privacy. Choose hosted or local LLM providers per domain, keep your work separated by context, and organize durable domain protocols and files — all on your machine.**
 
@@ -258,6 +259,16 @@ domain-os/
 ## Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for completed features, planned work, and future considerations.
+
+## Community
+
+Have questions, ideas, or want to share how you use DomainOS? Join the [Discussions](https://github.com/quiet-coder-io/DomainOS/discussions):
+
+- **Q&A** — setup help, provider config, and troubleshooting
+- **Feature Requests** — suggest and vote on new features
+- **Domain Setups** — share how you configured DomainOS for your use case
+- **Protocol Sharing** — exchange composable protocols and advisory configs
+- **Provider Reports** — crowdsourced LLM model compatibility and tool-use results
 
 ## Contributing
 
