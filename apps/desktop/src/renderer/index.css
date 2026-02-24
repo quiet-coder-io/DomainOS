@@ -33,11 +33,35 @@
   --font-mono: 'SF Mono', ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
 }
 
+/* ─── Light theme overrides ────────────────────────────────────────── */
+html.light {
+  --color-surface-0: oklch(0.98 0.005 260);
+  --color-surface-1: oklch(0.95 0.005 260);
+  --color-surface-2: oklch(0.91 0.005 260);
+  --color-surface-3: oklch(0.87 0.005 260);
+
+  --color-border: oklch(0.82 0.005 260);
+  --color-border-subtle: oklch(0.88 0.005 260);
+
+  --color-text-primary: oklch(0.15 0.005 260);
+  --color-text-secondary: oklch(0.40 0.005 260);
+  --color-text-tertiary: oklch(0.55 0.01 260);
+
+  --color-accent: oklch(0.55 0.15 230);
+  --color-accent-hover: oklch(0.48 0.17 230);
+  --color-accent-muted: oklch(0.90 0.06 230);
+  --color-accent-text: oklch(0.40 0.12 230);
+
+  --color-danger: oklch(0.55 0.2 25);
+  --color-success: oklch(0.50 0.18 155);
+  --color-warning: oklch(0.60 0.15 80);
+}
+
 /* ─── Base styles ───────────────────────────────────────────────────── */
 body {
   font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
-  background: oklch(0.13 0.005 260);
+  background: var(--color-surface-0);
 }
 
 /* ─── Scrollbar styling (Chromium / Electron) ───────────────────────── */
@@ -57,6 +81,14 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: oklch(0.42 0.005 260);
+}
+
+html.light ::-webkit-scrollbar-thumb {
+  background: oklch(0.75 0.005 260);
+}
+
+html.light ::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.65 0.005 260);
 }
 
 /* ─── Keyframes ─────────────────────────────────────────────────────── */
