@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { DomainOSAPI, KBUpdateProposal, ToolUseEvent, ProviderConfig, DependencyType, DeadlineStatus, DeadlineSource, AdvisoryType, AdvisoryStatus, SaveDraftBlockInput } from './api'
+import type { DomainOSAPI, KBUpdateProposal, ToolUseEvent, ProviderConfig, DependencyType, DeadlineStatus, DeadlineSource, AdvisoryType, AdvisoryStatus, SaveDraftBlockInput, AutomationNotification } from './api'
 
 const api: DomainOSAPI = {
   platform: process.platform,
@@ -206,6 +206,24 @@ const api: DomainOSAPI = {
     saveDraftBlock: (input: SaveDraftBlockInput) => ipcRenderer.invoke('advisory:save-draft-block', input),
     extractTasks: (artifactId: string, domainId: string) =>
       ipcRenderer.invoke('advisory:extract-tasks', artifactId, domainId),
+  },
+
+  automation: {
+    list: (domainId: string) => ipcRenderer.invoke('automation:list', domainId),
+    get: (id: string) => ipcRenderer.invoke('automation:get', id),
+    create: (input) => ipcRenderer.invoke('automation:create', input),
+    update: (id: string, input) => ipcRenderer.invoke('automation:update', id, input),
+    delete: (id: string) => ipcRenderer.invoke('automation:delete', id),
+    toggle: (id: string) => ipcRenderer.invoke('automation:toggle', id),
+    run: (id: string, requestId: string) => ipcRenderer.invoke('automation:run', id, requestId),
+    runs: (automationId: string, limit?: number) => ipcRenderer.invoke('automation:runs', automationId, limit),
+    resetFailures: (id: string) => ipcRenderer.invoke('automation:reset-failures', id),
+    onNotification(callback: (data: AutomationNotification) => void) {
+      ipcRenderer.on('automation:notification', (_event, data: AutomationNotification) => callback(data))
+    },
+    offNotification() {
+      ipcRenderer.removeAllListeners('automation:notification')
+    },
   },
 
   settings: {

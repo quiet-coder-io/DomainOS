@@ -270,6 +270,42 @@ export class GTasksClient {
     }
   }
 
+  /** Create a new task. Returns the created task or throws on error. */
+  async createTask(
+    taskListId: string,
+    title: string,
+    notes?: string,
+    due?: string,
+  ): Promise<GTask> {
+    const listTitle = await this.getTaskListTitle(taskListId)
+
+    const requestBody: Record<string, string> = { title }
+    if (notes) requestBody.notes = notes
+    if (due) requestBody.due = due
+
+    const res = await this.tasks.tasks.insert({
+      tasklist: taskListId,
+      requestBody,
+    })
+
+    const task = res.data
+    if (!task.id) throw new Error('Google Tasks API returned no task ID')
+
+    return {
+      id: task.id,
+      taskListId,
+      taskListTitle: listTitle,
+      title: task.title ?? '',
+      notes: task.notes ?? '',
+      due: task.due ?? '',
+      status: task.status ?? 'needsAction',
+      updated: task.updated ?? '',
+      completed: task.completed ?? '',
+      position: task.position ?? '',
+      parent: task.parent ?? '',
+    }
+  }
+
   /** Delete a task. Throws on error. */
   async deleteTask(taskListId: string, taskId: string): Promise<void> {
     await this.tasks.tasks.delete({

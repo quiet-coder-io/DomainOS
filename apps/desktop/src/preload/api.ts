@@ -205,6 +205,30 @@ export interface DomainOSAPI {
     extractTasks(artifactId: string, domainId: string): Promise<IPCResult<TurnIntoTasksOutput>>
   }
 
+  automation: {
+    list(domainId: string): Promise<IPCResult<Automation[]>>
+    get(id: string): Promise<IPCResult<Automation>>
+    create(input: {
+      domainId: string; name: string; description?: string
+      triggerType: AutomationTriggerType; triggerCron?: string | null; triggerEvent?: AutomationTriggerEvent | null
+      promptTemplate: string; actionType: AutomationActionType; actionConfig?: string
+      enabled?: boolean; catchUpEnabled?: boolean; storePayloads?: boolean; deadlineWindowDays?: number | null
+    }): Promise<IPCResult<Automation>>
+    update(id: string, input: {
+      name?: string; description?: string
+      triggerType?: AutomationTriggerType; triggerCron?: string | null; triggerEvent?: AutomationTriggerEvent | null
+      promptTemplate?: string; actionType?: AutomationActionType; actionConfig?: string
+      enabled?: boolean; catchUpEnabled?: boolean; storePayloads?: boolean; deadlineWindowDays?: number | null
+    }): Promise<IPCResult<Automation>>
+    delete(id: string): Promise<IPCResult<void>>
+    toggle(id: string): Promise<IPCResult<Automation>>
+    run(id: string, requestId: string): Promise<IPCResult<void>>
+    runs(automationId: string, limit?: number): Promise<IPCResult<AutomationRun[]>>
+    resetFailures(id: string): Promise<IPCResult<Automation>>
+    onNotification(callback: (data: AutomationNotification) => void): void
+    offNotification(): void
+  }
+
   settings: {
     getApiKey(): Promise<IPCResult<string>>
     setApiKey(key: string): Promise<IPCResult<void>>
@@ -609,4 +633,70 @@ export interface TurnIntoTasksOutput {
   needsEditing?: NeedsEditingTask[]
   artifactId: string
   artifactTitle: string
+}
+
+// ── Automation types ──
+
+export type AutomationTriggerType = 'schedule' | 'event' | 'manual'
+export type AutomationTriggerEvent = 'intake_created' | 'kb_changed' | 'gap_flag_raised' | 'deadline_approaching'
+export type AutomationActionType = 'notification' | 'create_gtask' | 'draft_gmail'
+export type AutomationRunStatus = 'pending' | 'running' | 'success' | 'failed' | 'skipped'
+
+export interface Automation {
+  id: string
+  domainId: string
+  name: string
+  description: string
+  triggerType: AutomationTriggerType
+  triggerCron: string | null
+  triggerEvent: AutomationTriggerEvent | null
+  promptTemplate: string
+  actionType: AutomationActionType
+  actionConfig: string
+  enabled: boolean
+  catchUpEnabled: boolean
+  storePayloads: boolean
+  deadlineWindowDays: number | null
+  nextRunAt: string | null
+  failureStreak: number
+  cooldownUntil: string | null
+  lastRunAt: string | null
+  lastError: string | null
+  runCount: number
+  duplicateSkipCount: number
+  lastDuplicateAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AutomationRun {
+  id: string
+  automationId: string
+  domainId: string
+  triggerType: AutomationTriggerType
+  triggerEvent: AutomationTriggerEvent | null
+  triggerData: string | null
+  dedupeKey: string | null
+  promptHash: string | null
+  promptRendered: string | null
+  responseHash: string | null
+  llmResponse: string | null
+  actionType: AutomationActionType
+  actionResult: string
+  actionExternalId: string | null
+  status: AutomationRunStatus
+  error: string | null
+  errorCode: string | null
+  durationMs: number | null
+  createdAt: string
+  startedAt: string | null
+  completedAt: string | null
+  updatedAt: string
+}
+
+export interface AutomationNotification {
+  automationId: string
+  automationName: string
+  domainId: string
+  message: string
 }

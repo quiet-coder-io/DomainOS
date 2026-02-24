@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Sidebar, IntakePanel, OnboardingFlow } from './components'
+import { Sidebar, IntakePanel, OnboardingFlow, ToastContainer } from './components'
 import { DomainListPage, DomainChatPage } from './pages'
 import { BriefingPage } from './pages/BriefingPage'
-import { useDomainStore, useIntakeStore } from './stores'
+import { useDomainStore, useIntakeStore, useToastStore } from './stores'
 import { useTheme } from './hooks/useTheme'
 
 export type ActiveView = 'domains' | 'intake' | 'briefing'
@@ -13,6 +13,7 @@ export function App(): React.JSX.Element {
   const domainsLoading = useDomainStore((s) => s.loading)
   const fetchPending = useIntakeStore((s) => s.fetchPending)
   const [activeView, setActiveView] = useState<ActiveView>('domains')
+  const addToast = useToastStore((s) => s.addToast)
   const { theme, toggleTheme } = useTheme()
 
   // Listen for new intake items from the server
@@ -24,6 +25,21 @@ export function App(): React.JSX.Element {
       window.domainOS.intake.offNewItem()
     }
   }, [fetchPending])
+
+  // Listen for automation notifications
+  useEffect(() => {
+    window.domainOS.automation.onNotification((data) => {
+      addToast({
+        message: `[${data.automationName}] ${data.message}`,
+        type: 'info',
+        domainId: data.domainId,
+        autoDismissMs: 8000,
+      })
+    })
+    return () => {
+      window.domainOS.automation.offNotification()
+    }
+  }, [addToast])
 
   const renderMainContent = () => {
     if (activeView === 'intake') return <IntakePanel />
@@ -45,6 +61,7 @@ export function App(): React.JSX.Element {
     <div className="flex h-screen bg-surface-0 text-text-primary">
       <Sidebar activeView={activeView} onViewChange={setActiveView} theme={theme} onToggleTheme={toggleTheme} />
       <main className="flex-1 min-h-0 overflow-hidden">{renderMainContent()}</main>
+      <ToastContainer />
     </div>
   )
 }

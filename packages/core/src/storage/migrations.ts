@@ -405,6 +405,99 @@ const migrations: Migration[] = [
       )
     },
   },
+  {
+    version: 13,
+    description: 'Automations — domain-scoped triggers, prompt execution, and action pipeline',
+    up(db) {
+      runSQL(db, `
+        CREATE TABLE IF NOT EXISTS automations (
+          id TEXT PRIMARY KEY,
+          domain_id TEXT NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
+          name TEXT NOT NULL CHECK (length(name) <= 100),
+          description TEXT NOT NULL DEFAULT '' CHECK (length(description) <= 500),
+          trigger_type TEXT NOT NULL CHECK (trigger_type IN ('schedule','event','manual')),
+          trigger_cron TEXT,
+          trigger_event TEXT CHECK (trigger_event IN ('intake_created','kb_changed','gap_flag_raised','deadline_approaching')),
+          prompt_template TEXT NOT NULL CHECK (length(prompt_template) <= 20000),
+          action_type TEXT NOT NULL CHECK (action_type IN ('notification','create_gtask','draft_gmail')),
+          action_config TEXT NOT NULL DEFAULT '{}',
+          enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+          catch_up_enabled INTEGER NOT NULL DEFAULT 0 CHECK (catch_up_enabled IN (0,1)),
+          store_payloads INTEGER NOT NULL DEFAULT 0 CHECK (store_payloads IN (0,1)),
+          deadline_window_days INTEGER CHECK (deadline_window_days IS NULL OR deadline_window_days BETWEEN 1 AND 60),
+          next_run_at TEXT,
+          failure_streak INTEGER NOT NULL DEFAULT 0 CHECK (failure_streak >= 0),
+          cooldown_until TEXT,
+          last_run_at TEXT,
+          last_error TEXT,
+          run_count INTEGER NOT NULL DEFAULT 0 CHECK (run_count >= 0),
+          duplicate_skip_count INTEGER NOT NULL DEFAULT 0 CHECK (duplicate_skip_count >= 0),
+          last_duplicate_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          CHECK (
+            (trigger_type = 'schedule' AND trigger_cron IS NOT NULL AND trigger_event IS NULL)
+            OR (trigger_type = 'event' AND trigger_cron IS NULL AND trigger_event IS NOT NULL)
+            OR (trigger_type = 'manual' AND trigger_cron IS NULL AND trigger_event IS NULL)
+          ),
+          CHECK (trigger_type = 'schedule' OR next_run_at IS NULL),
+          CHECK (trigger_type = 'schedule' OR catch_up_enabled = 0),
+          CHECK (
+            (trigger_type = 'event' AND trigger_event = 'deadline_approaching')
+            OR deadline_window_days IS NULL
+          )
+        );
+
+        CREATE INDEX IF NOT EXISTS automations_domain_id_idx ON automations(domain_id);
+        CREATE INDEX IF NOT EXISTS automations_enabled_trigger_type_idx ON automations(enabled, trigger_type);
+        CREATE INDEX IF NOT EXISTS automations_trigger_event_idx ON automations(trigger_event) WHERE trigger_event IS NOT NULL;
+
+        CREATE TABLE IF NOT EXISTS automation_runs (
+          id TEXT PRIMARY KEY,
+          automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+          domain_id TEXT NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
+          trigger_type TEXT NOT NULL CHECK (trigger_type IN ('schedule','event','manual')),
+          trigger_event TEXT CHECK (trigger_event IN ('intake_created','kb_changed','gap_flag_raised','deadline_approaching')),
+          trigger_data TEXT,
+          dedupe_key TEXT,
+          prompt_hash TEXT,
+          prompt_rendered TEXT,
+          response_hash TEXT,
+          llm_response TEXT,
+          action_type TEXT NOT NULL CHECK (action_type IN ('notification','create_gtask','draft_gmail')),
+          action_result TEXT NOT NULL DEFAULT '',
+          action_external_id TEXT,
+          status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','running','success','failed','skipped')),
+          error TEXT,
+          error_code TEXT,
+          duration_ms INTEGER CHECK (duration_ms IS NULL OR duration_ms >= 0),
+          created_at TEXT NOT NULL,
+          started_at TEXT,
+          completed_at TEXT,
+          updated_at TEXT NOT NULL,
+          CHECK (
+            (status = 'pending' AND started_at IS NULL AND completed_at IS NULL)
+            OR (status = 'running' AND started_at IS NOT NULL AND completed_at IS NULL)
+            OR (status IN ('success','failed','skipped') AND completed_at IS NOT NULL)
+          ),
+          CHECK (status = 'skipped' OR dedupe_key IS NOT NULL),
+          CHECK (
+            (trigger_type = 'event' AND trigger_event IS NOT NULL)
+            OR (trigger_type != 'event' AND trigger_event IS NULL)
+          ),
+          CHECK (trigger_data IS NULL OR length(trigger_data) <= 20000),
+          CHECK (prompt_rendered IS NULL OR length(prompt_rendered) <= 100000),
+          CHECK (llm_response IS NULL OR length(llm_response) <= 200000)
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS automation_runs_dedupe_key_uniq ON automation_runs(dedupe_key) WHERE dedupe_key IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS automation_runs_automation_created_idx ON automation_runs(automation_id, created_at);
+        CREATE INDEX IF NOT EXISTS automation_runs_domain_created_idx ON automation_runs(domain_id, created_at);
+        CREATE INDEX IF NOT EXISTS automation_runs_status_hot_idx ON automation_runs(status, created_at) WHERE status IN ('pending','running');
+        CREATE INDEX IF NOT EXISTS automation_runs_automation_status_created_idx ON automation_runs(automation_id, status, created_at);
+      `)
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

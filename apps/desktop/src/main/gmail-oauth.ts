@@ -17,7 +17,10 @@ import { saveGmailCredentials, clearGmailCredentials, loadGmailCredentials } fro
 // Loaded from .env: MAIN_VITE_GMAIL_CLIENT_ID, MAIN_VITE_GMAIL_CLIENT_SECRET
 const CLIENT_ID = import.meta.env.MAIN_VITE_GMAIL_CLIENT_ID ?? ''
 const CLIENT_SECRET = import.meta.env.MAIN_VITE_GMAIL_CLIENT_SECRET ?? ''
-const SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+const SCOPES = [
+  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/gmail.compose',
+]
 const CALLBACK_PATH = '/oauth2callback'
 const AUTH_TIMEOUT_MS = 120_000
 

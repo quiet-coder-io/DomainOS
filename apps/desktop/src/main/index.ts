@@ -6,6 +6,7 @@ import { registerIPCHandlers } from './ipc-handlers'
 import { generateIntakeToken } from './intake-token'
 import { startIntakeServer, stopIntakeServer } from './intake-server'
 import { stopAllKBWatchers } from './kb-watcher'
+import { startAutomationEngine, stopAutomationEngine } from './automation-engine'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -55,6 +56,19 @@ app.whenReady().then(() => {
     mainWindow?.webContents.send('intake:new-item', item.id)
   })
 
+  // Start automation engine after DB init
+  startAutomationEngine({
+    db,
+    mainWindow,
+    getProvider: async () => null, // Resolved dynamically via IPC handler's provider factory
+    actionDeps: {
+      mainWindow,
+      getGTasksClient: async () => null, // Resolved dynamically via credentials
+      checkGmailComposeScope: async () => false,
+      createGmailDraft: async () => { throw new Error('Gmail draft not configured') },
+    },
+  })
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       mainWindow = createWindow()
@@ -67,6 +81,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  stopAutomationEngine()
   stopAllKBWatchers()
   stopIntakeServer()
   closeDatabase()

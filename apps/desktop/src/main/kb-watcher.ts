@@ -1,6 +1,7 @@
 import { watch } from 'node:fs'
 import type { FSWatcher } from 'node:fs'
 import type { BrowserWindow } from 'electron'
+import { emitAutomationEvent } from './automation-events'
 
 const watchers = new Map<string, FSWatcher>()
 const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -28,6 +29,11 @@ export function startKBWatcher(
           debounceTimers.delete(domainId)
           await onChange(domainId)
           mainWindow?.webContents.send('kb:files-changed', domainId)
+          emitAutomationEvent({
+            type: 'kb_changed',
+            domainId,
+            data: { entityId: domainId, entityType: 'kb', summary: 'KB files changed' },
+          })
         }, DEBOUNCE_MS),
       )
     })

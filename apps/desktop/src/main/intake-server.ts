@@ -4,6 +4,7 @@ import type Database from 'better-sqlite3'
 import { IntakeRepository, MAX_INTAKE_CONTENT_BYTES } from '@domain-os/core'
 import type { IntakeItem } from '@domain-os/core'
 import { validateIntakeToken } from './intake-token'
+import { emitAutomationEvent } from './automation-events'
 
 const PORT = 19532
 const HOST = '127.0.0.1'
@@ -165,6 +166,11 @@ export function startIntakeServer(
         }
 
         onNewItem(result.value)
+        emitAutomationEvent({
+          type: 'intake_created',
+          domainId: result.value.suggestedDomainId ?? '',
+          data: { entityId: result.value.id, entityType: 'intake_item', summary: result.value.title },
+        })
         sendJSON(res, 201, { ok: true, id: result.value.id })
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)

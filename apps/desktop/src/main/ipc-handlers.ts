@@ -48,6 +48,7 @@ import {
   detectStatusIntent,
   computeDomainStatusSnapshot,
   STATUS_CAPS,
+  AutomationRepository,
 } from '@domain-os/core'
 import type {
   CreateDomainInput,
@@ -64,6 +65,8 @@ import type {
   AdvisoryStatus,
   SaveDraftBlockInput,
   DomainStatusSnapshot,
+  CreateAutomationInput,
+  UpdateAutomationInput,
 } from '@domain-os/core'
 import { getIntakeToken } from './intake-token'
 import { startKBWatcher, stopKBWatcher } from './kb-watcher'
@@ -76,6 +79,8 @@ import { startGTasksOAuth, disconnectGTasks } from './gtasks-oauth'
 import { GTASKS_TOOLS } from './gtasks-tools'
 import { runToolLoop } from './tool-loop'
 import { GmailClient, GTasksClient } from '@domain-os/integrations'
+import { emitAutomationEvent } from './automation-events'
+import { triggerManualRun } from './automation-engine'
 
 // ── Provider config types (D20) ──
 
@@ -575,12 +580,19 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
         // Parse and persist gap flags from LLM response
         const parsedGapFlags = parseGapFlags(fullResponse)
         for (const gf of parsedGapFlags) {
-          gapFlagRepo.create({
+          const gfResult = gapFlagRepo.create({
             domainId: payload.domainId,
             sessionId,
             category: gf.category,
             description: gf.description,
           })
+          if (gfResult.ok) {
+            emitAutomationEvent({
+              type: 'gap_flag_raised',
+              domainId: payload.domainId,
+              data: { entityId: gfResult.value.id, entityType: 'gap_flag', summary: gf.description },
+            })
+          }
         }
 
         // Parse advisory fence blocks from LLM response (runs on final assistant text only)
@@ -1749,4 +1761,73 @@ Rules:
       }
     },
   )
+
+  // ── Automation IPC handlers ──
+
+  const automationRepo = new AutomationRepository(db)
+
+  ipcMain.handle('automation:list', async (_e: IpcMainInvokeEvent, domainId: string) => {
+    try {
+      const result = automationRepo.getByDomain(domainId)
+      return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
+    } catch (e) { return { ok: false, error: (e as Error).message } }
+  })
+
+  ipcMain.handle('automation:get', async (_e: IpcMainInvokeEvent, id: string) => {
+    try {
+      const result = automationRepo.getById(id)
+      return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
+    } catch (e) { return { ok: false, error: (e as Error).message } }
+  })
+
+  ipcMain.handle('automation:create', async (_e: IpcMainInvokeEvent, input: CreateAutomationInput) => {
+    try {
+      const result = automationRepo.create(input)
+      return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
+    } catch (e) { return { ok: false, error: (e as Error).message } }
+  })
+
+  ipcMain.handle('automation:update', async (_e: IpcMainInvokeEvent, id: string, input: UpdateAutomationInput) => {
+    try {
+      const result = automationRepo.update(id, input)
+      return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
+    } catch (e) { return { ok: false, error: (e as Error).message } }
+  })
+
+  ipcMain.handle('automation:delete', async (_e: IpcMainInvokeEvent, id: string) => {
+    try {
+      const result = automationRepo.delete(id)
+      return result.ok ? { ok: true, value: undefined } : { ok: false, error: result.error.message }
+    } catch (e) { return { ok: false, error: (e as Error).message } }
+  })
+
+  ipcMain.handle('automation:toggle', async (_e: IpcMainInvokeEvent, id: string) => {
+    try {
+      const result = automationRepo.toggle(id)
+      return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
+    } catch (e) { return { ok: false, error: (e as Error).message } }
+  })
+
+  ipcMain.handle('automation:run', async (_e: IpcMainInvokeEvent, id: string, requestId: string) => {
+    try {
+      triggerManualRun(id, requestId)
+      return { ok: true, value: undefined }
+    } catch (e) { return { ok: false, error: (e as Error).message } }
+  })
+
+  ipcMain.handle('automation:runs', async (_e: IpcMainInvokeEvent, automationId: string, limit?: number) => {
+    try {
+      const result = automationRepo.getRunsByAutomation(automationId, limit)
+      return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
+    } catch (e) { return { ok: false, error: (e as Error).message } }
+  })
+
+  ipcMain.handle('automation:reset-failures', async (_e: IpcMainInvokeEvent, id: string) => {
+    try {
+      automationRepo.resetFailureStreak(id)
+      // Re-enable the automation
+      const result = automationRepo.update(id, { enabled: true })
+      return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
+    } catch (e) { return { ok: false, error: (e as Error).message } }
+  })
 }

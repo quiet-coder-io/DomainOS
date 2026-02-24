@@ -10,6 +10,7 @@ import { GapFlagPanel } from '../components/GapFlagPanel'
 import { DecisionLogPanel } from '../components/DecisionLogPanel'
 import { AuditLogPanel } from '../components/AuditLogPanel'
 import { AdvisoryPanel } from '../components/AdvisoryPanel'
+import { AutomationConfigDialog } from '../components/AutomationConfigDialog'
 import { SettingsDialog } from '../components/SettingsDialog'
 
 const DocumentIcon = () => (
@@ -64,6 +65,7 @@ export function DomainChatPage(): React.JSX.Element {
   const { providerConfig, loadProviderConfig, ollamaModels, listOllamaModels } = useSettingsStore()
 
   const [showSettings, setShowSettings] = useState(false)
+  const [showAutomations, setShowAutomations] = useState(false)
 
   // --- Per-domain model override state ---
   const [overrideExpanded, setOverrideExpanded] = useState(false)
@@ -329,6 +331,15 @@ export function DomainChatPage(): React.JSX.Element {
             <GearIcon />
           </button>
 
+          {/* Automations */}
+          <button
+            onClick={() => setShowAutomations(true)}
+            className="rounded border border-border-subtle px-2 py-0.5 text-[11px] text-text-tertiary hover:border-accent hover:text-accent transition-colors"
+            title="Automations"
+          >
+            Automations
+          </button>
+
           {/* Effective model display */}
           <span className="text-xs text-text-tertiary">
             {PROVIDER_LABELS[effectiveProvider]} / {effectiveModel}
@@ -562,6 +573,9 @@ export function DomainChatPage(): React.JSX.Element {
 
       {/* Settings modal */}
       {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
+      {showAutomations && activeDomainId && (
+        <AutomationConfigDialog domainId={activeDomainId} onClose={() => setShowAutomations(false)} />
+      )}
     </div>
   )
 }
