@@ -8,6 +8,7 @@
 [![Release](https://img.shields.io/badge/release-early--alpha-yellow.svg)](#project-status)
 [![Roadmap](https://img.shields.io/badge/roadmap-view-informational.svg)](ROADMAP.md)
 [![Discussions](https://img.shields.io/badge/discussions-join-brightgreen.svg)](https://github.com/quiet-coder-io/DomainOS/discussions)
+[![GitHub Stars](https://img.shields.io/github/stars/quiet-coder-io/DomainOS?style=social)](https://github.com/quiet-coder-io/DomainOS)
 
 **DomainOS is a local-first AI knowledge management desktop app for managing multiple domains with domain-scoped assistants, RAG-ready knowledge bases, automations, and bring-your-own-key (BYOK) privacy. Choose hosted or local LLM providers per domain, keep your work separated by context, automate recurring AI tasks, and organize durable domain protocols and files — all on your machine.**
 
@@ -235,6 +236,8 @@ npm run dev
 ```
 
 No cloud backend required. The app runs entirely on your machine.
+
+> If DomainOS is useful to you, consider giving it a [star on GitHub](https://github.com/quiet-coder-io/DomainOS) — it helps others discover the project.
 
 ## Project Structure
 
