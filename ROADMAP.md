@@ -56,6 +56,16 @@ This roadmap reflects current priorities and may shift as the project evolves. I
 - [x] Crash recovery and retention cleanup
 - [x] Starter templates for common automation patterns
 
+### Strategic Brainstorming (BMAD Method)
+- [x] Deep facilitated brainstorming sessions with AI as facilitator (not generator)
+- [x] 106 techniques (56 brainstorming + 50 elicitation) across 10 categories, adapted from [BMAD-METHOD](https://github.com/bmad-code-org/BMAD-METHOD)
+- [x] Heuristic technique recommendations (keyword matching + category affinity, no LLM)
+- [x] Multi-round idea capture with automatic round management and technique switching
+- [x] Deterministic synthesis: keyword clustering, n-gram labeling, ranked options (no LLM)
+- [x] Anti-bias facilitation protocol (creative pivots, energy checkpoints, push past obvious ideas)
+- [x] Session lifecycle: start → techniques → facilitate → pause/resume → synthesize → artifact
+- [x] One active session per domain, 500-idea soft cap, recovery-safe synthesis previews
+
 ### Integrations
 - [x] Gmail read-only tools (search, read) via OAuth PKCE
 - [x] Google Tasks read-write tools (search, read, complete, update, delete)

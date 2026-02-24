@@ -10,7 +10,7 @@
 [![Discussions](https://img.shields.io/badge/discussions-join-brightgreen.svg)](https://github.com/quiet-coder-io/DomainOS/discussions)
 [![GitHub Stars](https://img.shields.io/github/stars/quiet-coder-io/DomainOS?style=social)](https://github.com/quiet-coder-io/DomainOS)
 
-**DomainOS is a local-first AI knowledge management desktop app for managing multiple domains with domain-scoped assistants, RAG-ready knowledge bases, automations, and bring-your-own-key (BYOK) privacy. Choose hosted or local LLM providers per domain, keep your work separated by context, automate recurring AI tasks, and organize durable domain protocols and files — all on your machine.**
+**DomainOS is a local-first AI knowledge management desktop app for managing multiple domains with domain-scoped assistants, RAG-ready knowledge bases, BMAD-powered strategic brainstorming, automations, and bring-your-own-key (BYOK) privacy. Choose hosted or local LLM providers per domain, keep your work separated by context, run deep technique-driven brainstorming sessions, automate recurring AI tasks, and organize durable domain protocols and files — all on your machine.**
 
 <p align="center">
   <img src="docs/screenshot.png" alt="DomainOS — Domain chat with KB management, portfolio health briefing, Chrome extension intake pipeline, and main dashboard" width="960" />
@@ -74,6 +74,18 @@ DomainOS gives each area of your professional life its own AI-powered operating 
 - **Advisory tools** — 4 read-only tools (`advisory_search_decisions`, `advisory_search_deadlines`, `advisory_cross_domain_context`, `advisory_risk_snapshot`) give the AI data-aware strategic reasoning
 - **Cross-domain contamination guard** — cross-domain facts are labeled with source domain in tool outputs and enforced by protocol
 - **Deterministic task extraction** — "Turn into tasks" converts advisory artifacts into actionable deadlines without an LLM call
+
+### Strategic Brainstorming (BMAD Method)
+
+- **Deep facilitated sessions** — the AI acts as a brainstorm facilitator, not just a generator, guiding you through structured creative techniques with genuine back-and-forth coaching
+- **106 techniques across 10 categories** — 56 brainstorming techniques + 50 advanced elicitation methods spanning creative, analytical, strategic, disruptive, futuristic, collaborative, structured, design-thinking, lateral-thinking, and systems-thinking categories; technique data adapted from the [BMAD-METHOD](https://github.com/bmad-code-org/BMAD-METHOD) (MIT License)
+- **Heuristic technique recommendations** — keyword matching and category affinity scoring suggest the most relevant techniques for your topic and goals — no LLM call required
+- **Multi-round idea capture** — accumulate ideas across multiple technique rounds with automatic round management; switch techniques mid-session and the system tracks which ideas came from which round
+- **Anti-bias facilitation protocol** — the AI pivots creative approaches every 10 ideas, runs energy checkpoints every 4-5 exchanges, and pushes for ideas 50-100 (the first 20 are obvious)
+- **Deterministic synthesis** — when ready, a local synthesizer clusters ideas by keyword overlap and technique category, merges small clusters, ranks by size and round diversity, and produces up to 10 structured options with labels, recommendations, contrarian views, and challenged assumptions — no LLM needed for clustering
+- **Session lifecycle** — start → select techniques → facilitate → pause/resume → synthesize → advisory artifact; one active session per domain, paused sessions hold the slot
+- **500-idea soft cap** — sessions can accumulate up to 500 raw ideas before requiring synthesis
+- **Recovery-safe** — synthesis previews are stored in the database with SHA-256 hashes, so if the LLM fence block fails, the structured output is recoverable
 
 ### Safety & Governance
 
@@ -143,6 +155,7 @@ graph TB
                 PROTOCOLS[Protocols]
                 AGENTS[Agents]
                 ADVISORY["Advisory<br/><small>Parser · Artifacts · Tasks</small>"]
+                BRAINSTORM["Brainstorm<br/><small>Techniques · Synthesis</small>"]
                 BRIEFMOD["Briefing<br/><small>Health · Alerts</small>"]
                 AUTOMATIONS["Automations<br/><small>Cron · Events · Dedupe</small>"]
                 SESSIONS[Sessions]
@@ -251,12 +264,13 @@ domain-os/
 │   │       ├── protocols/    # Per-domain and shared protocols
 │   │       ├── agents/       # Multi-provider LLM (Anthropic, OpenAI, Ollama), prompt builder
 │   │       ├── advisory/     # Advisory parser, artifact repository, task extractor, schemas
+│   │       ├── brainstorm/  # BMAD technique library, session repository, deterministic synthesizer
 │   │       ├── automations/  # Automation schemas, cron parser, dedupe, templates, repository
 │   │       ├── briefing/     # Portfolio health computation, LLM analysis, output parsing
 │   │       ├── sessions/     # Session lifecycle management
 │   │       ├── audit/        # Event audit trail
 │   │       ├── intake/       # Browser intake classification
-│   │       ├── storage/      # SQLite schema and migrations (v1–v13)
+│   │       ├── storage/      # SQLite schema and migrations (v1–v14)
 │   │       └── common/       # Result type, shared schemas
 │   └── integrations/         # External service integrations (Gmail, Google Tasks)
 ├── apps/

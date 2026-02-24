@@ -80,6 +80,9 @@ Computed dashboard: per-domain health scoring (KB staleness × tiered importance
 ### Cross-Domain Relationships (Completed)
 Directed relationships with typed dependencies (`blocks`, `depends_on`, `informs`, `parallel`, `monitor_only`). Supports reciprocal relationships with different types per direction. Powers cross-domain alerts in portfolio health.
 
+### Strategic Brainstorming — BMAD Method (Completed)
+Deep facilitated brainstorming sessions using 106 techniques (56 brainstorming + 50 elicitation) across 10 categories, adapted from BMAD-METHOD. AI facilitates (not generates), with heuristic technique recommendations, multi-round idea capture, anti-bias protocol, and deterministic synthesis (keyword clustering → ranked options). One active session per domain, 500-idea soft cap, recovery-safe synthesis previews. 6 brainstorm_* tools wired into tool loop.
+
 ## Key Files Reference
 
 ### Core Library (`packages/core/`)
@@ -107,7 +110,12 @@ Directed relationships with typed dependencies (`blocks`, `depends_on`, `informs
 | `src/advisory/schemas.ts` | Zod schemas for 4 advisory types (brainstorm, risk_assessment, scenario, strategic_review) with nested `.strict()` on array items |
 | `src/advisory/task-extractor.ts` | Deterministic task extraction from artifacts — type-specific field mapping, title validation (6-120 chars, verb check), `needsEditing[]` for rejected candidates |
 | `src/advisory/normalize.ts` | Centralized `normalizeEnum()`, `normalizePersist()`, `normalizeType()`, `validateEnum()` — shared by advisory and decision parsers |
-| `src/storage/` | SQLite schema, migrations (v1–v12). v8: per-domain model override. v9: directed relationships. v11: decision quality columns. v12: advisory_artifacts table |
+| `src/brainstorm/technique-library.ts` | 56 brainstorming techniques + 50 elicitation methods across 10 categories with `getById`, `getByCategory`, `recommend` (heuristic), `getRandom`; technique data adapted from BMAD-METHOD (MIT) |
+| `src/brainstorm/schemas.ts` | Zod schemas for brainstorm sessions, rounds, ideas, step transitions; `STEP_TRANSITIONS` graph, `PAUSABLE_STEPS`, constants |
+| `src/brainstorm/repository.ts` | `BrainstormSessionRepository` — CRUD with step transition graph, idempotent pause/resume, auto-round creation via `getOrCreateOpenRound()`, 500-idea soft cap |
+| `src/brainstorm/synthesizer.ts` | Deterministic `synthesize()`: keyword clustering, n-gram labeling, ranked options (up to 10), recommendations, contrarian views, assumptions |
+| `src/agents/brainstorm-protocol.ts` | Seeded facilitation protocol (~500 tokens): when to use deep vs. quick brainstorm, anti-bias pivots, energy checkpoints, session lifecycle |
+| `src/storage/` | SQLite schema, migrations (v1–v14). v8: per-domain model override. v9: directed relationships. v11: decision quality columns. v12: advisory_artifacts table. v14: brainstorm_sessions table |
 | `src/common/` | Result type, shared Zod schemas |
 
 ### Integrations (`packages/integrations/`)
@@ -124,6 +132,7 @@ Directed relationships with typed dependencies (`blocks`, `depends_on`, `informs
 | `src/main/ipc-handlers.ts` | 60+ IPC handlers: domains, KB, chat, briefing, intake, protocols, sessions, relationships, gap flags, decisions, audit, advisory, Gmail, GTasks, settings |
 | `src/main/tool-loop.ts` | **Provider-agnostic** tool-use loop — works with Anthropic, OpenAI, Ollama; prefix-based dispatch (`gmail_*`, `gtasks_*`, `advisory_*`), ROWYS Gmail guard, tool output sanitization, transcript validation, size guards (75KB/result, 400KB total), capability cache management |
 | `src/main/advisory-tools.ts` | `ADVISORY_TOOLS` as `ToolDefinition[]` (advisory_search_decisions, advisory_search_deadlines, advisory_cross_domain_context, advisory_risk_snapshot), executors with output caps (10 items, 300 char truncation), `schemaVersion` wrapper |
+| `src/main/brainstorm-tools.ts` | `BRAINSTORM_TOOLS` as `ToolDefinition[]` (brainstorm_start_session, brainstorm_get_techniques, brainstorm_capture_ideas, brainstorm_session_status, brainstorm_synthesize, brainstorm_session_control), `executeBrainstormTool()` |
 | `src/main/gmail-tools.ts` | `GMAIL_TOOLS` as `ToolDefinition[]` (provider-agnostic), input validation, executor |
 | `src/main/gmail-oauth.ts` | OAuth PKCE flow via system browser + loopback |
 | `src/main/gmail-credentials.ts` | Encrypted credential storage (safeStorage) |
