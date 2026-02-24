@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { LayersIcon } from '../components/icons/LayersIcon'
+import { BrainIcon } from '../components/icons/BrainIcon'
 import { useBriefingStore } from '../stores'
 import type { DomainStatus } from '../../preload/api'
 import type { ActiveView } from '../App'
@@ -51,6 +52,22 @@ export function DomainListPage({ onViewChange }: Props): React.JSX.Element {
                   </span>
                 ))}
               </div>
+              {/* Brainstorm feature tip */}
+              <div className="mt-6 mx-auto max-w-sm rounded-lg border border-border-subtle bg-surface-2 p-4 text-left">
+                <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
+                  <BrainIcon className="h-4 w-4 text-accent" />
+                  Strategic Brainstorming
+                </div>
+                <p className="mt-2 text-xs text-text-secondary leading-relaxed">
+                  Run deep, technique-driven brainstorming with 100+ methods.
+                  Your AI facilitates multi-round exploration and synthesizes
+                  ideas into actionable strategic options.
+                </p>
+                <p className="mt-2 text-xs text-text-tertiary">
+                  Select a domain, then type: <span className="font-medium text-text-secondary">Deep brainstorm</span>
+                </p>
+              </div>
+
               <button
                 type="button"
                 onClick={() => onViewChange('briefing')}

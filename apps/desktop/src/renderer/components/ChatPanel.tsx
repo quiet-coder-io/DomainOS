@@ -4,6 +4,7 @@ import { MessageBubble } from './MessageBubble'
 import { StopAlert } from './StopAlert'
 import { GapFlagAlert } from './GapFlagAlert'
 import { DecisionCard } from './DecisionCard'
+import { BrainIcon } from './icons/BrainIcon'
 
 interface Props {
   domainId: string
@@ -21,11 +22,31 @@ const SpinnerIcon = () => (
   </svg>
 )
 
-const SUGGESTIONS = [
-  "What's the latest",
-  "Status update",
-  "Any deadlines coming up?",
+type Suggestion = {
+  id: 'latest' | 'status' | 'deadlines' | 'brainstorm'
+  label: string
+  text?: string
+  featured?: boolean
+}
+
+const SUGGESTIONS: Suggestion[] = [
+  { id: 'latest', label: "What's the latest" },
+  { id: 'status', label: "Status update" },
+  { id: 'deadlines', label: "Any deadlines coming up?" },
+  {
+    id: 'brainstorm',
+    label: "Deep brainstorm",
+    text: "Start a deep brainstorm session in this domain. Use technique-guided facilitation, capture ideas as we go, then synthesize into strategic options.",
+    featured: true,
+  },
 ]
+
+function chipClass(featured?: boolean): string {
+  const base = 'rounded-full px-3 py-1.5 text-xs transition-colors'
+  return featured
+    ? `${base} border border-accent/40 bg-accent/5 text-text-secondary hover:border-accent/60 hover:bg-accent/10 hover:text-text-primary`
+    : `${base} border border-border text-text-secondary hover:border-accent/50 hover:bg-accent/5 hover:text-text-primary`
+}
 
 export function ChatPanel({ domainId }: Props): React.JSX.Element {
   const {
@@ -153,12 +174,13 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
             <div className="flex flex-wrap justify-center gap-2">
               {SUGGESTIONS.map((s) => (
                 <button
-                  key={s}
-                  onClick={() => handleSuggestionClick(s)}
-                  className="rounded-full border border-border px-3 py-1.5 text-xs text-text-secondary
-                             transition-colors hover:border-accent/50 hover:bg-accent/5 hover:text-text-primary"
+                  type="button"
+                  key={s.id}
+                  onClick={() => handleSuggestionClick(s.text ?? s.label)}
+                  className={chipClass(s.featured)}
                 >
-                  {s}
+                  {s.featured && <BrainIcon aria-hidden="true" className="inline-block h-3 w-3 mr-1" />}
+                  {s.label}
                 </button>
               ))}
             </div>
