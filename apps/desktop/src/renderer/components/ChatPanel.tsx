@@ -21,6 +21,12 @@ const SpinnerIcon = () => (
   </svg>
 )
 
+const SUGGESTIONS = [
+  "What's the latest",
+  "Status update",
+  "Any deadlines coming up?",
+]
+
 export function ChatPanel({ domainId }: Props): React.JSX.Element {
   const {
     messages,
@@ -64,6 +70,11 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
     if (!text || isStreaming) return
 
     setInput('')
+    await sendMessage(text, domainId)
+  }
+
+  async function handleSuggestionClick(text: string): Promise<void> {
+    if (isStreaming) return
     await sendMessage(text, domainId)
   }
 
@@ -134,11 +145,23 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4">
-        {messages.length === 0 && !isStreaming && (
-          <div className="flex h-full items-center justify-center">
+        {!messages.some((m) => m.role !== 'system') && !isStreaming && (
+          <div className="flex h-full flex-col items-center justify-center gap-4">
             <p className="text-sm text-text-tertiary">
               Send a message to start chatting with this domain's AI assistant.
             </p>
+            <div className="flex flex-wrap justify-center gap-2">
+              {SUGGESTIONS.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => handleSuggestionClick(s)}
+                  className="rounded-full border border-border px-3 py-1.5 text-xs text-text-secondary
+                             transition-colors hover:border-accent/50 hover:bg-accent/5 hover:text-text-primary"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
           </div>
         )}
         {messages.map((msg, i) =>
