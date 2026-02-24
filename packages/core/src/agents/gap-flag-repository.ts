@@ -123,6 +123,17 @@ export class GapFlagRepository {
     return this.updateStatus(id, 'resolved')
   }
 
+  getRecentlyResolved(domainId: string, limit: number): Result<GapFlag[], DomainOSError> {
+    try {
+      const rows = this.db
+        .prepare("SELECT * FROM gap_flags WHERE domain_id = ? AND status = 'resolved' ORDER BY resolved_at DESC LIMIT ?")
+        .all(domainId, limit) as GapFlagRow[]
+      return Ok(rows.map(rowToGapFlag))
+    } catch (e) {
+      return Err(DomainOSError.db((e as Error).message))
+    }
+  }
+
   private updateStatus(id: string, status: GapFlag['status']): Result<GapFlag, DomainOSError> {
     const row = this.db.prepare('SELECT * FROM gap_flags WHERE id = ?').get(id) as GapFlagRow | undefined
     if (!row) return Err(DomainOSError.notFound('GapFlag', id))

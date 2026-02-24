@@ -30,4 +30,6 @@ export const TOKEN_BUDGETS = {
   kbInstructions: 500,
   /** Primary KB content (remainder after all other sections) */
   primaryKB: 21_500,
+  /** Status briefing section (only when status intent detected) */
+  statusBriefing: 900,
 } as const

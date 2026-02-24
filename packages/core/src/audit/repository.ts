@@ -120,6 +120,17 @@ export class AuditRepository {
     }
   }
 
+  getByDomainSince(domainId: string, since: string, limit: number): Result<AuditEntry[], DomainOSError> {
+    try {
+      const rows = this.db
+        .prepare('SELECT * FROM audit_log WHERE domain_id = ? AND created_at > ? ORDER BY created_at DESC LIMIT ?')
+        .all(domainId, since, limit) as AuditRow[]
+      return Ok(rows.map(rowToEntry))
+    } catch (e) {
+      return Err(DomainOSError.db((e as Error).message))
+    }
+  }
+
   findByContentHash(domainId: string, contentHash: string): Result<AuditEntry | null, DomainOSError> {
     try {
       const row = this.db

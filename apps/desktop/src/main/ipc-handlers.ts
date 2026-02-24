@@ -45,6 +45,9 @@ import {
   AdvisoryRepository,
   parseAdvisoryBlocks,
   extractTasksFromArtifact,
+  detectStatusIntent,
+  computeDomainStatusSnapshot,
+  STATUS_CAPS,
 } from '@domain-os/core'
 import type {
   CreateDomainInput,
@@ -60,6 +63,7 @@ import type {
   AdvisoryType,
   AdvisoryStatus,
   SaveDraftBlockInput,
+  DomainStatusSnapshot,
 } from '@domain-os/core'
 import { getIntakeToken } from './intake-token'
 import { startKBWatcher, stopKBWatcher } from './kb-watcher'
@@ -309,10 +313,17 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           }
         }
 
+        // Early intent detection for KB budget adjustment
+        const lastUserMsgEarly = payload.messages.filter((m) => m.role === 'user').at(-1)
+        const isStatusBriefingEarly = lastUserMsgEarly && detectStatusIntent(lastUserMsgEarly.content)
+
         const kbFiles = kbRepo.getFiles(payload.domainId)
         if (!kbFiles.ok) return { ok: false, error: kbFiles.error.message }
 
-        const kbContext = await buildKBContext(domain.value.kbPath, kbFiles.value, TOKEN_BUDGETS.primaryKB)
+        const kbBudget = isStatusBriefingEarly
+          ? TOKEN_BUDGETS.primaryKB - TOKEN_BUDGETS.statusBriefing
+          : TOKEN_BUDGETS.primaryKB
+        const kbContext = await buildKBContext(domain.value.kbPath, kbFiles.value, kbBudget)
         if (!kbContext.ok) return { ok: false, error: kbContext.error.message }
 
         const protocols = protocolRepo.getByDomainId(payload.domainId)
@@ -391,8 +402,31 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
         }
 
         // Detect wrap-up intent from last user message
-        const lastUserMsg = payload.messages.filter((m) => m.role === 'user').at(-1)
+        const lastUserMsg = lastUserMsgEarly
         const isWrapUp = lastUserMsg && /\b(wrap\s*up|wrap\s*-\s*up|end\s*session|session\s*summary|final\s*summary)\b/i.test(lastUserMsg.content)
+
+        // Status briefing intent (already detected early for KB budget)
+        const isStatusBriefing = isStatusBriefingEarly
+
+        if (isStatusBriefing) {
+          console.log('[chat:send] StatusIntentDebug: detected=true message=', lastUserMsg!.content.slice(0, 60))
+        }
+
+        let statusBriefing: DomainStatusSnapshot | undefined
+        if (isStatusBriefing) {
+          const snap = computeDomainStatusSnapshot(db, payload.domainId)
+          if (snap.ok) {
+            statusBriefing = snap.value
+            console.log('[chat:send] StatusBriefingDebug:',
+              `caps=${JSON.stringify(STATUS_CAPS)}`,
+              `actions=${statusBriefing.topActions.length}`,
+              `overdue=${statusBriefing.overdueDeadlines.length}`,
+              `gaps=${statusBriefing.openGapFlags.length}`,
+              `sinceWindow=${statusBriefing.sinceWindow.kind}`)
+          } else {
+            console.warn('[chat:send] Status snapshot failed:', snap.error.code)
+          }
+        }
 
         // Format current date with day-of-week, time, and timezone for LLM temporal grounding
         const currentDate = new Intl.DateTimeFormat('en-US', {
@@ -417,6 +451,7 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           sharedProtocols: sharedProtoList,
           siblingContext,
           sessionContext,
+          statusBriefing,
           currentDate,
         })
         const systemPrompt = promptResult.prompt
@@ -479,6 +514,10 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           // Advisory tools are always available (read-only, no external credentials)
           tools.push(...ADVISORY_TOOLS)
           toolsHint += '\n\n## Advisory Tools\nYou have tools to search decisions, deadlines, cross-domain context, and risk snapshots. Use them when providing strategic advice, assessing risk, or referencing prior decisions. When quoting cross-domain data, always attribute the source domain name.'
+
+          if (isStatusBriefing) {
+            toolsHint += '\n\n## Status Briefing Mode\nThis is a status update request. You SHOULD use available tools to enrich the briefing. Use the search hints provided in the DOMAIN STATUS BRIEFING section for Gmail/GTasks queries.'
+          }
 
           if (tools.length === ADVISORY_TOOLS.length) {
             // Only advisory tools available (Gmail + GTasks preflights failed) — still useful

@@ -4,6 +4,8 @@
  */
 
 import { estimateTokens, TOKEN_BUDGETS } from './token-budgets.js'
+import type { DomainStatusSnapshot } from '../briefing/domain-status.js'
+import { STATUS_CHAR_LIMITS, STATUS_SOFT_CAP_CHARS, STATUS_MAX_SECTION_CHARS } from '../briefing/domain-status-constants.js'
 
 // --- Input types ---
 
@@ -49,6 +51,7 @@ export interface PromptContext {
   sharedProtocols?: PromptProtocol[]
   siblingContext?: PromptSiblingContext
   sessionContext?: PromptSessionContext
+  statusBriefing?: DomainStatusSnapshot
   currentDate?: string
   debug?: boolean
 }
@@ -170,6 +173,12 @@ export function buildSystemPrompt(context: PromptContext): PromptResult {
     addSection('Escalation Triggers', escSection)
   }
 
+  // === DOMAIN STATUS BRIEFING === (when status intent detected)
+  if (context.statusBriefing) {
+    const briefingSection = renderStatusBriefing(context.statusBriefing, context.debug)
+    addSection('Domain Status Briefing', briefingSection)
+  }
+
   // === SESSION === (Phase 3)
   if (context.sessionContext) {
     const sessionLines = [
@@ -276,4 +285,257 @@ Insight guards:
       totalTokenEstimate,
     },
   }
+}
+
+// ── Status Briefing Rendering ──
+
+function truncate(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text
+  return text.slice(0, maxLen - 3) + '...'
+}
+
+function dateOnly(iso: string): string {
+  return iso.slice(0, 10)
+}
+
+interface BriefingSection {
+  header: string
+  totalCount: number
+  items: string[]
+  required: boolean
+}
+
+export function renderStatusBriefing(snapshot: DomainStatusSnapshot, debug?: boolean): string {
+  const sections: BriefingSection[] = []
+
+  // Health + KB (always required, combined into one)
+  sections.push({
+    header: '',
+    totalCount: 0,
+    items: [
+      `[COMPUTED — system-calculated, treat as ground truth]`,
+      `Health: Severity ${snapshot.severityScore} | Status: ${snapshot.status}`,
+      `KB: ${snapshot.kbStalenessHeadline}`,
+    ],
+    required: true,
+  })
+
+  // Top Actions (required)
+  if (snapshot.topActions.length > 0) {
+    sections.push({
+      header: 'Priority Actions (pre-ranked)',
+      totalCount: snapshot.topActions.length,
+      items: snapshot.topActions.map((a, i) =>
+        `${i + 1}. ${truncate(a.text, STATUS_CHAR_LIMITS.actionText)} — ${truncate(a.rationale, STATUS_CHAR_LIMITS.actionRationale)}`
+      ),
+      required: true,
+    })
+  }
+
+  // Overdue Deadlines (required — always show even if 0)
+  sections.push({
+    header: 'Overdue Deadlines',
+    totalCount: snapshot.overdueDeadlines.length,
+    items: snapshot.overdueDeadlines.length === 0
+      ? ['None']
+      : snapshot.overdueDeadlines.map(d =>
+          `P${d.priority} · ${d.dueDate} · ${truncate(d.text, STATUS_CHAR_LIMITS.deadlineText)} (${d.daysOverdue}d overdue)`
+        ),
+    required: true,
+  })
+
+  // Upcoming Deadlines (required)
+  if (snapshot.upcomingDeadlines.length > 0) {
+    sections.push({
+      header: 'Upcoming 14 Days',
+      totalCount: snapshot.upcomingDeadlines.length,
+      items: snapshot.upcomingDeadlines.map(d =>
+        `P${d.priority} · ${d.dueDate} · ${truncate(d.text, STATUS_CHAR_LIMITS.deadlineText)} (${d.daysUntilDue}d)`
+      ),
+      required: true,
+    })
+  }
+
+  // Open Gap Flags (required)
+  if (snapshot.openGapFlags.length > 0) {
+    sections.push({
+      header: 'Open Gap Flags',
+      totalCount: snapshot.openGapFlags.length,
+      items: snapshot.openGapFlags.map(g =>
+        `${g.category}: ${truncate(g.description, STATUS_CHAR_LIMITS.gapDescription)}`
+      ),
+      required: true,
+    })
+  }
+
+  // Recently Resolved (required)
+  if (snapshot.recentlyResolvedGapFlags.length > 0) {
+    sections.push({
+      header: 'Recently Resolved',
+      totalCount: snapshot.recentlyResolvedGapFlags.length,
+      items: snapshot.recentlyResolvedGapFlags.map(g =>
+        `${g.category}: ${truncate(g.description, STATUS_CHAR_LIMITS.gapDescription)} — resolved ${dateOnly(g.resolvedAt)}`
+      ),
+      required: true,
+    })
+  }
+
+  // RECORDED label
+  sections.push({
+    header: '',
+    totalCount: 0,
+    items: [`\n[RECORDED — from domain event log, P1=highest urgency]`],
+    required: true,
+  })
+
+  // Decisions (optional)
+  if (snapshot.recentDecisions.length > 0) {
+    sections.push({
+      header: 'Active Decisions',
+      totalCount: snapshot.recentDecisions.length,
+      items: snapshot.recentDecisions.map(d =>
+        `${d.category ?? 'uncat'} · ${truncate(d.decision, STATUS_CHAR_LIMITS.decisionText)} · ${d.confidence ?? 'n/a'}`
+      ),
+      required: false,
+    })
+  }
+
+  // Audit events (optional)
+  if (snapshot.recentAuditEvents.length > 0) {
+    sections.push({
+      header: 'Since Last Session',
+      totalCount: snapshot.recentAuditEvents.length,
+      items: snapshot.recentAuditEvents.map(e =>
+        `${e.eventType}: ${truncate(e.description, STATUS_CHAR_LIMITS.auditDescription)} — ${dateOnly(e.createdAt)}`
+      ),
+      required: false,
+    })
+  }
+
+  // Artifacts (optional, narrative history)
+  if (snapshot.recentArtifacts.length > 0) {
+    sections.push({
+      header: '',
+      totalCount: 0,
+      items: [`\n[NARRATIVE HISTORY — prior strategic analysis, may be outdated]`],
+      required: false,
+    })
+    sections.push({
+      header: 'Recent Advisory',
+      totalCount: snapshot.recentArtifacts.length,
+      items: [`If relevant, you MAY reference these:`, ...snapshot.recentArtifacts.map(a =>
+        `${a.type}: ${truncate(a.title, STATUS_CHAR_LIMITS.artifactTitle)} — ${dateOnly(a.createdAt)}`
+      )],
+      required: false,
+    })
+  }
+
+  // Render with budget
+  return renderWithBudget(snapshot, sections, debug)
+}
+
+function renderWithBudget(
+  snapshot: DomainStatusSnapshot,
+  sections: BriefingSection[],
+  debug?: boolean,
+): string {
+  const lines: string[] = [
+    `=== DOMAIN STATUS BRIEFING ===`,
+    `You MUST treat this as a status briefing request.`,
+    snapshot.sinceWindow.label,
+    '',
+  ]
+  let charCount = lines.join('\n').length
+  const omittedSections: string[] = []
+  let hardCapHit = false
+  let softCapHit = false
+
+  for (const section of sections) {
+    // Check soft cap for optional sections
+    if (!section.required && (softCapHit || charCount >= STATUS_SOFT_CAP_CHARS)) {
+      softCapHit = true
+      if (section.header) omittedSections.push(section.header)
+      continue
+    }
+
+    // Build section content
+    const sectionLines: string[] = []
+
+    if (section.header) {
+      // Headerless sections (health, labels) have no count display
+      if (section.totalCount > 0) {
+        sectionLines.push(`${section.header} (${section.items.length}${section.items.length < section.totalCount ? ` shown of ${section.totalCount}` : ''}):`)
+      } else {
+        sectionLines.push(`${section.header}:`)
+      }
+    }
+
+    // Add items one by one, checking hard cap
+    let itemsRendered = 0
+    for (const item of section.items) {
+      const lineChars = item.length + 1 // +1 for newline
+      if (charCount + lineChars > STATUS_MAX_SECTION_CHARS) {
+        hardCapHit = true
+        break
+      }
+      sectionLines.push(item)
+      charCount += lineChars
+      itemsRendered++
+    }
+
+    // Update header if we truncated items within this section
+    if (section.header && section.totalCount > 0 && itemsRendered < section.items.length) {
+      sectionLines[0] = `${section.header} (${itemsRendered} shown of ${section.totalCount}):`
+    }
+
+    lines.push(...sectionLines)
+
+    if (hardCapHit) {
+      if (section.header) {
+        // Section was partially rendered — no need to add to omitted
+      }
+      break
+    }
+  }
+
+  // Add response format instructions
+  const responseFormat = `
+=== BRIEFING RESPONSE FORMAT ===
+Structure your response as:
+1. **Health** — 1-2 sentence domain health assessment
+2. **What Changed** — since last session (from [RECORDED] events above; if no audit events are shown, state "No event log available for this period" instead of inventing changes)
+3. **Action Items** — use [COMPUTED] Priority Actions as your checklist; present all of them, do not skip or re-rank
+4. **Upcoming** — deadlines in next 14 days
+5. **Strategic Context** — relevant decisions or advisory insights
+
+Do not invent missing deadlines/decisions/gaps; if a section has 0 items, say "None."
+If Priority Actions is empty, state: "No computed action items found." Then recommend checking deadlines and gap flags via tools.
+Do not infer causality from the severity score — report it as a computed metric, not an explanation.
+If you call Gmail/GTasks tools, summarize results and link them back to Action Items.
+
+Search hints for tool enrichment:
+Gmail: ${snapshot.searchHints.gmailQueries.join(' | ')}
+GTasks: ${snapshot.searchHints.gtasksQueries.join(' | ')}`
+
+  // Check if response format fits
+  if (charCount + responseFormat.length <= STATUS_MAX_SECTION_CHARS + 600) {
+    // Response format is critical — always include even if slightly over hard cap
+    lines.push(responseFormat)
+  }
+
+  // Footer
+  if (omittedSections.length > 0) {
+    lines.push(`\n(sections omitted: ${omittedSections.join(', ')})`)
+  }
+  if (hardCapHit) {
+    lines.push('NOTE: Briefing truncated due to size limits; treat missing sections as unknown.')
+  }
+
+  const rendered = lines.join('\n')
+
+  if (debug) {
+    console.log(`[prompt-builder] StatusBriefingRender: chars=${rendered.length} omitted=[${omittedSections.join(',')}] hardCapHit=${hardCapHit}`)
+  }
+
+  return rendered
 }
