@@ -312,6 +312,10 @@ Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup inst
 
 Looking for a place to start? Check issues labeled [`good-first-issue`](https://github.com/quiet-coder-io/DomainOS/labels/good-first-issue).
 
+## Acknowledgments
+
+DomainOS's strategic brainstorming engine is built on technique data adapted from the **[BMAD-METHOD](https://github.com/bmad-code-org/BMAD-METHOD)** by [bmad-code-org](https://github.com/bmad-code-org), licensed under [MIT](https://github.com/bmad-code-org/BMAD-METHOD/blob/main/LICENSE). The 106 brainstorming and elicitation techniques (56 brainstorming + 50 advanced elicitation across 10 categories) that power DomainOS's facilitated sessions originate from BMAD-METHOD's comprehensive technique library.
+
 ## License
 
 [AGPL-3.0](LICENSE) — you can use, modify, and distribute this software, but any modified version must also be open-sourced under AGPL-3.0, including when served over a network.
