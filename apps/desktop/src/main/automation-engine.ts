@@ -13,6 +13,7 @@ import {
   generateDedupeKey,
   renderPromptTemplate,
 } from '@domain-os/core'
+import { DomainRepository } from '@domain-os/core'
 import type { Automation, AutomationErrorCode, LLMProvider } from '@domain-os/core'
 import { onAutomationEvent, offAutomationEvent } from './automation-events'
 import type { AutomationEvent, AutomationEventHandler } from './automation-events'
@@ -249,8 +250,12 @@ async function executeAutomation(
   recordRateUsage(automation.id, automation.domainId)
 
   // 3. Render prompt
+  const domainRepo = new DomainRepository(config.db)
+  const domainResult = domainRepo.getById(automation.domainId)
+  const domainName = domainResult.ok ? domainResult.value.name : automation.domainId
+
   const templateContext: Record<string, string> = {
-    domain_name: automation.domainId,
+    domain_name: domainName,
     event_type: triggerEvent ?? triggerType,
     event_data: triggerData ? JSON.stringify(triggerData) : '',
     current_date: new Date().toLocaleDateString(),
@@ -297,7 +302,7 @@ async function executeAutomation(
 
     const result = await provider.chatComplete(
       [{ role: 'user', content: renderedPrompt }],
-      `You are an automation assistant for domain "${automation.domainId}". Respond concisely.`,
+      `You are an automation assistant for domain "${domainName}". Respond concisely.`,
     )
 
     if (!result.ok) {
