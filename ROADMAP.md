@@ -74,6 +74,14 @@ This roadmap reflects current priorities and may shift as the project evolves. I
 - [ ] Bulk artifact import with validation (`source: 'import'`)
 - [ ] Advisory artifact export (JSON, PDF)
 
+### Automation Enhancements
+- [ ] KB-aware prompts — inject KB digest/snippets into automation prompt context so the LLM has domain knowledge, not just the domain name
+- [ ] Email trigger — poll Gmail for new messages matching sender/subject filters, fire automations on match
+- [ ] Classify-to-domain action — route incoming content (email, intake) to a specific domain based on AI classification
+- [ ] Workflow chains — multi-step automations: trigger → prompt → action → prompt → action (currently limited to one prompt → one action)
+- [ ] Webhook trigger — fire automations from external HTTP requests (beyond Chrome extension intake)
+- [ ] Conditional actions — branch on LLM response content (e.g., create task only if response contains action items)
+
 ### Account Mapping Tool
 - [ ] Visual mapping of domain accounts, entities, and relationships
 - [ ] Interactive graph view of cross-domain dependencies

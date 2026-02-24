@@ -106,6 +106,7 @@ DomainOS gives each area of your professional life its own AI-powered operating 
 - **Prompt templates** — mustache-style `{{var}}` substitution with domain name, event type, event data, and current date
 - **Run history** — expandable per-automation history showing status, duration, error codes, and timestamps
 - **Starter templates** — quick-fill buttons for common patterns: "Daily Briefing → Notification", "KB Changed → Notify", "New Intake → Create Task"
+- **Current scope** — the LLM receives domain name and event metadata as context; KB-aware prompts (injecting KB content into automation runs) are planned for a future release
 
 ### Cross-Domain
 
