@@ -45,6 +45,17 @@ This roadmap reflects current priorities and may shift as the project evolves. I
 - [x] Deadline management with priority and status tracking
 - [x] Snapshot hashing for stale detection
 
+### Automations & Triggers
+- [x] Domain-scoped automation rules (trigger → AI prompt → action)
+- [x] Schedule triggers (5-field cron), event triggers (intake/KB/gap flag/deadline), manual triggers
+- [x] Action types: in-app notification, create Google Task, draft Gmail
+- [x] Atomic dedupe via UNIQUE partial index (prevents double-fires)
+- [x] Failure tracking with auto-disable at 5 consecutive failures
+- [x] Rate limiting (per-automation, per-domain, global) with in-memory rolling windows
+- [x] Privacy controls (opt-in payload storage, SHA-256 hashes by default)
+- [x] Crash recovery and retention cleanup
+- [x] Starter templates for common automation patterns
+
 ### Integrations
 - [x] Gmail read-only tools (search, read) via OAuth PKCE
 - [x] Google Tasks read-write tools (search, read, complete, update, delete)
@@ -71,7 +82,7 @@ This roadmap reflects current priorities and may shift as the project evolves. I
 - [ ] Onboarding wizard improvements
 - [ ] Keyboard shortcuts for common actions
 - [ ] Search across all domains (global search)
-- [ ] Dark/light theme toggle
+- [x] Dark/light theme toggle
 
 ### Platform
 - [ ] Protocol marketplace / sharing

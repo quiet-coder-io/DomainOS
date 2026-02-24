@@ -9,7 +9,7 @@
 [![Roadmap](https://img.shields.io/badge/roadmap-view-informational.svg)](ROADMAP.md)
 [![Discussions](https://img.shields.io/badge/discussions-join-brightgreen.svg)](https://github.com/quiet-coder-io/DomainOS/discussions)
 
-**DomainOS is a local-first AI knowledge management desktop app for managing multiple domains with domain-scoped assistants, RAG-ready knowledge bases, and bring-your-own-key (BYOK) privacy. Choose hosted or local LLM providers per domain, keep your work separated by context, and organize durable domain protocols and files — all on your machine.**
+**DomainOS is a local-first AI knowledge management desktop app for managing multiple domains with domain-scoped assistants, RAG-ready knowledge bases, automations, and bring-your-own-key (BYOK) privacy. Choose hosted or local LLM providers per domain, keep your work separated by context, automate recurring AI tasks, and organize durable domain protocols and files — all on your machine.**
 
 <p align="center">
   <img src="docs/screenshot.png" alt="DomainOS — Domain chat with KB management, portfolio health briefing, Chrome extension intake pipeline, and main dashboard" width="960" />
@@ -92,6 +92,21 @@ DomainOS gives each area of your professional life its own AI-powered operating 
 - **Google Tasks integration** — OAuth PKCE connect, overdue task detection across all lists, inline editing (click title/date to edit, reschedule, add notes), complete and delete actions with optimistic UI and error recovery
 - **Snapshot hashing** — detects when portfolio state has changed since the last analysis, prompting a re-run
 
+### Automations & Triggers
+
+- **Domain-scoped automations** — define rules per domain: "when X happens, run an AI prompt, then do Y with the result"
+- **Three trigger types** — schedule (5-field cron with human-readable preview), event (intake created, KB changed, gap flag raised, deadline approaching), or manual (one-click "Run Now")
+- **Three action types** — in-app toast notification, create Google Task, or draft Gmail (requires compose scope)
+- **Atomic dedupe** — UNIQUE partial index on dedupe keys prevents double-fires for schedule (same minute), event (same data hash), and manual (UUID per click) triggers
+- **Failure tracking** — consecutive failure streak with auto-disable at 5 failures, exponential cooldown/backoff on provider errors, "Re-enable" button to reset
+- **Rate limiting** — 1/min per automation, 10/hour per domain, 30/hour global (in-memory rolling windows); manual triggers bypass rate limits
+- **Privacy controls** — opt-in payload storage; when disabled, only SHA-256 hashes of prompts/responses are stored (no preview content in DB)
+- **Startup catch-up** — opt-in per automation: if the app was offline when a scheduled automation should have fired, run it once on startup
+- **Crash recovery** — stale pending/running runs are automatically cleaned up on engine restart
+- **Prompt templates** — mustache-style `{{var}}` substitution with domain name, event type, event data, and current date
+- **Run history** — expandable per-automation history showing status, duration, error codes, and timestamps
+- **Starter templates** — quick-fill buttons for common patterns: "Daily Briefing → Notification", "KB Changed → Notify", "New Intake → Create Task"
+
 ### Cross-Domain
 
 - **Directed domain relationships** — link domains with typed dependencies: `blocks`, `depends_on`, `informs`, `parallel`, `monitor_only`; supports reciprocal relationships with different types per direction
@@ -127,11 +142,13 @@ graph TB
                 AGENTS[Agents]
                 ADVISORY["Advisory<br/><small>Parser · Artifacts · Tasks</small>"]
                 BRIEFMOD["Briefing<br/><small>Health · Alerts</small>"]
+                AUTOMATIONS["Automations<br/><small>Cron · Events · Dedupe</small>"]
                 SESSIONS[Sessions]
                 AUDIT[Audit Trail]
                 GAPFLAGS[Gap Flags]
                 DECISIONS[Decisions]
             end
+            AUTOENG["Automation Engine<br/><small>Scheduler · Rate Limits · Actions</small>"]
             INTAKESVR["Intake Server<br/><small>localhost · token auth</small>"]
         end
 
@@ -230,17 +247,18 @@ domain-os/
 │   │       ├── protocols/    # Per-domain and shared protocols
 │   │       ├── agents/       # Multi-provider LLM (Anthropic, OpenAI, Ollama), prompt builder
 │   │       ├── advisory/     # Advisory parser, artifact repository, task extractor, schemas
+│   │       ├── automations/  # Automation schemas, cron parser, dedupe, templates, repository
 │   │       ├── briefing/     # Portfolio health computation, LLM analysis, output parsing
 │   │       ├── sessions/     # Session lifecycle management
 │   │       ├── audit/        # Event audit trail
 │   │       ├── intake/       # Browser intake classification
-│   │       ├── storage/      # SQLite schema and migrations (v1–v12)
+│   │       ├── storage/      # SQLite schema and migrations (v1–v13)
 │   │       └── common/       # Result type, shared schemas
 │   └── integrations/         # External service integrations (Gmail, Google Tasks)
 ├── apps/
 │   └── desktop/              # Electron + React desktop app
 │       └── src/
-│           ├── main/         # Main process, IPC handlers, advisory tools, intake server
+│           ├── main/         # Main process, IPC handlers, automation engine, intake server
 │           ├── preload/      # contextBridge API surface
 │           └── renderer/     # React UI
 │               ├── components/  # Shared UI components
