@@ -66,6 +66,7 @@ This loop validates the core value prop: domain-scoped AI that reads and writes 
 - **Strategic advisory system** — mode-classified responses (brainstorm/challenge/review/scenario/general), persistent advisory artifacts with strict Zod-validated JSON fence blocks, 4 read-only advisory tools, deterministic task extraction, cross-domain contamination guard
 - **Decision quality gates** — confidence, horizon, reversibility class, category, authority source tier on decision records
 - **File attachments in chat** — drag-and-drop files onto chat as context for the LLM. Supports text files (.md, .ts, .json, etc.) and binary documents (PDF, Excel, Word) with server-side text extraction. Files are sent as user message preamble; only metadata (filename, size, sha256) stored in chat history. Budget enforcement: 100KB/file text, 2MB/file binary, 500KB total, 200K chars total, max 20 files. Hash-based dedup, encoding validation, deterministic truncation.
+- **Skill library** — reusable analytical procedures (e.g., "CMBS loan review") with per-message activation, freeform/structured output, tool hints, import/export as `.skill.md` files, and full CRUD management dialog. Skills inject into the system prompt between shared protocols and domain protocols with protocol precedence enforcement.
 
 ### Out of scope (future)
 - Protocol marketplace/sharing
@@ -86,6 +87,9 @@ Deep facilitated brainstorming sessions using 106 techniques (56 brainstorming +
 
 ### File Attachments in Chat (Completed)
 Drag-and-drop files from Finder onto the chat panel as LLM context. Split transport/storage: file contents sent in LLM user message with injection-guarded preamble; only metadata (filename, size, SHA-256) persisted in chat history. **Text files** (.md, .ts, .json, .csv, etc. + exact-name files like Dockerfile, Makefile): read via `file.text()`, encoding validated, 100KB limit. **Binary documents** (PDF, Excel, Word): read as `ArrayBuffer`, sent to main process via `file:extract-text` IPC for server-side extraction (`unpdf`, `xlsx`, `mammoth`), 2MB limit. Shared pipeline: deterministic truncation (50K chars/file), hash-based dedup, incremental budget enforcement (500KB / 200K chars / 20 files total), display-name collision handling. UI: `ChatAttachmentsBar` with file chips (name, size, truncation badge, hash tooltip), remove/remove-all, error toast with auto-dismiss. Message bubbles show attachment badges for historical messages.
+
+### Skill Library (Completed)
+Reusable analytical procedures stored globally and activated per-message. Full vertical slice: DB migration v16 (`skills` table with COLLATE NOCASE, CHECK constraints, JSON1 validation) → Zod schemas with `.superRefine()` cross-field validation (structured ↔ outputSchema) → Repository with merged-state validation on update → Prompt injection (between shared protocols and domain protocols, with protocol precedence enforcement, 12K char budget) → IPC handlers (9 channels: CRUD + toggle + import/export) → Preload bridge → Zustand store (`activeSkillIdByDomain` for domain-scoped selection, 5-min cache TTL) → UI (SkillSelector chips, SkillEditor form, SkillLibraryDialog with search/filter/toggle/import/export). Import/export uses `.skill.md` format with frontmatter + fenced outputSchema block. Skills support freeform or structured JSON output with schema enforcement, and tool hints for recommending specific tools.
 
 ## Key Files Reference
 
@@ -119,7 +123,10 @@ Drag-and-drop files from Finder onto the chat panel as LLM context. Split transp
 | `src/brainstorm/repository.ts` | `BrainstormSessionRepository` — CRUD with step transition graph, idempotent pause/resume, auto-round creation via `getOrCreateOpenRound()`, 500-idea soft cap |
 | `src/brainstorm/synthesizer.ts` | Deterministic `synthesize()`: keyword clustering, n-gram labeling, ranked options (up to 10), recommendations, contrarian views, assumptions |
 | `src/agents/brainstorm-protocol.ts` | Seeded facilitation protocol (~500 tokens): when to use deep vs. quick brainstorm, anti-bias pivots, energy checkpoints, session lifecycle |
-| `src/storage/` | SQLite schema, migrations (v1–v14). v8: per-domain model override. v9: directed relationships. v11: decision quality columns. v12: advisory_artifacts table. v14: brainstorm_sessions table |
+| `src/skills/schemas.ts` | Zod schemas for skill create/update with `.superRefine()` cross-field validation (structured ↔ outputSchema); `SkillOutputFormatSchema`, `CreateSkillInputSchema`, `UpdateSkillInputSchema` |
+| `src/skills/repository.ts` | `SkillRepository` — CRUD with merged-state validation on update, COLLATE NOCASE duplicate guard, JSON roundtrip for toolHints, toggleEnabled |
+| `src/skills/serialization.ts` | `.skill.md` import/export: `skillToMarkdown()` / `markdownToSkillInput()` with frontmatter + fenced outputSchema block |
+| `src/storage/` | SQLite schema, migrations (v1–v16). v8: per-domain model override. v9: directed relationships. v11: decision quality columns. v12: advisory_artifacts table. v14: brainstorm_sessions table. v16: skills table |
 | `src/common/` | Result type, shared Zod schemas |
 
 ### Integrations (`packages/integrations/`)
@@ -133,7 +140,7 @@ Drag-and-drop files from Finder onto the chat panel as LLM context. Split transp
 
 | File | Purpose |
 |------|---------|
-| `src/main/ipc-handlers.ts` | 60+ IPC handlers: domains, KB, chat, briefing, intake, protocols, sessions, relationships, gap flags, decisions, audit, advisory, Gmail, GTasks, settings, file text extraction |
+| `src/main/ipc-handlers.ts` | 70+ IPC handlers: domains, KB, chat, briefing, intake, protocols, sessions, relationships, gap flags, decisions, audit, advisory, skills, Gmail, GTasks, settings, file text extraction |
 | `src/main/tool-loop.ts` | **Provider-agnostic** tool-use loop — works with Anthropic, OpenAI, Ollama; prefix-based dispatch (`gmail_*`, `gtasks_*`, `advisory_*`), ROWYS Gmail guard, tool output sanitization, transcript validation, size guards (75KB/result, 400KB total), capability cache management |
 | `src/main/advisory-tools.ts` | `ADVISORY_TOOLS` as `ToolDefinition[]` (advisory_search_decisions, advisory_search_deadlines, advisory_cross_domain_context, advisory_risk_snapshot), executors with output caps (10 items, 300 char truncation), `schemaVersion` wrapper |
 | `src/main/brainstorm-tools.ts` | `BRAINSTORM_TOOLS` as `ToolDefinition[]` (brainstorm_start_session, brainstorm_get_techniques, brainstorm_capture_ideas, brainstorm_session_status, brainstorm_synthesize, brainstorm_session_control), `executeBrainstormTool()` |
@@ -156,6 +163,10 @@ Drag-and-drop files from Finder onto the chat panel as LLM context. Split transp
 | `src/renderer/components/ChatAttachmentsBar.tsx` | File chips UI: displayName + size + truncation badge + hash tooltip, remove/remove-all, error toast with auto-dismiss |
 | `src/renderer/components/ChatPanel.tsx` | Chat input with drag-and-drop file attachment, `processFiles()` with budget enforcement, binary file extraction via IPC |
 | `src/renderer/components/AdvisoryPanel.tsx` | Strategic History panel — status/type filters, expandable artifact cards, type-specific content renderers, archive/unarchive actions |
+| `src/renderer/stores/skill-store.ts` | Zustand store for skills: `activeSkillIdByDomain` (domain-scoped selection), `fetchSkills(force?)` with 5-min cache, auto-clear stale selections |
+| `src/renderer/components/SkillSelector.tsx` | Chip-based skill selector above chat textarea; per-message activation with auto-clear after send |
+| `src/renderer/components/SkillLibraryDialog.tsx` | Full CRUD dialog: search, filter (all/enabled/disabled), toggle, edit, delete with confirm, import/export |
+| `src/renderer/components/SkillEditor.tsx` | Skill form: name, description, content textarea, output format radio, JSON schema (validated on blur), tool hints |
 
 ## Multi-Provider LLM Architecture
 
@@ -260,6 +271,15 @@ Decrypted keys cached in-memory after first read. Keys never cross IPC to render
 | `advisory:save-draft-block` | renderer→main | 1-click save of a `persist:"no"` draft block from message metadata |
 | `advisory:extract-tasks` | renderer→main | Deterministic task extraction from an artifact |
 | `file:extract-text` | renderer→main | Binary file text extraction (PDF via `unpdf`, Excel via `xlsx`, Word via `mammoth`) |
+| `skill:list` | renderer→main | List all skills (for library management) |
+| `skill:list-enabled` | renderer→main | List enabled skills (for selector UI) |
+| `skill:get` | renderer→main | Get skill by ID |
+| `skill:create` | renderer→main | Create a new skill |
+| `skill:update` | renderer→main | Update skill fields |
+| `skill:delete` | renderer→main | Delete a skill |
+| `skill:toggle` | renderer→main | Toggle skill enabled/disabled |
+| `skill:export` | renderer→main | Export skill as `.skill.md` file (save dialog) |
+| `skill:import` | renderer→main | Import skill from `.skill.md` file (open dialog) |
 
 ## Environment Variables
 

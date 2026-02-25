@@ -11,6 +11,7 @@ import { DecisionLogPanel } from '../components/DecisionLogPanel'
 import { AuditLogPanel } from '../components/AuditLogPanel'
 import { AdvisoryPanel } from '../components/AdvisoryPanel'
 import { AutomationConfigDialog } from '../components/AutomationConfigDialog'
+import { SkillLibraryDialog } from '../components/SkillLibraryDialog'
 import { SettingsDialog } from '../components/SettingsDialog'
 
 const DocumentIcon = () => (
@@ -66,6 +67,7 @@ export function DomainChatPage(): React.JSX.Element {
 
   const [showSettings, setShowSettings] = useState(false)
   const [showAutomations, setShowAutomations] = useState(false)
+  const [showSkillLibrary, setShowSkillLibrary] = useState(false)
 
   // --- Per-domain model override state ---
   const [overrideExpanded, setOverrideExpanded] = useState(false)
@@ -345,6 +347,15 @@ export function DomainChatPage(): React.JSX.Element {
             Automations
           </button>
 
+          {/* Skills */}
+          <button
+            onClick={() => setShowSkillLibrary(true)}
+            className="rounded border border-border-subtle px-2 py-0.5 text-[11px] text-text-tertiary hover:border-accent hover:text-accent transition-colors"
+            title="Skill Library"
+          >
+            Skills
+          </button>
+
           {/* Effective model display */}
           <span className="text-xs text-text-tertiary">
             {PROVIDER_LABELS[effectiveProvider]} / {effectiveModel}
@@ -580,6 +591,9 @@ export function DomainChatPage(): React.JSX.Element {
       {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
       {showAutomations && activeDomainId && (
         <AutomationConfigDialog domainId={activeDomainId} onClose={() => setShowAutomations(false)} />
+      )}
+      {showSkillLibrary && (
+        <SkillLibraryDialog onClose={() => setShowSkillLibrary(false)} />
       )}
     </div>
   )

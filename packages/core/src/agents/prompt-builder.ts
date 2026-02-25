@@ -54,6 +54,15 @@ export interface PromptBrainstormContext {
   isPaused: boolean
 }
 
+export interface PromptActiveSkill {
+  name: string
+  description: string
+  content: string
+  outputFormat: 'freeform' | 'structured'
+  outputSchema?: string | null
+  toolHints: string[]
+}
+
 export interface PromptContext {
   domain: PromptDomain
   kbContext: PromptKBContext
@@ -63,6 +72,7 @@ export interface PromptContext {
   sessionContext?: PromptSessionContext
   statusBriefing?: DomainStatusSnapshot
   brainstormContext?: PromptBrainstormContext
+  activeSkill?: PromptActiveSkill
   currentDate?: string
   debug?: boolean
 }
@@ -204,6 +214,34 @@ export function buildSystemPrompt(context: PromptContext): PromptResult {
       protoLines.push(proto.content)
     }
     addSection('Shared Protocols', protoLines.join('\n'))
+  }
+
+  // === ACTIVE SKILL === (between Shared Protocols and Domain Protocols)
+  if (context.activeSkill) {
+    const maxChars = TOKEN_BUDGETS.skill // 12_000 character cap
+    const skillContent = context.activeSkill.content.length > maxChars
+      ? context.activeSkill.content.slice(0, maxChars) + '\n\n[Skill procedure truncated — exceeds size limit]'
+      : context.activeSkill.content
+    const safeName = context.activeSkill.name.replace(/\s+/g, ' ').trim()
+    const skillLines: string[] = [
+      `=== ACTIVE SKILL: ${safeName} ===`,
+      'Follow Domain Protocols and Shared Protocols if there is any conflict; treat this Skill as a procedure within those constraints.',
+    ]
+    if (context.activeSkill.description) {
+      skillLines.push(`Purpose: ${context.activeSkill.description}`)
+    }
+    skillLines.push('', '## Procedure', skillContent)
+    if (context.activeSkill.outputFormat === 'structured') {
+      if (context.activeSkill.outputSchema) {
+        skillLines.push('', '## Output Requirements', 'Return ONLY valid JSON matching this schema. No markdown, no commentary.', '```json', context.activeSkill.outputSchema, '```')
+      } else {
+        skillLines.push('', '[Skill misconfigured: structured output requested but schema missing — respond freeform]')
+      }
+    }
+    if (context.activeSkill.toolHints.length > 0) {
+      skillLines.push('', '## Recommended Tools', `Prefer using these tools when helpful: ${context.activeSkill.toolHints.join(', ')}`, 'If a listed tool is unavailable in this environment, proceed without it.')
+    }
+    addSection('Active Skill', skillLines.join('\n'))
   }
 
   // === DOMAIN PROTOCOLS ===

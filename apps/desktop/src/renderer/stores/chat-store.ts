@@ -73,6 +73,7 @@ interface ChatState {
     llmContent: string,
     domainId: string,
     attachments?: Array<{ filename: string; sizeBytes: number; sha256: string; truncated?: boolean }>,
+    activeSkillId?: string,
   ): Promise<void>
   cancelChat(): void
   applyProposal(domainId: string, id: string): Promise<void>
@@ -217,7 +218,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       // Transport cancel is sender-scoped. onStreamDone handles flag cleanup.
     },
 
-    async sendMessage(displayContent, llmContent, domainId, attachments) {
+    async sendMessage(displayContent, llmContent, domainId, attachments, activeSkillId) {
       const state = get()
 
       // Send guard: block any send while any request is in-flight
@@ -261,6 +262,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           requestId,
           domainId,
           messages: ipcMessages,
+          ...(activeSkillId ? { activeSkillId } : {}),
         })
 
         if (result.ok && result.value?.cancelled) {

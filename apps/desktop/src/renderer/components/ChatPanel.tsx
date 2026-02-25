@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { useChatStore } from '../stores'
+import { useChatStore, useSkillStore } from '../stores'
 import { MessageBubble } from './MessageBubble'
+import { SkillSelector } from './SkillSelector'
 import { StopAlert } from './StopAlert'
 import { GapFlagAlert } from './GapFlagAlert'
 import { DecisionCard } from './DecisionCard'
@@ -386,14 +387,22 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
       llmContent = `${buildLlmFileBlock(attachedFiles)}\n\n${text}`
     }
 
+    const { getActiveSkillId, clearActiveSkill } = useSkillStore.getState()
+    const activeSkillId = getActiveSkillId(domainId) ?? undefined
+
     setInput('')
     setAttachedFiles([])
-    await sendMessage(text, llmContent, domainId, attachmentMeta)
+    await sendMessage(text, llmContent, domainId, attachmentMeta, activeSkillId)
+    // Per-message: clear only on success (sendMessage handles error display)
+    clearActiveSkill(domainId)
   }
 
   async function handleSuggestionClick(text: string): Promise<void> {
     if (isStreaming) return
-    await sendMessage(text, text, domainId)
+    const { getActiveSkillId, clearActiveSkill } = useSkillStore.getState()
+    const activeSkillId = getActiveSkillId(domainId) ?? undefined
+    await sendMessage(text, text, domainId, undefined, activeSkillId)
+    clearActiveSkill(domainId)
   }
 
   // --- Keyboard handlers ---
@@ -575,6 +584,9 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
             Update All
           </button>
         </div>
+
+        {/* Skill selector */}
+        <SkillSelector domainId={domainId} />
 
         {/* Attachments bar */}
         <ChatAttachmentsBar

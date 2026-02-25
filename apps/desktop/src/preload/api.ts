@@ -39,6 +39,7 @@ export interface DomainOSAPI {
       requestId: string
       domainId: string
       messages: Array<{ role: 'user' | 'assistant'; content: string }>
+      activeSkillId?: string
     }): Promise<IPCResult<{
       requestId: string
       content: string
@@ -237,6 +238,24 @@ export interface DomainOSAPI {
     distinctValues(key: string, limit?: number): Promise<IPCResult<Array<{ value: string; count: number }>>>
     filter(filters: Record<string, string[]>): Promise<IPCResult<string[] | null>>
     all(): Promise<IPCResult<Record<string, DomainTag[]>>>
+  }
+
+  skill: {
+    list(): Promise<IPCResult<Skill[]>>
+    listEnabled(): Promise<IPCResult<Skill[]>>
+    get(id: string): Promise<IPCResult<Skill>>
+    create(input: {
+      name: string; description?: string; content: string; outputFormat?: string
+      outputSchema?: string | null; toolHints?: string[]; isEnabled?: boolean; sortOrder?: number
+    }): Promise<IPCResult<Skill>>
+    update(id: string, input: {
+      name?: string; description?: string; content?: string; outputFormat?: string
+      outputSchema?: string | null; toolHints?: string[]; isEnabled?: boolean; sortOrder?: number
+    }): Promise<IPCResult<Skill>>
+    delete(id: string): Promise<IPCResult<void>>
+    toggle(id: string): Promise<IPCResult<Skill>>
+    export(id: string): Promise<IPCResult<{ path: string }>>
+    import(): Promise<IPCResult<Skill>>
   }
 
   file: {
@@ -708,4 +727,22 @@ export interface AutomationNotification {
   automationName: string
   domainId: string
   message: string
+}
+
+// ── Skill types ──
+
+export type SkillOutputFormat = 'freeform' | 'structured'
+
+export interface Skill {
+  id: string
+  name: string
+  description: string
+  content: string
+  outputFormat: SkillOutputFormat
+  outputSchema: string | null
+  toolHints: string[]
+  isEnabled: boolean
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
 }

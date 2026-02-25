@@ -549,6 +549,28 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    version: 16,
+    description: 'Skills — user-activated procedural expertise for per-message prompt injection',
+    up(db) {
+      runSQL(db, `
+        CREATE TABLE IF NOT EXISTS skills (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL COLLATE NOCASE UNIQUE CHECK(length(trim(name)) > 0),
+          description TEXT NOT NULL DEFAULT '',
+          content TEXT NOT NULL CHECK(length(trim(content)) > 0),
+          output_format TEXT NOT NULL DEFAULT 'freeform' CHECK(output_format IN ('freeform','structured')),
+          output_schema TEXT,
+          tool_hints TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(tool_hints)),
+          is_enabled INTEGER NOT NULL DEFAULT 1,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_skills_sort ON skills(is_enabled, sort_order, name);
+      `)
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

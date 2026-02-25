@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { DomainOSAPI, KBUpdateProposal, ToolUseEvent, ProviderConfig, DependencyType, DeadlineStatus, DeadlineSource, AdvisoryType, AdvisoryStatus, SaveDraftBlockInput, AutomationNotification, DomainTag } from './api'
+import type { DomainOSAPI, KBUpdateProposal, ToolUseEvent, ProviderConfig, DependencyType, DeadlineStatus, DeadlineSource, AdvisoryType, AdvisoryStatus, SaveDraftBlockInput, AutomationNotification, DomainTag, SkillOutputFormat } from './api'
 
 const api: DomainOSAPI = {
   platform: process.platform,
@@ -234,6 +234,18 @@ const api: DomainOSAPI = {
     filter: (filters: Record<string, string[]>) =>
       ipcRenderer.invoke('tags:filter', filters),
     all: () => ipcRenderer.invoke('tags:all'),
+  },
+
+  skill: {
+    list: () => ipcRenderer.invoke('skill:list'),
+    listEnabled: () => ipcRenderer.invoke('skill:list-enabled'),
+    get: (id: string) => ipcRenderer.invoke('skill:get', id),
+    create: (input) => ipcRenderer.invoke('skill:create', input),
+    update: (id: string, input) => ipcRenderer.invoke('skill:update', id, input),
+    delete: (id: string) => ipcRenderer.invoke('skill:delete', id),
+    toggle: (id: string) => ipcRenderer.invoke('skill:toggle', id),
+    export: (id: string) => ipcRenderer.invoke('skill:export', id),
+    import: () => ipcRenderer.invoke('skill:import'),
   },
 
   file: {

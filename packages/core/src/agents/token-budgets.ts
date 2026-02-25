@@ -32,4 +32,6 @@ export const TOKEN_BUDGETS = {
   primaryKB: 21_500,
   /** Status briefing section (only when status intent detected) */
   statusBriefing: 900,
+  /** Active skill procedure — NOTE: this is a character cap, not token count */
+  skill: 12_000,
 } as const

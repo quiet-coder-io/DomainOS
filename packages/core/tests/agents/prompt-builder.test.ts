@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { buildSystemPrompt } from '../../src/agents/prompt-builder.js'
-import type { PromptContext } from '../../src/agents/prompt-builder.js'
+import type { PromptContext, PromptActiveSkill } from '../../src/agents/prompt-builder.js'
+import { TOKEN_BUDGETS } from '../../src/agents/token-budgets.js'
 
 describe('buildSystemPrompt', () => {
   const baseContext: PromptContext = {
@@ -249,5 +250,105 @@ describe('buildSystemPrompt', () => {
     expect(manifest.sections.length).toBe(11)
     expect(manifest.filesIncluded.length).toBe(2)
     expect(manifest.totalTokenEstimate).toBeGreaterThan(0)
+  })
+
+  describe('Active Skill section', () => {
+    const baseSkill: PromptActiveSkill = {
+      name: 'Email Drafter',
+      description: 'Draft professional emails.',
+      content: 'Step 1: Read context.\nStep 2: Write email.',
+      outputFormat: 'freeform',
+      toolHints: [],
+    }
+
+    it('appears with correct === ACTIVE SKILL: X === heading', () => {
+      const context: PromptContext = { ...baseContext, activeSkill: baseSkill }
+      const { prompt } = buildSystemPrompt(context)
+      expect(prompt).toContain('=== ACTIVE SKILL: Email Drafter ===')
+    })
+
+    it('contains Purpose and Procedure subsections', () => {
+      const context: PromptContext = { ...baseContext, activeSkill: baseSkill }
+      const { prompt } = buildSystemPrompt(context)
+      expect(prompt).toContain('Purpose: Draft professional emails.')
+      expect(prompt).toContain('## Procedure')
+      expect(prompt).toContain('Step 1: Read context.')
+    })
+
+    it('includes Output Requirements section for structured output', () => {
+      const context: PromptContext = {
+        ...baseContext,
+        activeSkill: {
+          ...baseSkill,
+          outputFormat: 'structured',
+          outputSchema: '{"type":"object","properties":{"summary":{"type":"string"}}}',
+        },
+      }
+      const { prompt } = buildSystemPrompt(context)
+      expect(prompt).toContain('## Output Requirements')
+      expect(prompt).toContain('Return ONLY valid JSON matching this schema')
+      expect(prompt).toContain('```json')
+      expect(prompt).toContain('"type":"object"')
+    })
+
+    it('includes Recommended Tools section when toolHints provided', () => {
+      const context: PromptContext = {
+        ...baseContext,
+        activeSkill: {
+          ...baseSkill,
+          toolHints: ['gmail_search', 'gtasks_read'],
+        },
+      }
+      const { prompt } = buildSystemPrompt(context)
+      expect(prompt).toContain('## Recommended Tools')
+      expect(prompt).toContain('gmail_search, gtasks_read')
+      expect(prompt).toContain('If a listed tool is unavailable')
+    })
+
+    it('does not emit active skill section when activeSkill is undefined', () => {
+      const { prompt } = buildSystemPrompt(baseContext)
+      expect(prompt).not.toContain('=== ACTIVE SKILL:')
+    })
+
+    it('truncates content at TOKEN_BUDGETS.skill with marker', () => {
+      const longContent = 'x'.repeat(TOKEN_BUDGETS.skill + 1000)
+      const context: PromptContext = {
+        ...baseContext,
+        activeSkill: { ...baseSkill, content: longContent },
+      }
+      const { prompt } = buildSystemPrompt(context)
+      expect(prompt).toContain('[Skill procedure truncated')
+      // The full long content should NOT appear
+      expect(prompt).not.toContain('x'.repeat(TOKEN_BUDGETS.skill + 1000))
+    })
+
+    it('places Active Skill between Shared Protocols and Domain Protocols', () => {
+      const context: PromptContext = {
+        ...baseContext,
+        sharedProtocols: [{ name: 'Shared', content: 'Shared content.' }],
+        activeSkill: baseSkill,
+      }
+      const { prompt } = buildSystemPrompt(context)
+      const sharedIdx = prompt.indexOf('=== SHARED PROTOCOLS ===')
+      const skillIdx = prompt.indexOf('=== ACTIVE SKILL:')
+      const domainIdx = prompt.indexOf('=== DOMAIN PROTOCOLS ===')
+      expect(sharedIdx).toBeLessThan(skillIdx)
+      expect(skillIdx).toBeLessThan(domainIdx)
+    })
+
+    it('sanitizes name: removes newlines and tabs from header', () => {
+      const context: PromptContext = {
+        ...baseContext,
+        activeSkill: {
+          ...baseSkill,
+          name: 'Evil\nSkill\tName',
+        },
+      }
+      const { prompt } = buildSystemPrompt(context)
+      // safeName replaces whitespace sequences with single space
+      expect(prompt).toContain('=== ACTIVE SKILL: Evil Skill Name ===')
+      expect(prompt).not.toContain('Evil\n')
+      expect(prompt).not.toContain('Skill\t')
+    })
   })
 })

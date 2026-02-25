@@ -10,7 +10,7 @@
 [![Discussions](https://img.shields.io/badge/discussions-join-brightgreen.svg)](https://github.com/quiet-coder-io/DomainOS/discussions)
 [![GitHub Stars](https://img.shields.io/github/stars/quiet-coder-io/DomainOS?style=social)](https://github.com/quiet-coder-io/DomainOS)
 
-**DomainOS is a local-first AI knowledge management desktop app for managing multiple domains with domain-scoped assistants, RAG-ready knowledge bases, BMAD-powered strategic brainstorming, automations, and bring-your-own-key (BYOK) privacy. Choose hosted or local LLM providers per domain, keep your work separated by context, run deep technique-driven brainstorming sessions, automate recurring AI tasks, and organize durable domain protocols and files — all on your machine.**
+**DomainOS is a local-first AI knowledge management desktop app for managing multiple domains with domain-scoped assistants, RAG-ready knowledge bases, a skill library for reusable analytical procedures, BMAD-powered strategic brainstorming, automations, and bring-your-own-key (BYOK) privacy. Choose hosted or local LLM providers per domain, keep your work separated by context, activate skills per-message for structured analysis, run deep technique-driven brainstorming sessions, automate recurring AI tasks, and organize durable domain protocols and files — all on your machine.**
 
 <p align="center">
   <img src="docs/screenshot.png" alt="DomainOS — Domain chat with KB management, portfolio health briefing, Chrome extension intake pipeline, and main dashboard" width="960" />
@@ -129,6 +129,17 @@ DomainOS gives each area of your professional life its own AI-powered operating 
 - **Google Tasks as AI tools** — the chat assistant can search, read, complete, update, and delete Google Tasks via tool-use, enabling conversational task management within any domain
 - **KB file watching** — automatic filesystem monitoring with debounced re-scan when KB files change on disk
 
+### Skill Library
+
+- **Reusable analytical procedures** — define structured skills (like "CMBS loan review" or "contract analysis") with step-by-step instructions that are injected into the AI's system prompt when activated
+- **Per-message activation** — select a skill before sending a message; it applies to that message only and auto-clears after send, keeping conversations flexible
+- **Domain-scoped selection** — skill selection is tracked per domain, so switching between domains doesn't leak skill context
+- **Freeform or structured output** — skills can produce freeform responses or enforce structured JSON output with a user-defined schema
+- **Tool hints** — skills can recommend specific tools (Gmail search, advisory tools, etc.) for the AI to prefer when executing the procedure
+- **Import/export** — share skills as `.skill.md` files with frontmatter metadata and markdown procedures; import skills from colleagues or across machines
+- **Skill library management** — full CRUD dialog with search, filter by enabled/disabled, toggle on/off, inline editing, and per-skill export
+- **Protocol precedence** — skills are treated as procedures within the domain's existing protocol constraints; domain and shared protocols always take priority
+
 ## Architecture
 
 ```mermaid
@@ -156,6 +167,7 @@ graph TB
                 AGENTS[Agents]
                 ADVISORY["Advisory<br/><small>Parser · Artifacts · Tasks</small>"]
                 BRAINSTORM["Brainstorm<br/><small>Techniques · Synthesis</small>"]
+                SKILLS["Skills<br/><small>Library · Import/Export</small>"]
                 BRIEFMOD["Briefing<br/><small>Health · Alerts</small>"]
                 AUTOMATIONS["Automations<br/><small>Cron · Events · Dedupe</small>"]
                 SESSIONS[Sessions]
@@ -265,12 +277,13 @@ domain-os/
 │   │       ├── agents/       # Multi-provider LLM (Anthropic, OpenAI, Ollama), prompt builder
 │   │       ├── advisory/     # Advisory parser, artifact repository, task extractor, schemas
 │   │       ├── brainstorm/  # BMAD technique library, session repository, deterministic synthesizer
+│   │       ├── skills/       # Skill library: schemas, repository, import/export serialization
 │   │       ├── automations/  # Automation schemas, cron parser, dedupe, templates, repository
 │   │       ├── briefing/     # Portfolio health computation, LLM analysis, output parsing
 │   │       ├── sessions/     # Session lifecycle management
 │   │       ├── audit/        # Event audit trail
 │   │       ├── intake/       # Browser intake classification
-│   │       ├── storage/      # SQLite schema and migrations (v1–v14)
+│   │       ├── storage/      # SQLite schema and migrations (v1–v16)
 │   │       └── common/       # Result type, shared schemas
 │   └── integrations/         # External service integrations (Gmail, Google Tasks)
 ├── apps/

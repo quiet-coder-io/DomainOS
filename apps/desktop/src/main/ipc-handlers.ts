@@ -51,6 +51,9 @@ import {
   AutomationRepository,
   BrainstormSessionRepository,
   DomainTagRepository,
+  SkillRepository,
+  skillToMarkdown,
+  markdownToSkillInput,
 } from '@domain-os/core'
 import type {
   CreateDomainInput,
@@ -132,6 +135,7 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
   const deadlineRepo = new DeadlineRepository(db)
   const advisoryRepo = new AdvisoryRepository(db)
   const tagRepo = new DomainTagRepository(db)
+  const skillRepo = new SkillRepository(db)
 
   // Seed default shared protocols (STOP + Gap Detection) — idempotent
   seedDefaultProtocols(sharedProtocolRepo)
@@ -276,6 +280,7 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
         requestId: string
         domainId: string
         messages: ChatMessage[]
+        activeSkillId?: string
       },
     ) => {
       const { requestId } = payload
@@ -506,6 +511,26 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
         // Fetch domain tags for prompt injection
         const domainTags = tagRepo.getByDomain(payload.domainId)
 
+        // Fetch active skill (if selected for this message)
+        let activeSkill: {
+          name: string; description: string; content: string
+          outputFormat: 'freeform' | 'structured'; outputSchema?: string | null; toolHints: string[]
+        } | undefined
+        if (payload.activeSkillId) {
+          const skillResult = skillRepo.getById(payload.activeSkillId)
+          if (skillResult.ok && skillResult.value.isEnabled) {
+            const s = skillResult.value
+            activeSkill = {
+              name: s.name,
+              description: s.description,
+              content: s.content,
+              outputFormat: s.outputFormat as 'freeform' | 'structured',
+              outputSchema: s.outputSchema,
+              toolHints: s.toolHints,
+            }
+          }
+        }
+
         const promptResult = buildSystemPrompt({
           domain: {
             name: domain.value.name,
@@ -521,6 +546,7 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           sessionContext,
           statusBriefing,
           brainstormContext,
+          activeSkill,
           currentDate,
         })
         const systemPrompt = promptResult.prompt
@@ -539,6 +565,7 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           let gmailClient: GmailClient | undefined
           let gtasksClient: GTasksClient | undefined
           let toolsHint = ''
+          const integrationNames: string[] = []
 
           if (gmailEnabled) {
             gmailClient = new GmailClient({
@@ -556,7 +583,8 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
             }
 
             tools.push(...GMAIL_TOOLS)
-            toolsHint += '\n\n## Gmail Access\nYou have tools available to search and read the user\'s Gmail. When the user\'s request involves email, use the provided tool functions to retrieve real data — never fabricate or assume email content. If the request does not involve email, respond normally without using tools.'
+            integrationNames.push('Gmail (gmail_search, gmail_read)')
+            toolsHint += '\n\n## Gmail Access\nIMPORTANT: You have a live, authenticated Gmail connection. You CAN and SHOULD use the gmail_search and gmail_read tools to retrieve real emails. When the user asks about emails, correspondence, or contacts — USE YOUR TOOLS. Do not tell the user to copy-paste emails or claim you lack email access. If you are unsure whether an email exists, search for it first.\nIf the request does not involve email, respond normally without using tools.'
           }
 
           if (gtasksEnabled) {
@@ -574,7 +602,8 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
               gtasksClient = undefined
             } else {
               tools.push(...GTASKS_TOOLS)
-              toolsHint += '\n\n## Google Tasks Access\nYou have tools available to search, read, complete, update, and delete the user\'s Google Tasks. When the user\'s request involves tasks or to-do items, use the provided tool functions to retrieve and modify real data — never fabricate or assume task content. If the request does not involve tasks, respond normally without using tools.'
+              integrationNames.push('Google Tasks (gtasks_search, gtasks_read, gtasks_complete, gtasks_update, gtasks_delete)')
+              toolsHint += '\n\n## Google Tasks Access\nIMPORTANT: You have a live, authenticated Google Tasks connection. You CAN and SHOULD use the gtasks_* tools to search, read, complete, update, and delete the user\'s tasks. When the user asks about tasks or to-do items — USE YOUR TOOLS. Do not claim you lack task access.\nIf the request does not involve tasks, respond normally without using tools.'
             }
           }
 
@@ -588,6 +617,12 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
 
           if (isStatusBriefing) {
             toolsHint += '\n\n## Status Briefing Mode\nThis is a status update request. You SHOULD use available tools to enrich the briefing. Use the search hints provided in the DOMAIN STATUS BRIEFING section for Gmail/GTasks queries.'
+          }
+
+          // Prepend a prominent capability preamble when external integrations are connected
+          if (integrationNames.length > 0) {
+            const preamble = '\n\n=== TOOL CAPABILITIES ===\nYou have LIVE, AUTHENTICATED access to the following external integrations: ' + integrationNames.join('; ') + '.\nThese are real connections — not hypothetical. Use them when the user\'s request is relevant. NEVER claim you lack access to these integrations or tell the user to manually copy-paste data.'
+            toolsHint = preamble + toolsHint
           }
 
           if (tools.length === ADVISORY_TOOLS.length) {
@@ -1991,6 +2026,80 @@ Rules:
     try {
       return { ok: true, value: tagRepo.getAllGroupedByDomain() }
     } catch (e) { return { ok: false, error: (e as Error).message } }
+  })
+
+  // --- Skills CRUD ---
+
+  ipcMain.handle('skill:list', async () => {
+    const result = skillRepo.list()
+    return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
+  })
+
+  ipcMain.handle('skill:list-enabled', async () => {
+    const result = skillRepo.listEnabled()
+    return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
+  })
+
+  ipcMain.handle('skill:get', async (_e: IpcMainInvokeEvent, id: string) => {
+    const result = skillRepo.getById(id)
+    return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
+  })
+
+  ipcMain.handle('skill:create', async (_e: IpcMainInvokeEvent, input: {
+    name: string; description?: string; content: string; outputFormat?: string
+    outputSchema?: string | null; toolHints?: string[]; isEnabled?: boolean; sortOrder?: number
+  }) => {
+    const result = skillRepo.create(input)
+    return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
+  })
+
+  ipcMain.handle('skill:update', async (_e: IpcMainInvokeEvent, id: string, input: {
+    name?: string; description?: string; content?: string; outputFormat?: string
+    outputSchema?: string | null; toolHints?: string[]; isEnabled?: boolean; sortOrder?: number
+  }) => {
+    const result = skillRepo.update(id, input)
+    return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
+  })
+
+  ipcMain.handle('skill:delete', async (_e: IpcMainInvokeEvent, id: string) => {
+    const result = skillRepo.delete(id)
+    return result.ok ? { ok: true } : { ok: false, error: result.error.message }
+  })
+
+  ipcMain.handle('skill:toggle', async (_e: IpcMainInvokeEvent, id: string) => {
+    const result = skillRepo.toggleEnabled(id)
+    return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
+  })
+
+  ipcMain.handle('skill:export', async (_e: IpcMainInvokeEvent, id: string) => {
+    const result = skillRepo.getById(id)
+    if (!result.ok) return { ok: false, error: result.error.message }
+
+    const markdown = skillToMarkdown(result.value)
+    const safeName = result.value.name.replace(/[^a-zA-Z0-9-_ ]/g, '').replace(/\s+/g, '-')
+    const dialogResult = await dialog.showSaveDialog({
+      defaultPath: `${safeName}.skill.md`,
+      filters: [{ name: 'Skill files', extensions: ['skill.md', 'md'] }],
+    })
+    if (dialogResult.canceled || !dialogResult.filePath) return { ok: false, error: 'Cancelled' }
+    await writeFile(dialogResult.filePath, markdown, 'utf-8')
+    return { ok: true, value: { path: dialogResult.filePath } }
+  })
+
+  ipcMain.handle('skill:import', async () => {
+    const dialogResult = await dialog.showOpenDialog({
+      filters: [{ name: 'Skill files', extensions: ['skill.md', 'md'] }],
+      properties: ['openFile'],
+    })
+    if (dialogResult.canceled || dialogResult.filePaths.length === 0) return { ok: false, error: 'Cancelled' }
+    try {
+      const content = await readFile(dialogResult.filePaths[0], 'utf-8')
+      const input = markdownToSkillInput(content)
+      const result = skillRepo.create(input)
+      return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
+    } catch (e) {
+      return { ok: false, error: (e as Error).message }
+    }
   })
 
   // --- File text extraction (for binary attachments: PDF, Excel, Word) ---
