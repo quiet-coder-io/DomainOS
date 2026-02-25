@@ -4,7 +4,7 @@
  */
 
 // Provider types and interfaces
-export type { ChatMessage, LLMProvider, ToolCapableProvider, ToolUseMessage, ToolUseResponse, ToolDefinition, ToolCall, ToolCapability } from './provider.js'
+export type { ChatMessage, ChatOptions, LLMProvider, ToolCapableProvider, ToolUseMessage, ToolUseResponse, ToolDefinition, ToolCall, ToolCapability } from './provider.js'
 export { ToolsNotSupportedError, isToolCapableProvider, toolCapKey, getToolCapability, setToolCapability, shouldUseTools, maybeWrapToolsNotSupported, toolCapabilityCache, notObservedCounters } from './provider.js'
 
 // Provider implementations

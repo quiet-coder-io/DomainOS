@@ -1,6 +1,7 @@
 interface Props {
   role: 'user' | 'assistant'
   content: string
+  status?: 'cancelled'
   onExtractKb?: () => void
 }
 
@@ -144,7 +145,7 @@ const ExtractIcon = () => (
   </svg>
 )
 
-export function MessageBubble({ role, content, onExtractKb }: Props): React.JSX.Element {
+export function MessageBubble({ role, content, status, onExtractKb }: Props): React.JSX.Element {
   const isUser = role === 'user'
 
   return (
@@ -160,6 +161,9 @@ export function MessageBubble({ role, content, onExtractKb }: Props): React.JSX.
           <div className="whitespace-pre-wrap break-words">{content}</div>
         ) : (
           <div className="break-words">{renderMarkdown(content)}</div>
+        )}
+        {status === 'cancelled' && (
+          <span className="mt-1 inline-block text-[10px] text-text-tertiary italic">Stopped</span>
         )}
       </div>
       {/* Per-message "Update KB" button — hover-visible on assistant messages */}

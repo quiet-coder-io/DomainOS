@@ -19,6 +19,7 @@ import type {
   ToolDefinition,
   ToolUseMessage,
   ChatMessage,
+  ChatOptions,
 } from '@domain-os/core'
 import {
   ToolsNotSupportedError,
@@ -86,11 +87,13 @@ export interface ToolLoopOptions {
   eventSender: WebContents
   maxRounds?: number
   ollamaBaseUrl?: string
+  signal?: AbortSignal
 }
 
 export interface ToolLoopResult {
   fullResponse: string
   toolCalls: Array<{ toolUseId: string; name: string; input: unknown }>
+  cancelled?: boolean
 }
 
 /**
@@ -119,6 +122,7 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
     eventSender,
     maxRounds = 5,
     ollamaBaseUrl,
+    signal,
   } = options
 
   const capKey = toolCapKey(providerName, model, ollamaBaseUrl)
@@ -152,6 +156,11 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
 
   try {
     for (let round = 1; round <= maxRounds + 1; round++) {
+      // Abort checkpoint 1: top of each round
+      if (signal?.aborted) {
+        return { fullResponse: getLastAssistantText(messages), toolCalls: allToolCalls, cancelled: true }
+      }
+
       // D15: structured logging
       console.info(`[tool-loop] round_start provider=${providerName} model=${model} round=${round} domainId=${domainId}`)
 
@@ -169,12 +178,20 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
       validateTranscript(messages)
 
       const startMs = Date.now()
-      const response = await provider.createToolUseMessage({
-        messages,
-        systemPrompt,
-        tools: toolsForProvider,
-      })
+      const response = await provider.createToolUseMessage(
+        {
+          messages,
+          systemPrompt,
+          tools: toolsForProvider,
+        },
+        { signal },
+      )
       const latencyMs = Date.now() - startMs
+
+      // Abort checkpoint 2: after createToolUseMessage
+      if (signal?.aborted) {
+        return { fullResponse: response.textContent || getLastAssistantText(messages), toolCalls: allToolCalls, cancelled: true }
+      }
 
       console.info(`[tool-loop] round_end stopReason=${response.stopReason} toolCallsCount=${response.toolCalls.length} latencyMs=${latencyMs}`)
 
@@ -240,6 +257,11 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
       let toolExecutionSucceeded = false
 
       for (const call of callsToExecute) {
+        // Abort checkpoint 3: before each tool execution
+        if (signal?.aborted) {
+          return { fullResponse: response.textContent || getLastAssistantText(messages), toolCalls: allToolCalls, cancelled: true }
+        }
+
         const input = call.input
         allToolCalls.push({ toolUseId: call.id, name: call.name, input })
 
@@ -359,6 +381,11 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
           detail: doneDetail,
         }
         eventSender.send('chat:tool-use', doneEvent)
+
+        // Abort checkpoint 4: after each tool execution
+        if (signal?.aborted) {
+          return { fullResponse: response.textContent || getLastAssistantText(messages), toolCalls: allToolCalls, cancelled: true }
+        }
       }
 
       // Skipped calls get proper tool results (keeps transcript invariants)
@@ -512,6 +539,16 @@ function synthesizeHistoricalRawMessage(providerName: string, content: string): 
   }
   // OpenAI / Ollama
   return { role: 'assistant', content }
+}
+
+/** Extract the last assistant derivedText from the transcript (for cancelled returns). */
+function getLastAssistantText(messages: ToolUseMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'assistant') {
+      return (messages[i] as { derivedText?: string }).derivedText ?? ''
+    }
+  }
+  return ''
 }
 
 /** Pseudo-stream text on paragraph boundaries for streaming UX. */

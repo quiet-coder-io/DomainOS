@@ -19,6 +19,7 @@ interface StoredRejectedProposal extends RejectedProposal {
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
+  status?: 'cancelled'
   stopBlocks?: Array<{ reason: string; actionNeeded: string }>
   gapFlags?: Array<{ category: string; description: string }>
   decisions?: Array<{ decisionId: string; decision: string }>
@@ -58,6 +59,7 @@ interface ChatState {
 
   switchDomain(domainId: string, domainName: string): void
   sendMessage(content: string, domainId: string): Promise<void>
+  cancelChat(): void
   applyProposal(domainId: string, id: string): Promise<void>
   dismissProposal(id: string): void
   editProposal(id: string, newContent: string): void
@@ -152,6 +154,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     })
   },
 
+  cancelChat() {
+    window.domainOS.chat.sendCancel()
+  },
+
   async sendMessage(content, domainId) {
     // Send guard: prevent double-sends
     if (get().isSending) return
@@ -189,6 +195,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
         domainId,
         messages: currentMessages.filter((m) => m.role !== 'system') as Array<{ role: 'user' | 'assistant'; content: string }>,
       })
+
+      if (result.ok && result.value?.cancelled) {
+        const partialContent = get().streamingContent || result.value.content || ''
+        const newMessages: ChatMessage[] = partialContent
+          ? [...currentMessages, { role: 'assistant' as const, content: partialContent, status: 'cancelled' as const }]
+          : currentMessages
+        set({
+          messages: newMessages,
+          isStreaming: false,
+          isSending: false,
+          streamingContent: '',
+          activeToolCall: null,
+          toolEvents: [],
+          messagesByDomain: { ...get().messagesByDomain, [domainId]: newMessages },
+        })
+        return
+      }
 
       if (result.ok && result.value) {
         const newMessages = [

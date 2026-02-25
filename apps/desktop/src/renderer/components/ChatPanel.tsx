@@ -22,6 +22,12 @@ const SpinnerIcon = () => (
   </svg>
 )
 
+const StopIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+    <rect x="2" y="2" width="10" height="10" rx="1.5" />
+  </svg>
+)
+
 type Suggestion = {
   id: 'latest' | 'status' | 'deadlines' | 'brainstorm'
   label: string
@@ -52,12 +58,14 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
   const {
     messages,
     isStreaming,
+    isSending,
     streamingContent,
     isExtracting,
     extractionError,
     extractionResult,
     activeToolCall,
     sendMessage,
+    cancelChat,
     clearMessages,
     extractKbUpdates,
     clearExtractionError,
@@ -85,6 +93,16 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
       return () => clearTimeout(t)
     }
   }, [extractionResult, clearExtractionResult])
+
+  // Escape key to cancel processing
+  useEffect(() => {
+    if (!isStreaming && !isSending) return
+    function handleEsc(e: KeyboardEvent): void {
+      if (e.key === 'Escape') cancelChat()
+    }
+    document.addEventListener('keydown', handleEsc)
+    return () => document.removeEventListener('keydown', handleEsc)
+  }, [isStreaming, isSending, cancelChat])
 
   async function handleSend(): Promise<void> {
     const text = input.trim()
@@ -198,6 +216,7 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
               <MessageBubble
                 role={msg.role}
                 content={msg.content}
+                status={msg.status}
                 onExtractKb={msg.role === 'assistant' ? () => handleExtractSingle(i) : undefined}
               />
               {msg.role === 'assistant' && msg.stopBlocks?.length ? <StopAlert stopBlocks={msg.stopBlocks} /> : null}
@@ -266,14 +285,24 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
             placeholder="Type a message... (Enter to send, Shift+Enter for newline)"
             disabled={isStreaming}
           />
-          <button
-            onClick={handleSend}
-            disabled={isStreaming || !input.trim()}
-            className="flex items-center gap-1.5 self-end rounded bg-accent px-3 py-2 text-sm text-white hover:bg-accent-hover disabled:opacity-50"
-          >
-            <SendIcon />
-            Send
-          </button>
+          {(isStreaming || isSending) ? (
+            <button
+              onClick={cancelChat}
+              className="flex items-center gap-1.5 self-end rounded bg-danger px-3 py-2 text-sm text-white hover:bg-danger/80"
+            >
+              <StopIcon />
+              Stop
+            </button>
+          ) : (
+            <button
+              onClick={handleSend}
+              disabled={!input.trim()}
+              className="flex items-center gap-1.5 self-end rounded bg-accent px-3 py-2 text-sm text-white hover:bg-accent-hover disabled:opacity-50"
+            >
+              <SendIcon />
+              Send
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -29,6 +29,7 @@ const api: DomainOSAPI = {
 
   chat: {
     send: (payload) => ipcRenderer.invoke('chat:send', payload),
+    sendCancel: () => ipcRenderer.invoke('chat:send-cancel'),
     extractKbUpdates: (payload) => ipcRenderer.invoke('chat:extract-kb-updates', payload),
     onStreamChunk(callback: (chunk: string) => void) {
       ipcRenderer.on('chat:stream-chunk', (_event, chunk: string) => callback(chunk))
@@ -36,8 +37,8 @@ const api: DomainOSAPI = {
     offStreamChunk() {
       ipcRenderer.removeAllListeners('chat:stream-chunk')
     },
-    onStreamDone(callback: () => void) {
-      ipcRenderer.on('chat:stream-done', () => callback())
+    onStreamDone(callback: (data: { cancelled: boolean }) => void) {
+      ipcRenderer.on('chat:stream-done', (_event, data?: { cancelled: boolean }) => callback(data ?? { cancelled: false }))
     },
     offStreamDone() {
       ipcRenderer.removeAllListeners('chat:stream-done')

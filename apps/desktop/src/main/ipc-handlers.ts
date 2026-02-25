@@ -101,6 +101,19 @@ const DEFAULT_PROVIDER_CONFIG: ProviderConfigFile = {
   ollamaBaseUrl: 'http://localhost:11434',
 }
 
+// ── Sender-scoped chat abort controllers ──
+const activeChatControllers = new Map<number, AbortController>()
+
+function isAbortError(err: unknown, controller: AbortController): boolean {
+  if (controller.signal.aborted) return true
+  let current: unknown = err
+  while (current instanceof Error) {
+    if (current.name === 'AbortError') return true
+    current = (current as { cause?: unknown }).cause
+  }
+  return false
+}
+
 // ── In-memory key cache (avoids repeated safeStorage calls) ──
 const keyCache: Map<string, string> = new Map()
 
@@ -263,6 +276,24 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
         messages: ChatMessage[]
       },
     ) => {
+      // ── Sender-scoped cancellation ──
+      const senderId = event.sender.id
+      activeChatControllers.get(senderId)?.abort()
+      const controller = new AbortController()
+      activeChatControllers.set(senderId, controller)
+
+      // Idempotent stream-done: guaranteed exactly once per send
+      let streamDoneSent = false
+      function sendStreamDone(cancelled: boolean): void {
+        if (streamDoneSent) return
+        streamDoneSent = true
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('chat:stream-done', { cancelled })
+        }
+      }
+
+      let fullResponse = ''
+
       try {
         const domain = domainRepo.getById(payload.domainId)
         if (!domain.ok) return { ok: false, error: domain.error.message }
@@ -278,13 +309,13 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           const apiKey = await loadProviderKey(resolvedProvider)
           if (!apiKey) {
             const source = domain.value.modelProvider ? 'Domain override' : 'Global default'
-            event.sender.send('chat:stream-done')
+            sendStreamDone(false)
             return { ok: false, error: `${source} uses ${resolvedProvider}, but no API key is configured. Open Settings to add one.` }
           }
         } else {
           const reachable = await OllamaProvider.testConnection(ollamaBaseUrl)
           if (!reachable) {
-            event.sender.send('chat:stream-done')
+            sendStreamDone(false)
             return { ok: false, error: `Ollama not reachable at ${ollamaBaseUrl}. Is it running?` }
           }
         }
@@ -491,8 +522,6 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
         })
         const systemPrompt = promptResult.prompt
 
-        let fullResponse = ''
-
         // --- Tool-use branch (Advisory + Gmail + GTasks, uses unified shouldUseTools routing) ---
         const gmailCreds = await loadGmailCredentials()
         const gmailEnabled = gmailCreds && domain.value.allowGmail
@@ -519,7 +548,7 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
             const profile = await gmailClient.getProfile()
             if (!profile.ok) {
               event.sender.send('chat:stream-chunk', 'Gmail credentials appear to be invalid or expired. Please reconnect Gmail in the settings bar above.')
-              event.sender.send('chat:stream-done')
+              sendStreamDone(false)
               return { ok: true, value: { content: 'Gmail credentials appear to be invalid or expired. Please reconnect Gmail in the settings bar above.', proposals: [], rejectedProposals: [], stopBlocks: [], gapFlags: [], decisions: [] } }
             }
 
@@ -578,7 +607,13 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
               gtasksClient,
               eventSender: event.sender,
               ollamaBaseUrl: resolvedProvider === 'ollama' ? ollamaBaseUrl : undefined,
+              signal: controller.signal,
             })
+
+            if (result.cancelled) {
+              sendStreamDone(true)
+              return { ok: true, value: { content: result.fullResponse, proposals: [], rejectedProposals: [], cancelled: true } }
+            }
 
             fullResponse = result.fullResponse
           }
@@ -586,12 +621,18 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
 
         if (!fullResponse) {
           // --- Streaming path (all providers) ---
-          for await (const chunk of provider.chat(payload.messages, systemPrompt)) {
+          for await (const chunk of provider.chat(payload.messages, systemPrompt, { signal: controller.signal })) {
+            if (controller.signal.aborted) break
             fullResponse += chunk
             event.sender.send('chat:stream-chunk', chunk)
           }
 
-          event.sender.send('chat:stream-done')
+          if (controller.signal.aborted) {
+            sendStreamDone(true)
+            return { ok: true, value: { content: fullResponse, proposals: [], rejectedProposals: [], cancelled: true } }
+          }
+
+          sendStreamDone(false)
         }
 
         const { proposals, rejectedProposals } = parseKBUpdates(fullResponse)
@@ -681,12 +722,32 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           },
         }
       } catch (err) {
+        if (isAbortError(err, controller)) {
+          sendStreamDone(true)
+          return { ok: true, value: { content: fullResponse, proposals: [], rejectedProposals: [], cancelled: true } }
+        }
         const message = err instanceof Error ? err.message : String(err)
-        event.sender.send('chat:stream-done')
+        sendStreamDone(false)
         return { ok: false, error: message }
+      } finally {
+        if (activeChatControllers.get(senderId) === controller) {
+          activeChatControllers.delete(senderId)
+        }
       }
     },
   )
+
+  // --- Chat Cancel ---
+
+  ipcMain.handle('chat:send-cancel', (event) => {
+    const ctrl = activeChatControllers.get(event.sender.id)
+    if (ctrl) {
+      ctrl.abort()
+      activeChatControllers.delete(event.sender.id)
+      return { ok: true, value: { cancelled: true } }
+    }
+    return { ok: true, value: { cancelled: false } }
+  })
 
   // --- KB Update Apply ---
 

@@ -11,6 +11,7 @@ import { DomainOSError } from '../common/index.js'
 import type { Result } from '../common/index.js'
 import type {
   ChatMessage,
+  ChatOptions,
   ToolCapableProvider,
   ToolUseMessage,
   ToolUseResponse,
@@ -47,16 +48,19 @@ export class OpenAIProvider implements ToolCapableProvider {
    * Only concatenates delta.content — ignores delta.tool_calls and other fields.
    * Tool rounds use non-streaming via createToolUseMessage(). (D6)
    */
-  async *chat(messages: ChatMessage[], systemPrompt: string): AsyncIterable<string> {
-    const stream = await this.client.chat.completions.create({
-      model: this.model,
-      max_tokens: this.maxTokens,
-      stream: true,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        ...messages.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
-      ],
-    })
+  async *chat(messages: ChatMessage[], systemPrompt: string, options?: ChatOptions): AsyncIterable<string> {
+    const stream = await this.client.chat.completions.create(
+      {
+        model: this.model,
+        max_tokens: this.maxTokens,
+        stream: true,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...messages.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+        ],
+      },
+      { signal: options?.signal as AbortSignal | undefined },
+    )
 
     for await (const chunk of stream) {
       const delta = chunk.choices?.[0]?.delta
@@ -70,16 +74,20 @@ export class OpenAIProvider implements ToolCapableProvider {
   async chatComplete(
     messages: ChatMessage[],
     systemPrompt: string,
+    options?: ChatOptions,
   ): Promise<Result<string, DomainOSError>> {
     try {
-      const response = await this.client.chat.completions.create({
-        model: this.model,
-        max_tokens: this.maxTokens,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          ...messages.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
-        ],
-      })
+      const response = await this.client.chat.completions.create(
+        {
+          model: this.model,
+          max_tokens: this.maxTokens,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            ...messages.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+          ],
+        },
+        { signal: options?.signal as AbortSignal | undefined },
+      )
 
       const content = response.choices?.[0]?.message?.content
       if (!content) {
@@ -101,11 +109,14 @@ export class OpenAIProvider implements ToolCapableProvider {
    * - Assistant messages with tool_calls must preserve the full message object
    * - Each tool result maps to one { role: 'tool', tool_call_id, content } message
    */
-  async createToolUseMessage(params: {
-    messages: ToolUseMessage[]
-    systemPrompt: string
-    tools: ToolDefinition[]
-  }): Promise<ToolUseResponse> {
+  async createToolUseMessage(
+    params: {
+      messages: ToolUseMessage[]
+      systemPrompt: string
+      tools: ToolDefinition[]
+    },
+    options?: ChatOptions,
+  ): Promise<ToolUseResponse> {
     // Convert ToolDefinition[] → OpenAI function tools
     // Key rename only: inputSchema → parameters. No schema mutation. (D5)
     const openaiTools: OpenAI.ChatCompletionTool[] = params.tools.map((t) => ({
@@ -122,13 +133,16 @@ export class OpenAIProvider implements ToolCapableProvider {
 
     let response: OpenAI.ChatCompletion
     try {
-      response = await this.client.chat.completions.create({
-        model: this.model,
-        max_tokens: this.maxTokens,
-        stream: false, // Explicit: tool rounds are never streamed (D6)
-        messages: openaiMessages,
-        ...(openaiTools.length ? { tools: openaiTools } : {}),
-      })
+      response = await this.client.chat.completions.create(
+        {
+          model: this.model,
+          max_tokens: this.maxTokens,
+          stream: false, // Explicit: tool rounds are never streamed (D6)
+          messages: openaiMessages,
+          ...(openaiTools.length ? { tools: openaiTools } : {}),
+        },
+        { signal: options?.signal as AbortSignal | undefined },
+      )
     } catch (err) {
       // Check if error indicates tools not supported (D10)
       const wrapped = maybeWrapToolsNotSupported(err)

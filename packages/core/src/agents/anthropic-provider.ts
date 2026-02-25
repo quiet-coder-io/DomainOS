@@ -7,7 +7,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { Ok, Err } from '../common/index.js'
 import { DomainOSError } from '../common/index.js'
 import type { Result } from '../common/index.js'
-import type { ChatMessage, LLMProvider, ToolCapableProvider, ToolUseMessage, ToolUseResponse, ToolDefinition, ToolCall } from './provider.js'
+import type { ChatMessage, ChatOptions, LLMProvider, ToolCapableProvider, ToolUseMessage, ToolUseResponse, ToolDefinition, ToolCall } from './provider.js'
 
 export interface AnthropicProviderOptions {
   apiKey: string
@@ -28,13 +28,16 @@ export class AnthropicProvider implements ToolCapableProvider {
     this.maxTokens = options.maxTokens ?? 4096
   }
 
-  async *chat(messages: ChatMessage[], systemPrompt: string): AsyncIterable<string> {
-    const stream = this.client.messages.stream({
-      model: this.model,
-      max_tokens: this.maxTokens,
-      system: systemPrompt,
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
-    })
+  async *chat(messages: ChatMessage[], systemPrompt: string, options?: ChatOptions): AsyncIterable<string> {
+    const stream = this.client.messages.stream(
+      {
+        model: this.model,
+        max_tokens: this.maxTokens,
+        system: systemPrompt,
+        messages: messages.map((m) => ({ role: m.role, content: m.content })),
+      },
+      { signal: options?.signal as AbortSignal | undefined },
+    )
 
     for await (const event of stream) {
       if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
@@ -49,11 +52,14 @@ export class AnthropicProvider implements ToolCapableProvider {
    * Uses stream: false intentionally — tool rounds need full response objects,
    * not streamed deltas. Do NOT "optimize" this to use streaming. (D6)
    */
-  async createToolUseMessage(params: {
-    messages: ToolUseMessage[]
-    systemPrompt: string
-    tools: ToolDefinition[]
-  }): Promise<ToolUseResponse> {
+  async createToolUseMessage(
+    params: {
+      messages: ToolUseMessage[]
+      systemPrompt: string
+      tools: ToolDefinition[]
+    },
+    options?: ChatOptions,
+  ): Promise<ToolUseResponse> {
     // Convert ToolDefinition[] → Anthropic.Messages.Tool[]
     // Key rename only: inputSchema → input_schema. No schema mutation. (D5)
     const anthropicTools: Anthropic.Messages.Tool[] = params.tools.map((t) => ({
@@ -65,13 +71,16 @@ export class AnthropicProvider implements ToolCapableProvider {
     // Convert ToolUseMessage[] → Anthropic.Messages.MessageParam[]
     const anthropicMessages = convertToAnthropicMessages(params.messages)
 
-    const response = await this.client.messages.create({
-      model: this.model,
-      max_tokens: this.maxTokens,
-      system: params.systemPrompt,
-      messages: anthropicMessages,
-      ...(anthropicTools.length ? { tools: anthropicTools } : {}),
-    })
+    const response = await this.client.messages.create(
+      {
+        model: this.model,
+        max_tokens: this.maxTokens,
+        system: params.systemPrompt,
+        messages: anthropicMessages,
+        ...(anthropicTools.length ? { tools: anthropicTools } : {}),
+      },
+      { signal: options?.signal as AbortSignal | undefined },
+    )
 
     // Map stop_reason to normalized stopReason (D9/D17)
     let stopReason: ToolUseResponse['stopReason']
@@ -106,14 +115,18 @@ export class AnthropicProvider implements ToolCapableProvider {
   async chatComplete(
     messages: ChatMessage[],
     systemPrompt: string,
+    options?: ChatOptions,
   ): Promise<Result<string, DomainOSError>> {
     try {
-      const response = await this.client.messages.create({
-        model: this.model,
-        max_tokens: this.maxTokens,
-        system: systemPrompt,
-        messages: messages.map((m) => ({ role: m.role, content: m.content })),
-      })
+      const response = await this.client.messages.create(
+        {
+          model: this.model,
+          max_tokens: this.maxTokens,
+          system: systemPrompt,
+          messages: messages.map((m) => ({ role: m.role, content: m.content })),
+        },
+        { signal: options?.signal as AbortSignal | undefined },
+      )
 
       const textBlock = response.content.find((block) => block.type === 'text')
       if (!textBlock || textBlock.type !== 'text') {

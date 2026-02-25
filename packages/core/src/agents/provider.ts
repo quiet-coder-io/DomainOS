@@ -15,10 +15,14 @@ export interface ChatMessage {
   content: string
 }
 
+export interface ChatOptions {
+  signal?: AbortSignal
+}
+
 export interface LLMProvider {
   name: string
-  chat(messages: ChatMessage[], systemPrompt: string): AsyncIterable<string>
-  chatComplete(messages: ChatMessage[], systemPrompt: string): Promise<Result<string, DomainOSError>>
+  chat(messages: ChatMessage[], systemPrompt: string, options?: ChatOptions): AsyncIterable<string>
+  chatComplete(messages: ChatMessage[], systemPrompt: string, options?: ChatOptions): Promise<Result<string, DomainOSError>>
 }
 
 // ── Tool definitions ──
@@ -80,11 +84,14 @@ export interface ToolUseResponse {
 
 export interface ToolCapableProvider extends LLMProvider {
   supportsTools: true
-  createToolUseMessage(params: {
-    messages: ToolUseMessage[]
-    systemPrompt: string
-    tools: ToolDefinition[]
-  }): Promise<ToolUseResponse>
+  createToolUseMessage(
+    params: {
+      messages: ToolUseMessage[]
+      systemPrompt: string
+      tools: ToolDefinition[]
+    },
+    options?: ChatOptions,
+  ): Promise<ToolUseResponse>
 }
 
 /** Type guard: checks if provider implements ToolCapableProvider interface. */

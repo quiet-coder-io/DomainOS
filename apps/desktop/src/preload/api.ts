@@ -42,6 +42,7 @@ export interface DomainOSAPI {
       content: string
       proposals: KBUpdateProposal[]
       rejectedProposals: RejectedProposal[]
+      cancelled?: boolean
       stopBlocks?: Array<{ reason: string; actionNeeded: string }>
       gapFlags?: Array<{ category: string; description: string }>
       decisions?: Array<{ decisionId: string; decision: string }>
@@ -58,6 +59,7 @@ export interface DomainOSAPI {
         systemNotes: string[]
       }
     }>>
+    sendCancel(): Promise<IPCResult<{ cancelled: boolean }>>
     extractKbUpdates(payload: {
       domainId: string
       content: string
@@ -67,7 +69,7 @@ export interface DomainOSAPI {
     }>>
     onStreamChunk(callback: (chunk: string) => void): void
     offStreamChunk(): void
-    onStreamDone(callback: () => void): void
+    onStreamDone(callback: (data: { cancelled: boolean }) => void): void
     offStreamDone(): void
     onToolUse(callback: (data: ToolUseEvent) => void): () => void
   }
