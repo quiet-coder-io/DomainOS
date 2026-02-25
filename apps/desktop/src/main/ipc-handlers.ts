@@ -2046,7 +2046,7 @@ Rules:
   })
 
   ipcMain.handle('skill:create', async (_e: IpcMainInvokeEvent, input: {
-    name: string; description?: string; content: string; outputFormat?: string
+    name: string; description?: string; content: string; outputFormat?: 'freeform' | 'structured'
     outputSchema?: string | null; toolHints?: string[]; isEnabled?: boolean; sortOrder?: number
   }) => {
     const result = skillRepo.create(input)
@@ -2054,7 +2054,7 @@ Rules:
   })
 
   ipcMain.handle('skill:update', async (_e: IpcMainInvokeEvent, id: string, input: {
-    name?: string; description?: string; content?: string; outputFormat?: string
+    name?: string; description?: string; content?: string; outputFormat?: 'freeform' | 'structured'
     outputSchema?: string | null; toolHints?: string[]; isEnabled?: boolean; sortOrder?: number
   }) => {
     const result = skillRepo.update(id, input)
