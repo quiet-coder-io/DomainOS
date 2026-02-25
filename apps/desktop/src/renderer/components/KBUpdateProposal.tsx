@@ -71,7 +71,7 @@ export function KBUpdateProposal({ proposal, onAccept, onDismiss, onEdit }: Prop
             onChange={(e) => setEditContent(e.target.value)}
             spellCheck={false}
             className="w-full max-h-96 rounded border border-border-subtle bg-surface-0 p-2 font-mono text-xs text-text-secondary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
-            style={{ whiteSpace: 'pre', overflowWrap: 'normal' }}
+            style={{ whiteSpace: 'pre-wrap', overflowWrap: 'break-word' }}
             rows={Math.min(20, (editContent.match(/\n/g) || []).length + 3)}
           />
           <div className="mt-1 flex gap-2">
@@ -92,7 +92,7 @@ export function KBUpdateProposal({ proposal, onAccept, onDismiss, onEdit }: Prop
       ) : (
         <>
           {proposal.content && (
-            <pre className="mb-2 max-h-32 overflow-y-auto rounded border border-border-subtle bg-surface-0 p-2 font-mono text-xs text-text-secondary">
+            <pre className="mb-2 max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded border border-border-subtle bg-surface-0 p-2 font-mono text-xs text-text-secondary">
               {proposal.content.slice(0, 500)}
               {proposal.content.length > 500 ? '...' : ''}
             </pre>
