@@ -31,17 +31,15 @@ const api: DomainOSAPI = {
     send: (payload) => ipcRenderer.invoke('chat:send', payload),
     sendCancel: () => ipcRenderer.invoke('chat:send-cancel'),
     extractKbUpdates: (payload) => ipcRenderer.invoke('chat:extract-kb-updates', payload),
-    onStreamChunk(callback: (chunk: string) => void) {
-      ipcRenderer.on('chat:stream-chunk', (_event, chunk: string) => callback(chunk))
+    onStreamChunk(callback: (data: { requestId: string; chunk: string }) => void) {
+      const handler = (_event: unknown, data: { requestId: string; chunk: string }) => callback(data)
+      ipcRenderer.on('chat:stream-chunk', handler as (...args: unknown[]) => void)
+      return () => { ipcRenderer.removeListener('chat:stream-chunk', handler as (...args: unknown[]) => void) }
     },
-    offStreamChunk() {
-      ipcRenderer.removeAllListeners('chat:stream-chunk')
-    },
-    onStreamDone(callback: (data: { cancelled: boolean }) => void) {
-      ipcRenderer.on('chat:stream-done', (_event, data?: { cancelled: boolean }) => callback(data ?? { cancelled: false }))
-    },
-    offStreamDone() {
-      ipcRenderer.removeAllListeners('chat:stream-done')
+    onStreamDone(callback: (data: { requestId: string; cancelled: boolean }) => void) {
+      const handler = (_event: unknown, data: { requestId: string; cancelled: boolean }) => callback(data)
+      ipcRenderer.on('chat:stream-done', handler as (...args: unknown[]) => void)
+      return () => { ipcRenderer.removeListener('chat:stream-done', handler as (...args: unknown[]) => void) }
     },
     onToolUse(callback: (data: ToolUseEvent) => void) {
       const handler = (_e: unknown, data: ToolUseEvent): void => callback(data)

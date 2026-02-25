@@ -81,6 +81,7 @@ import { loadGTasksCredentials, checkGTasksConnected } from './gtasks-credential
 import { startGTasksOAuth, disconnectGTasks } from './gtasks-oauth'
 import { GTASKS_TOOLS } from './gtasks-tools'
 import { runToolLoop } from './tool-loop'
+import { sendChatChunk, sendChatDone } from './chat-events'
 import { GmailClient, GTasksClient } from '@domain-os/integrations'
 import { emitAutomationEvent } from './automation-events'
 import { triggerManualRun } from './automation-engine'
@@ -272,10 +273,13 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
     async (
       event: IpcMainInvokeEvent,
       payload: {
+        requestId: string
         domainId: string
         messages: ChatMessage[]
       },
     ) => {
+      const { requestId } = payload
+
       // ── Sender-scoped cancellation ──
       const senderId = event.sender.id
       activeChatControllers.get(senderId)?.abort()
@@ -284,12 +288,11 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
 
       // Idempotent stream-done: guaranteed exactly once per send
       let streamDoneSent = false
-      function sendStreamDone(cancelled: boolean): void {
+      let cancelled = false // tracks polarity for finally safety net
+      function sendStreamDone(isCancelled: boolean): void {
         if (streamDoneSent) return
         streamDoneSent = true
-        if (!event.sender.isDestroyed()) {
-          event.sender.send('chat:stream-done', { cancelled })
-        }
+        sendChatDone(event.sender, requestId, isCancelled)
       }
 
       let fullResponse = ''
@@ -547,9 +550,9 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
             // Preflight: validate credentials before entering tool loop
             const profile = await gmailClient.getProfile()
             if (!profile.ok) {
-              event.sender.send('chat:stream-chunk', 'Gmail credentials appear to be invalid or expired. Please reconnect Gmail in the settings bar above.')
+              sendChatChunk(event.sender, requestId, 'Gmail credentials appear to be invalid or expired. Please reconnect Gmail in the settings bar above.')
               sendStreamDone(false)
-              return { ok: true, value: { content: 'Gmail credentials appear to be invalid or expired. Please reconnect Gmail in the settings bar above.', proposals: [], rejectedProposals: [], stopBlocks: [], gapFlags: [], decisions: [] } }
+              return { ok: true, value: { requestId, content: 'Gmail credentials appear to be invalid or expired. Please reconnect Gmail in the settings bar above.', proposals: [], rejectedProposals: [], stopBlocks: [], gapFlags: [], decisions: [] } }
             }
 
             tools.push(...GMAIL_TOOLS)
@@ -599,6 +602,7 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
               providerName: resolvedProvider,
               model: resolvedModel,
               domainId: payload.domainId,
+              requestId,
               userMessages: payload.messages,
               systemPrompt: systemPrompt + toolsHint,
               tools,
@@ -611,8 +615,9 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
             })
 
             if (result.cancelled) {
+              cancelled = true
               sendStreamDone(true)
-              return { ok: true, value: { content: result.fullResponse, proposals: [], rejectedProposals: [], cancelled: true } }
+              return { ok: true, value: { requestId, content: result.fullResponse, proposals: [], rejectedProposals: [], cancelled: true } }
             }
 
             fullResponse = result.fullResponse
@@ -624,12 +629,13 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           for await (const chunk of provider.chat(payload.messages, systemPrompt, { signal: controller.signal })) {
             if (controller.signal.aborted) break
             fullResponse += chunk
-            event.sender.send('chat:stream-chunk', chunk)
+            sendChatChunk(event.sender, requestId, chunk)
           }
 
           if (controller.signal.aborted) {
+            cancelled = true
             sendStreamDone(true)
-            return { ok: true, value: { content: fullResponse, proposals: [], rejectedProposals: [], cancelled: true } }
+            return { ok: true, value: { requestId, content: fullResponse, proposals: [], rejectedProposals: [], cancelled: true } }
           }
 
           sendStreamDone(false)
@@ -707,6 +713,7 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
         return {
           ok: true,
           value: {
+            requestId,
             content: fullResponse,
             proposals,
             rejectedProposals,
@@ -723,13 +730,16 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
         }
       } catch (err) {
         if (isAbortError(err, controller)) {
+          cancelled = true
           sendStreamDone(true)
-          return { ok: true, value: { content: fullResponse, proposals: [], rejectedProposals: [], cancelled: true } }
+          return { ok: true, value: { requestId, content: fullResponse, proposals: [], rejectedProposals: [], cancelled: true } }
         }
         const message = err instanceof Error ? err.message : String(err)
         sendStreamDone(false)
         return { ok: false, error: message }
       } finally {
+        // Safety net: correct polarity guaranteed by tracking `cancelled`
+        if (!streamDoneSent) sendStreamDone(cancelled)
         if (activeChatControllers.get(senderId) === controller) {
           activeChatControllers.delete(senderId)
         }

@@ -31,6 +31,8 @@ import {
 import type { GmailClient, GTasksClient } from '@domain-os/integrations'
 import type Database from 'better-sqlite3'
 import type { WebContents } from 'electron'
+import type { ToolUseEvent } from '../shared/chat-types'
+import { sendChatChunk, sendChatDone, sendChatToolUse } from './chat-events'
 import { executeGmailTool } from './gmail-tools'
 import { executeGTasksTool } from './gtasks-tools'
 import { executeAdvisoryTool } from './advisory-tools'
@@ -57,27 +59,14 @@ const SECRET_PATTERNS = [
 /** Base64 blobs >200 chars (likely binary data or tokens). */
 const LONG_BASE64_PATTERN = /(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{200,}={0,3}/g
 
-export interface ToolUseEvent {
-  toolName: string
-  toolUseId: string
-  status: 'running' | 'done'
-  domainId: string
-  roundIndex: number
-  detail?: {
-    query?: string
-    resultCount?: number
-    messageId?: string
-    subject?: string
-    taskId?: string
-    taskListTitle?: string
-  }
-}
+export type { ToolUseEvent }
 
 export interface ToolLoopOptions {
   provider: ToolCapableProvider
   providerName: string
   model: string
   domainId: string
+  requestId: string
   userMessages: Array<{ role: 'user' | 'assistant'; content: string }>
   systemPrompt: string
   tools: ToolDefinition[]
@@ -113,6 +102,7 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
     providerName,
     model,
     domainId,
+    requestId,
     userMessages,
     systemPrompt,
     tools,
@@ -170,7 +160,7 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
         const systemWithNotice = systemPrompt + '\n\n[Tool loop reached max rounds. Respond with best available info using tool results already obtained.]'
         const finalResult = await provider.chatComplete(flattenForChatComplete(messages), systemWithNotice)
         const finalText = finalResult.ok ? finalResult.value : 'I encountered an error generating a final response.'
-        pseudoStream(eventSender, finalText)
+        pseudoStream(eventSender, requestId,finalText)
         return { fullResponse: finalText, toolCalls: allToolCalls }
       }
 
@@ -211,7 +201,7 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
       // Edge case: tool_use signal but 0 calls → treat as end_turn, log warning
       if (response.stopReason === 'tool_use' && response.toolCalls.length === 0) {
         console.warn('[tool-loop] tool_use signal with 0 tool calls — treating as end_turn')
-        pseudoStream(eventSender, response.textContent)
+        pseudoStream(eventSender, requestId,response.textContent)
         return { fullResponse: response.textContent, toolCalls: allToolCalls }
       }
 
@@ -223,7 +213,7 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
       }
       if (consecutiveMaxTokens >= 2) {
         console.warn('[tool-loop] consecutive max_tokens, exiting tool loop')
-        pseudoStream(eventSender, response.textContent)
+        pseudoStream(eventSender, requestId,response.textContent)
         return { fullResponse: response.textContent, toolCalls: allToolCalls }
       }
 
@@ -232,7 +222,7 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
         const contSystem = systemPrompt + '\n\n[Continue using prior context; response may have been cut off.]'
         const contResult = await provider.chatComplete(flattenForChatComplete(messages), contSystem)
         const contText = contResult.ok ? contResult.value : response.textContent
-        pseudoStream(eventSender, contText)
+        pseudoStream(eventSender, requestId,contText)
         return { fullResponse: contText, toolCalls: allToolCalls }
       }
 
@@ -246,7 +236,7 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
           console.info(`[tool-loop] capability_cache_update key=${capKey} status=not_observed`)
         }
 
-        pseudoStream(eventSender, response.textContent)
+        pseudoStream(eventSender, requestId,response.textContent)
         return { fullResponse: response.textContent, toolCalls: allToolCalls }
       }
 
@@ -277,15 +267,14 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
           runningDetail.taskId = typeof input.task_id === 'string' ? input.task_id : undefined
         }
 
-        const runningEvent: ToolUseEvent = {
+        sendChatToolUse(eventSender, requestId, {
           toolName: call.name,
           toolUseId: call.id,
           status: 'running',
           domainId,
           roundIndex: round - 1,
           detail: runningDetail,
-        }
-        eventSender.send('chat:tool-use', runningEvent)
+        })
 
         const toolStart = Date.now()
         let result: string
@@ -372,15 +361,14 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
           doneDetail.taskListTitle = '(deleted)'
         }
 
-        const doneEvent: ToolUseEvent = {
+        sendChatToolUse(eventSender, requestId, {
           toolName: call.name,
           toolUseId: call.id,
           status: 'done',
           domainId,
           roundIndex: round - 1,
           detail: doneDetail,
-        }
-        eventSender.send('chat:tool-use', doneEvent)
+        })
 
         // Abort checkpoint 4: after each tool execution
         if (signal?.aborted) {
@@ -410,7 +398,7 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
         const overflowSystem = systemPrompt + '\n\n[Tool context exceeded size limit. Respond with best available info.]'
         const overflowResult = await provider.chatComplete(flattenForChatComplete(messages), overflowSystem)
         const overflowText = overflowResult.ok ? overflowResult.value : 'Tool context grew too large. Please try a more specific query.'
-        pseudoStream(eventSender, overflowText)
+        pseudoStream(eventSender, requestId,overflowText)
         return { fullResponse: overflowText, toolCalls: allToolCalls }
       }
     }
@@ -425,7 +413,7 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
       setToolCapability(providerName, model, 'not_supported', ollamaBaseUrl)
       const fallbackResult = await provider.chatComplete(flattenForChatComplete(messages), systemPrompt)
       const fallbackText = fallbackResult.ok ? fallbackResult.value : 'The model does not support tool use. Please try a different model.'
-      pseudoStream(eventSender, fallbackText)
+      pseudoStream(eventSender, requestId,fallbackText)
       return { fullResponse: fallbackText, toolCalls: allToolCalls }
     }
     throw e
@@ -552,11 +540,11 @@ function getLastAssistantText(messages: ToolUseMessage[]): string {
 }
 
 /** Pseudo-stream text on paragraph boundaries for streaming UX. */
-function pseudoStream(eventSender: WebContents, text: string): void {
+function pseudoStream(eventSender: WebContents, requestId: string, text: string): void {
   const paragraphs = text.split('\n\n')
   for (let i = 0; i < paragraphs.length; i++) {
     const chunk = i < paragraphs.length - 1 ? paragraphs[i] + '\n\n' : paragraphs[i]
-    eventSender.send('chat:stream-chunk', chunk)
+    sendChatChunk(eventSender, requestId, chunk)
   }
-  eventSender.send('chat:stream-done')
+  sendChatDone(eventSender, requestId, false)
 }

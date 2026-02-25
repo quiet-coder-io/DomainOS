@@ -52,9 +52,9 @@ const PROVIDER_LABELS: Record<ProviderName, string> = {
 export function DomainChatPage(): React.JSX.Element {
   const { activeDomainId, domains, updateDomain } = useDomainStore()
   const {
-    messages,
-    kbProposals,
-    rejectedProposals,
+    messagesByDomain,
+    proposalsByDomain,
+    rejectedProposalsByDomain,
     applyProposal,
     dismissProposal,
     editProposal,
@@ -260,6 +260,11 @@ export function DomainChatPage(): React.JSX.Element {
       setUseCustomOverride(false)
     }
   }, [domain?.id, domain?.modelProvider, domain?.modelName, ollamaModels])
+
+  // Derive active domain slice
+  const messages = messagesByDomain[activeDomainId ?? ''] ?? []
+  const kbProposals = proposalsByDomain[activeDomainId ?? ''] ?? []
+  const rejectedProposals = rejectedProposalsByDomain[activeDomainId ?? ''] ?? []
 
   if (!domain || !activeDomainId) return <div />
 

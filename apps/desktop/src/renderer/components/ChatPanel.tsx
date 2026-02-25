@@ -56,14 +56,14 @@ function chipClass(featured?: boolean): string {
 
 export function ChatPanel({ domainId }: Props): React.JSX.Element {
   const {
-    messages,
-    isStreaming,
-    isSending,
-    streamingContent,
+    messagesByDomain,
+    isStreamingByDomain,
+    isSendingByDomain,
+    streamingContentByDomain,
+    activeToolCallByDomain,
     isExtracting,
     extractionError,
     extractionResult,
-    activeToolCall,
     sendMessage,
     cancelChat,
     clearMessages,
@@ -71,6 +71,13 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
     clearExtractionError,
     clearExtractionResult,
   } = useChatStore()
+
+  // Derive active domain slice
+  const messages = messagesByDomain[domainId] ?? []
+  const isStreaming = isStreamingByDomain[domainId] ?? false
+  const isSending = isSendingByDomain[domainId] ?? false
+  const streamingContent = streamingContentByDomain[domainId] ?? ''
+  const activeToolCall = activeToolCallByDomain[domainId] ?? null
   const [input, setInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
 

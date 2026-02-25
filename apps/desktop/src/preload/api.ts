@@ -36,9 +36,11 @@ export interface DomainOSAPI {
 
   chat: {
     send(payload: {
+      requestId: string
       domainId: string
       messages: Array<{ role: 'user' | 'assistant'; content: string }>
     }): Promise<IPCResult<{
+      requestId: string
       content: string
       proposals: KBUpdateProposal[]
       rejectedProposals: RejectedProposal[]
@@ -67,11 +69,9 @@ export interface DomainOSAPI {
       proposals: KBUpdateProposal[]
       rejectedProposals: RejectedProposal[]
     }>>
-    onStreamChunk(callback: (chunk: string) => void): void
-    offStreamChunk(): void
-    onStreamDone(callback: (data: { cancelled: boolean }) => void): void
-    offStreamDone(): void
-    onToolUse(callback: (data: ToolUseEvent) => void): () => void
+    onStreamChunk(callback: (data: { requestId: string; chunk: string }) => void): () => void
+    onStreamDone(callback: (data: { requestId: string; cancelled: boolean }) => void): () => void
+    onToolUse(callback: (data: import('../shared/chat-types').ToolUseEvent) => void): () => void
   }
 
   gmail: {
@@ -287,21 +287,8 @@ export interface DomainTag {
   createdAt: string
 }
 
-export interface ToolUseEvent {
-  toolName: string
-  toolUseId: string
-  status: 'running' | 'done'
-  domainId: string
-  roundIndex: number
-  detail?: {
-    query?: string
-    resultCount?: number
-    messageId?: string
-    subject?: string
-    taskId?: string
-    taskListTitle?: string
-  }
-}
+// Re-export ToolUseEvent from shared types (single source of truth)
+export type { ToolUseEvent } from '../shared/chat-types'
 
 export interface KBFile {
   id: string
