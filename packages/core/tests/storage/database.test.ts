@@ -55,7 +55,7 @@ describe('openDatabase', () => {
       .prepare('SELECT MAX(version) as version FROM schema_version')
       .get() as { version: number }
 
-    expect(version.version).toBe(14)
+    expect(version.version).toBe(15)
     db.close()
   })
 })

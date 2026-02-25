@@ -50,6 +50,7 @@ import {
   STATUS_CAPS,
   AutomationRepository,
   BrainstormSessionRepository,
+  DomainTagRepository,
 } from '@domain-os/core'
 import type {
   CreateDomainInput,
@@ -116,6 +117,7 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
   const gapFlagRepo = new GapFlagRepository(db)
   const deadlineRepo = new DeadlineRepository(db)
   const advisoryRepo = new AdvisoryRepository(db)
+  const tagRepo = new DomainTagRepository(db)
 
   // Seed default shared protocols (STOP + Gap Detection) — idempotent
   seedDefaultProtocols(sharedProtocolRepo)
@@ -467,12 +469,16 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           // brainstorm_sessions table might not exist yet (pre-migration)
         }
 
+        // Fetch domain tags for prompt injection
+        const domainTags = tagRepo.getByDomain(payload.domainId)
+
         const promptResult = buildSystemPrompt({
           domain: {
             name: domain.value.name,
             description: domain.value.description,
             identity: domain.value.identity ?? '',
             escalationTriggers: domain.value.escalationTriggers ?? '',
+            tags: domainTags.map((t) => ({ key: t.key, value: t.value })),
           },
           kbContext: kbContext.value,
           protocols: protocols.value.map((p) => ({ name: p.name, content: p.content })),
@@ -1880,6 +1886,39 @@ Rules:
       // Re-enable the automation
       const result = automationRepo.update(id, { enabled: true })
       return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
+    } catch (e) { return { ok: false, error: (e as Error).message } }
+  })
+
+  // --- Tags ---
+
+  ipcMain.handle('tags:get', async (_e: IpcMainInvokeEvent, domainId: string) => {
+    try {
+      return { ok: true, value: tagRepo.getByDomain(domainId) }
+    } catch (e) { return { ok: false, error: (e as Error).message } }
+  })
+
+  ipcMain.handle('tags:set', async (_e: IpcMainInvokeEvent, domainId: string, tags: Array<{ key: string; value: string }>) => {
+    try {
+      tagRepo.setTags(domainId, tags)
+      return { ok: true }
+    } catch (e) { return { ok: false, error: (e as Error).message } }
+  })
+
+  ipcMain.handle('tags:distinct-values', async (_e: IpcMainInvokeEvent, key: string, limit?: number) => {
+    try {
+      return { ok: true, value: tagRepo.getDistinctValues(key, limit ? { limit } : undefined) }
+    } catch (e) { return { ok: false, error: (e as Error).message } }
+  })
+
+  ipcMain.handle('tags:filter', async (_e: IpcMainInvokeEvent, filters: Record<string, string[]>) => {
+    try {
+      return { ok: true, value: tagRepo.findDomainIdsByFilters(filters) }
+    } catch (e) { return { ok: false, error: (e as Error).message } }
+  })
+
+  ipcMain.handle('tags:all', async () => {
+    try {
+      return { ok: true, value: tagRepo.getAllGroupedByDomain() }
     } catch (e) { return { ok: false, error: (e as Error).message } }
   })
 }

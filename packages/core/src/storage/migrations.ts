@@ -530,6 +530,25 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    version: 15,
+    description: 'Domain tags — filterable key-value metadata for domains',
+    up(db) {
+      runSQL(db, `
+        CREATE TABLE IF NOT EXISTS domain_tags (
+          id TEXT PRIMARY KEY,
+          domain_id TEXT NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
+          key TEXT NOT NULL CHECK(length(key) <= 32),
+          value TEXT NOT NULL CHECK(length(value) <= 128),
+          value_norm TEXT NOT NULL CHECK(length(value_norm) <= 128),
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE UNIQUE INDEX idx_domain_tags_unique ON domain_tags(domain_id, key, value_norm);
+        CREATE INDEX idx_domain_tags_key_value ON domain_tags(key, value_norm);
+        CREATE INDEX idx_domain_tags_domain ON domain_tags(domain_id);
+      `)
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

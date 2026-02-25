@@ -14,6 +14,7 @@ export interface PromptDomain {
   description: string
   identity?: string
   escalationTriggers?: string
+  tags?: Array<{ key: string; value: string }>
 }
 
 export interface PromptKBFile {
@@ -125,6 +126,42 @@ export function buildSystemPrompt(context: PromptContext): PromptResult {
   // === DOMAIN ===
   const domainSection = `=== DOMAIN: ${context.domain.name} ===\n${context.domain.description}`
   addSection('Domain', domainSection)
+
+  // === DOMAIN ASSOCIATIONS (tags) ===
+  if (context.domain.tags && context.domain.tags.length > 0) {
+    // Group by key, stable ordering: property → contact → type → custom alpha
+    const predefinedOrder = ['property', 'contact', 'type']
+    const grouped: Record<string, string[]> = {}
+    for (const tag of context.domain.tags) {
+      if (!grouped[tag.key]) grouped[tag.key] = []
+      grouped[tag.key].push(tag.value)
+    }
+    // Sort values alphabetically within each key
+    for (const key of Object.keys(grouped)) {
+      grouped[key].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+    }
+    // Sort keys: predefined first in order, then custom alphabetically
+    const allKeys = Object.keys(grouped).sort((a, b) => {
+      const ai = predefinedOrder.indexOf(a)
+      const bi = predefinedOrder.indexOf(b)
+      if (ai >= 0 && bi >= 0) return ai - bi
+      if (ai >= 0) return -1
+      if (bi >= 0) return 1
+      return a.localeCompare(b)
+    })
+
+    const lines: string[] = ['=== DOMAIN ASSOCIATIONS ===']
+    let lineCount = 0
+    for (const key of allKeys) {
+      if (lineCount >= 10) {
+        lines.push(`(+${allKeys.length - lineCount} more tags omitted)`)
+        break
+      }
+      lines.push(`${key.charAt(0).toUpperCase() + key.slice(1)}: ${grouped[key].join(', ')}`)
+      lineCount++
+    }
+    addSection('Domain Associations', lines.join('\n'))
+  }
 
   // === KNOWLEDGE BASE ===
   const kbLines: string[] = ['=== KNOWLEDGE BASE ===']

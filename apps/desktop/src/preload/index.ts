@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { DomainOSAPI, KBUpdateProposal, ToolUseEvent, ProviderConfig, DependencyType, DeadlineStatus, DeadlineSource, AdvisoryType, AdvisoryStatus, SaveDraftBlockInput, AutomationNotification } from './api'
+import type { DomainOSAPI, KBUpdateProposal, ToolUseEvent, ProviderConfig, DependencyType, DeadlineStatus, DeadlineSource, AdvisoryType, AdvisoryStatus, SaveDraftBlockInput, AutomationNotification, DomainTag } from './api'
 
 const api: DomainOSAPI = {
   platform: process.platform,
@@ -224,6 +224,17 @@ const api: DomainOSAPI = {
     offNotification() {
       ipcRenderer.removeAllListeners('automation:notification')
     },
+  },
+
+  tags: {
+    get: (domainId: string) => ipcRenderer.invoke('tags:get', domainId),
+    set: (domainId: string, tags: Array<{ key: string; value: string }>) =>
+      ipcRenderer.invoke('tags:set', domainId, tags),
+    distinctValues: (key: string, limit?: number) =>
+      ipcRenderer.invoke('tags:distinct-values', key, limit),
+    filter: (filters: Record<string, string[]>) =>
+      ipcRenderer.invoke('tags:filter', filters),
+    all: () => ipcRenderer.invoke('tags:all'),
   },
 
   settings: {

@@ -229,6 +229,14 @@ export interface DomainOSAPI {
     offNotification(): void
   }
 
+  tags: {
+    get(domainId: string): Promise<IPCResult<DomainTag[]>>
+    set(domainId: string, tags: Array<{ key: string; value: string }>): Promise<IPCResult<void>>
+    distinctValues(key: string, limit?: number): Promise<IPCResult<Array<{ value: string; count: number }>>>
+    filter(filters: Record<string, string[]>): Promise<IPCResult<string[] | null>>
+    all(): Promise<IPCResult<Record<string, DomainTag[]>>>
+  }
+
   settings: {
     getApiKey(): Promise<IPCResult<string>>
     setApiKey(key: string): Promise<IPCResult<void>>
@@ -267,6 +275,14 @@ export interface Domain {
   forceToolAttempt: boolean
   createdAt: string
   updatedAt: string
+}
+
+export interface DomainTag {
+  id: string
+  domainId: string
+  key: string
+  value: string
+  createdAt: string
 }
 
 export interface ToolUseEvent {

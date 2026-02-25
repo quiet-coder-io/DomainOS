@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
-import { useDomainStore, useIntakeStore } from '../stores'
+import { useDomainStore, useIntakeStore, useTagStore } from '../stores'
 import { CreateDomainDialog } from './CreateDomainDialog'
 import { EditDomainDialog } from './EditDomainDialog'
 import { DomainContextMenu } from './DomainContextMenu'
 import { IntakeTokenDisplay } from './IntakeTokenDisplay'
+import type { DomainTag } from '../../preload/api'
+
+const PREDEFINED_TAG_KEYS = ['property', 'contact', 'type'] as const
 
 interface SidebarProps {
   activeView: 'domains' | 'intake' | 'briefing'
@@ -12,9 +15,127 @@ interface SidebarProps {
   onToggleTheme: () => void
 }
 
+// ── Filter Dropdown ──
+
+function FilterDropdown({
+  label,
+  tagKey,
+  values,
+  activeValues,
+  onToggle,
+}: {
+  label: string
+  tagKey: string
+  values: Array<{ value: string; count: number }>
+  activeValues: string[]
+  onToggle: (key: string, value: string) => void
+}): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const isActive = activeValues.length > 0
+
+  useEffect(() => {
+    if (!open) return
+    function handler(e: MouseEvent): void {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    function keyHandler(e: KeyboardEvent): void {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    document.addEventListener('keydown', keyHandler)
+    return () => {
+      document.removeEventListener('mousedown', handler)
+      document.removeEventListener('keydown', keyHandler)
+    }
+  }, [open])
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => values.length > 0 && setOpen(!open)}
+        className={`rounded px-2 py-0.5 text-[10px] font-medium border transition-colors ${
+          isActive
+            ? 'border-accent bg-accent/15 text-accent-text'
+            : values.length === 0
+              ? 'border-border/50 text-text-tertiary/50 cursor-default'
+              : 'border-border text-text-tertiary hover:text-text-secondary hover:bg-surface-2'
+        }`}
+      >
+        {label} {isActive ? `(${activeValues.length})` : ''}
+        <span className="ml-0.5 text-[8px]">&#9662;</span>
+      </button>
+
+      {open && values.length > 0 && (
+        <div className="absolute left-0 top-full z-50 mt-1 min-w-[180px] max-h-60 overflow-y-auto rounded border border-border bg-surface-1 py-1 shadow-lg">
+          {values.map((v) => {
+            const checked = activeValues.includes(v.value)
+            return (
+              <label
+                key={v.value}
+                className="flex items-center gap-2 px-3 py-1.5 text-xs text-text-secondary hover:bg-surface-2 cursor-pointer"
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => onToggle(tagKey, v.value)}
+                  className="rounded border-border accent-accent"
+                />
+                <span className="flex-1 truncate">{v.value}</span>
+                <span className="text-text-tertiary">({v.count})</span>
+              </label>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Tag Dots (indicators on domain items) ──
+
+function TagDots({ tags }: { tags: DomainTag[] }): React.JSX.Element | null {
+  if (tags.length === 0) return null
+
+  // Group by key
+  const grouped: Record<string, string[]> = {}
+  for (const tag of tags) {
+    if (!grouped[tag.key]) grouped[tag.key] = []
+    grouped[tag.key].push(tag.value)
+  }
+
+  const keys = Object.keys(grouped).sort()
+  const tooltipParts = keys.map((k) => `${k.charAt(0).toUpperCase() + k.slice(1)}: ${grouped[k].join(', ')}`)
+
+  return (
+    <span className="inline-flex gap-0.5 ml-1" title={tooltipParts.join('\n')}>
+      {keys.slice(0, 3).map((k) => (
+        <span
+          key={k}
+          className="inline-block h-1.5 w-1.5 rounded-full bg-accent/50"
+        />
+      ))}
+    </span>
+  )
+}
+
+// ── Main Sidebar ──
+
 export function Sidebar({ activeView, onViewChange, theme, onToggleTheme }: SidebarProps): React.JSX.Element {
   const { domains, activeDomainId, loading, fetchDomains, setActiveDomain, deleteDomain } = useDomainStore()
   const { items: intakeItems, fetchPending } = useIntakeStore()
+  const {
+    tagsByDomain,
+    distinctValuesByKey,
+    activeFilters,
+    filteredDomainIds,
+    fetchAllTags,
+    fetchDistinctValues,
+    toggleFilter,
+    clearFilters,
+  } = useTagStore()
+
   const [showCreate, setShowCreate] = useState(false)
   const [createMode, setCreateMode] = useState<'add' | 'create'>('add')
   const [showNewMenu, setShowNewMenu] = useState(false)
@@ -78,9 +199,20 @@ export function Sidebar({ activeView, onViewChange, theme, onToggleTheme }: Side
   useEffect(() => {
     fetchDomains()
     fetchPending()
-  }, [fetchDomains, fetchPending])
+    fetchAllTags()
+    // Load distinct values for filter dropdowns
+    for (const key of PREDEFINED_TAG_KEYS) {
+      fetchDistinctValues(key)
+    }
+  }, [fetchDomains, fetchPending, fetchAllTags, fetchDistinctValues])
 
   const intakeBadgeText = intakeItems.length > 99 ? '99+' : `${intakeItems.length}`
+
+  // Filter domains if filters are active
+  const hasActiveFilters = Object.values(activeFilters).some((v) => v.length > 0)
+  const visibleDomains = filteredDomainIds != null
+    ? domains.filter((d) => filteredDomainIds.includes(d.id))
+    : domains
 
   return (
     <aside
@@ -283,6 +415,57 @@ export function Sidebar({ activeView, onViewChange, theme, onToggleTheme }: Side
             </div>
           )}
 
+          {/* Filter bar — only when domains view is active and there are domains */}
+          {activeView === 'domains' && domains.length > 0 && (
+            <div className="border-b border-border px-3 py-2">
+              <div className="flex flex-wrap gap-1.5">
+                {PREDEFINED_TAG_KEYS.map((key) => (
+                  <FilterDropdown
+                    key={key}
+                    label={key.charAt(0).toUpperCase() + key.slice(1)}
+                    tagKey={key}
+                    values={distinctValuesByKey[key] ?? []}
+                    activeValues={activeFilters[key] ?? []}
+                    onToggle={toggleFilter}
+                  />
+                ))}
+                {hasActiveFilters && (
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    className="text-[10px] text-accent-text hover:underline px-1"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+
+              {/* Active filter chips */}
+              {hasActiveFilters && (
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {Object.entries(activeFilters).map(([key, values]) =>
+                    values.map((val) => (
+                      <span
+                        key={`${key}-${val}`}
+                        className="inline-flex items-center gap-0.5 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] text-accent-text"
+                      >
+                        {val}
+                        <button
+                          type="button"
+                          onClick={() => toggleFilter(key, val)}
+                          className="text-text-tertiary hover:text-text-primary"
+                          aria-label={`Remove filter ${val}`}
+                        >
+                          &times;
+                        </button>
+                      </span>
+                    )),
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           <nav ref={navRef} className="flex-1 min-h-0 overflow-y-auto p-2">
             {activeView === 'domains' && (
               <>
@@ -309,8 +492,23 @@ export function Sidebar({ activeView, onViewChange, theme, onToggleTheme }: Side
                     </p>
                   </div>
                 )}
-                {domains.map((domain) => {
+                {hasActiveFilters && visibleDomains.length === 0 && domains.length > 0 && (
+                  <div className="mx-2 my-4 rounded-lg border border-dashed border-border p-4 text-center">
+                    <p className="text-xs text-text-tertiary">
+                      No domains match the current filters.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={clearFilters}
+                      className="mt-1 text-xs text-accent-text hover:underline"
+                    >
+                      Clear filters
+                    </button>
+                  </div>
+                )}
+                {visibleDomains.map((domain) => {
                   const isActive = activeDomainId === domain.id
+                  const domainTags = tagsByDomain[domain.id] ?? []
                   return (
                     <button
                       key={domain.id}
@@ -333,8 +531,11 @@ export function Sidebar({ activeView, onViewChange, theme, onToggleTheme }: Side
                           isActive ? 'bg-accent' : 'bg-text-tertiary'
                         }`}
                       />
-                      <div className="min-w-0">
-                        <div className="font-medium">{domain.name}</div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center">
+                          <span className="font-medium">{domain.name}</span>
+                          <TagDots tags={domainTags} />
+                        </div>
                         {domain.description && (
                           <div className="mt-0.5 truncate text-xs text-text-tertiary">{domain.description}</div>
                         )}
