@@ -65,6 +65,7 @@ This loop validates the core value prop: domain-scoped AI that reads and writes 
 - **KB file watching** — filesystem monitoring with debounced auto-scan on domain switch
 - **Strategic advisory system** — mode-classified responses (brainstorm/challenge/review/scenario/general), persistent advisory artifacts with strict Zod-validated JSON fence blocks, 4 read-only advisory tools, deterministic task extraction, cross-domain contamination guard
 - **Decision quality gates** — confidence, horizon, reversibility class, category, authority source tier on decision records
+- **File attachments in chat** — drag-and-drop files onto chat as context for the LLM. Supports text files (.md, .ts, .json, etc.) and binary documents (PDF, Excel, Word) with server-side text extraction. Files are sent as user message preamble; only metadata (filename, size, sha256) stored in chat history. Budget enforcement: 100KB/file text, 2MB/file binary, 500KB total, 200K chars total, max 20 files. Hash-based dedup, encoding validation, deterministic truncation.
 
 ### Out of scope (future)
 - Protocol marketplace/sharing
@@ -82,6 +83,9 @@ Directed relationships with typed dependencies (`blocks`, `depends_on`, `informs
 
 ### Strategic Brainstorming — BMAD Method (Completed)
 Deep facilitated brainstorming sessions using 106 techniques (56 brainstorming + 50 elicitation) across 10 categories, adapted from BMAD-METHOD. AI facilitates (not generates), with heuristic technique recommendations, multi-round idea capture, anti-bias protocol, and deterministic synthesis (keyword clustering → ranked options). One active session per domain, 500-idea soft cap, recovery-safe synthesis previews. 6 brainstorm_* tools wired into tool loop.
+
+### File Attachments in Chat (Completed)
+Drag-and-drop files from Finder onto the chat panel as LLM context. Split transport/storage: file contents sent in LLM user message with injection-guarded preamble; only metadata (filename, size, SHA-256) persisted in chat history. **Text files** (.md, .ts, .json, .csv, etc. + exact-name files like Dockerfile, Makefile): read via `file.text()`, encoding validated, 100KB limit. **Binary documents** (PDF, Excel, Word): read as `ArrayBuffer`, sent to main process via `file:extract-text` IPC for server-side extraction (`unpdf`, `xlsx`, `mammoth`), 2MB limit. Shared pipeline: deterministic truncation (50K chars/file), hash-based dedup, incremental budget enforcement (500KB / 200K chars / 20 files total), display-name collision handling. UI: `ChatAttachmentsBar` with file chips (name, size, truncation badge, hash tooltip), remove/remove-all, error toast with auto-dismiss. Message bubbles show attachment badges for historical messages.
 
 ## Key Files Reference
 
@@ -129,7 +133,7 @@ Deep facilitated brainstorming sessions using 106 techniques (56 brainstorming +
 
 | File | Purpose |
 |------|---------|
-| `src/main/ipc-handlers.ts` | 60+ IPC handlers: domains, KB, chat, briefing, intake, protocols, sessions, relationships, gap flags, decisions, audit, advisory, Gmail, GTasks, settings |
+| `src/main/ipc-handlers.ts` | 60+ IPC handlers: domains, KB, chat, briefing, intake, protocols, sessions, relationships, gap flags, decisions, audit, advisory, Gmail, GTasks, settings, file text extraction |
 | `src/main/tool-loop.ts` | **Provider-agnostic** tool-use loop — works with Anthropic, OpenAI, Ollama; prefix-based dispatch (`gmail_*`, `gtasks_*`, `advisory_*`), ROWYS Gmail guard, tool output sanitization, transcript validation, size guards (75KB/result, 400KB total), capability cache management |
 | `src/main/advisory-tools.ts` | `ADVISORY_TOOLS` as `ToolDefinition[]` (advisory_search_decisions, advisory_search_deadlines, advisory_cross_domain_context, advisory_risk_snapshot), executors with output caps (10 items, 300 char truncation), `schemaVersion` wrapper |
 | `src/main/brainstorm-tools.ts` | `BRAINSTORM_TOOLS` as `ToolDefinition[]` (brainstorm_start_session, brainstorm_get_techniques, brainstorm_capture_ideas, brainstorm_session_status, brainstorm_synthesize, brainstorm_session_control), `executeBrainstormTool()` |
@@ -148,6 +152,9 @@ Deep facilitated brainstorming sessions using 106 techniques (56 brainstorming +
 | `src/renderer/stores/domain-store.ts` | Zustand store for domains including `modelProvider`, `modelName`, `forceToolAttempt` |
 | `src/renderer/stores/advisory-store.ts` | Zustand store for advisory artifacts: fetch, filter (status/type), archive/unarchive, rename |
 | `src/renderer/stores/briefing-store.ts` | Zustand store: `fetchHealth()`, `analyze()` with streaming + cancel, snapshot hash stale detection |
+| `src/renderer/common/file-attach-utils.ts` | Pure file attachment utilities: validation (`isAllowedFile`, `isBinaryFormat`), SHA-256 hashing, truncation, budget accounting, LLM block assembly, `AttachedFile` type |
+| `src/renderer/components/ChatAttachmentsBar.tsx` | File chips UI: displayName + size + truncation badge + hash tooltip, remove/remove-all, error toast with auto-dismiss |
+| `src/renderer/components/ChatPanel.tsx` | Chat input with drag-and-drop file attachment, `processFiles()` with budget enforcement, binary file extraction via IPC |
 | `src/renderer/components/AdvisoryPanel.tsx` | Strategic History panel — status/type filters, expandable artifact cards, type-specific content renderers, archive/unarchive actions |
 
 ## Multi-Provider LLM Architecture
@@ -252,6 +259,7 @@ Decrypted keys cached in-memory after first read. Keys never cross IPC to render
 | `advisory:rename` | renderer→main | Rename an advisory artifact title |
 | `advisory:save-draft-block` | renderer→main | 1-click save of a `persist:"no"` draft block from message metadata |
 | `advisory:extract-tasks` | renderer→main | Deterministic task extraction from an artifact |
+| `file:extract-text` | renderer→main | Binary file text extraction (PDF via `unpdf`, Excel via `xlsx`, Word via `mammoth`) |
 
 ## Environment Variables
 

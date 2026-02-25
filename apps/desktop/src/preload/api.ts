@@ -239,6 +239,10 @@ export interface DomainOSAPI {
     all(): Promise<IPCResult<Record<string, DomainTag[]>>>
   }
 
+  file: {
+    extractText(filename: string, buffer: ArrayBuffer): Promise<IPCResult<string>>
+  }
+
   settings: {
     getApiKey(): Promise<IPCResult<string>>
     setApiKey(key: string): Promise<IPCResult<void>>

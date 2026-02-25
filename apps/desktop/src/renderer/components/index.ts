@@ -4,6 +4,7 @@
 
 export { Sidebar } from './Sidebar'
 export { ChatPanel } from './ChatPanel'
+export { ChatAttachmentsBar } from './ChatAttachmentsBar'
 export { MessageBubble } from './MessageBubble'
 export { KBFileList } from './KBFileList'
 export { KBUpdateProposal } from './KBUpdateProposal'

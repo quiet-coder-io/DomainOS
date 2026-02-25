@@ -1,10 +1,32 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useChatStore } from '../stores'
 import { MessageBubble } from './MessageBubble'
 import { StopAlert } from './StopAlert'
 import { GapFlagAlert } from './GapFlagAlert'
 import { DecisionCard } from './DecisionCard'
+import { ChatAttachmentsBar } from './ChatAttachmentsBar'
 import { BrainIcon } from './icons/BrainIcon'
+import type { AttachedFile, AttachmentMeta } from '../common/file-attach-utils'
+import {
+  isAllowedFile,
+  isBinaryFormat,
+  hasEncodingIssues,
+  sha256,
+  formatFileSize,
+  truncateContent,
+  buildFileSection,
+  buildLlmFileBlock,
+  fileSectionChars,
+  separatorChars,
+  deduplicateDisplayName,
+  MAX_FILE_SIZE,
+  MAX_BINARY_FILE_SIZE,
+  MAX_TOTAL_SIZE,
+  MAX_CHARS_PER_FILE,
+  MAX_TOTAL_CHARS,
+  MAX_FILE_COUNT,
+  BASE_BLOCK_OVERHEAD_CHARS,
+} from '../common/file-attach-utils'
 
 interface Props {
   domainId: string
@@ -25,6 +47,12 @@ const SpinnerIcon = () => (
 const StopIcon = () => (
   <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
     <rect x="2" y="2" width="10" height="10" rx="1.5" />
+  </svg>
+)
+
+const PaperclipIcon = () => (
+  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 )
 
@@ -81,6 +109,11 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
   const [input, setInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
 
+  // --- File attachment state ---
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([])
+  const [isDragOver, setIsDragOver] = useState(false)
+  const [fileError, setFileError] = useState<string | null>(null)
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, streamingContent])
@@ -101,7 +134,7 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
     }
   }, [extractionResult, clearExtractionResult])
 
-  // Escape key to cancel processing
+  // Escape key to cancel processing (only when NOT in confirm mode)
   useEffect(() => {
     if (!isStreaming && !isSending) return
     function handleEsc(e: KeyboardEvent): void {
@@ -111,19 +144,259 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
     return () => document.removeEventListener('keydown', handleEsc)
   }, [isStreaming, isSending, cancelChat])
 
+  // --- File processing with budget enforcement ---
+  const processFiles = useCallback(async (files: File[]): Promise<void> => {
+    const errors: string[] = []
+    const newFiles: AttachedFile[] = []
+    let skippedCount = 0
+
+    // Get current state for budget calculation
+    const currentFiles = attachedFiles
+    let remainingSlots = MAX_FILE_COUNT - currentFiles.length
+
+    // Running budgets (including existing files)
+    let runningBytes = currentFiles.reduce((s, f) => s + f.size, 0)
+    const existingFileCount = currentFiles.length
+    let runningChars = existingFileCount > 0
+      ? currentFiles.reduce((s, f) => s + fileSectionChars(f), 0)
+        + separatorChars(existingFileCount)
+        + BASE_BLOCK_OVERHEAD_CHARS
+      : 0
+
+    // Collect existing hashes for dedup
+    const existingHashes = new Set(currentFiles.map((f) => f.sha256))
+    const existingDisplayNames = currentFiles.map((f) => f.displayName)
+    let acceptedInThisBatch = 0
+
+    for (const file of files) {
+      // Slot check
+      if (remainingSlots <= 0) {
+        skippedCount++
+        continue
+      }
+
+      // 1. Allowed file check
+      if (!isAllowedFile(file.name)) {
+        errors.push(`${file.name}: unsupported file type`)
+        continue
+      }
+
+      const isBinary = isBinaryFormat(file.name)
+      const sizeLimit = isBinary ? MAX_BINARY_FILE_SIZE : MAX_FILE_SIZE
+
+      // 2. Size check (binary files get a larger limit since extraction compresses)
+      if (file.size > sizeLimit) {
+        errors.push(`${file.name}: exceeds ${formatFileSize(sizeLimit)} limit`)
+        continue
+      }
+
+      // 3. Read content — binary files go through main process extraction
+      let rawContent: string
+      try {
+        if (isBinary) {
+          const buffer = await file.arrayBuffer()
+          const result = await window.domainOS.file.extractText(file.name, buffer)
+          if (!result.ok || !result.value) {
+            errors.push(`${file.name}: ${result.error ?? 'no text could be extracted'}`)
+            continue
+          }
+          rawContent = result.value
+        } else {
+          rawContent = await file.text()
+        }
+      } catch {
+        errors.push(`${file.name}: could not read file`)
+        continue
+      }
+
+      // 4. Encoding check (skip for binary — main process already decoded)
+      if (!isBinary && hasEncodingIssues(rawContent)) {
+        errors.push(`${file.name}: unsupported encoding`)
+        continue
+      }
+
+      // 5. Truncate if needed
+      const { content, truncated } = truncateContent(rawContent)
+
+      // 6. Build section string and compute hash
+      const tempFile: AttachedFile = {
+        id: '',
+        displayName: file.name,
+        originalName: file.name,
+        size: file.size,
+        content,
+        sha256: '',
+        truncated,
+      }
+      const sectionStr = buildFileSection(tempFile)
+      const hash = await sha256(sectionStr)
+
+      // 7. Hash-based dedup
+      if (existingHashes.has(hash)) {
+        // Silently skip duplicates
+        continue
+      }
+
+      // Check against new files in this batch too
+      if (newFiles.some((f) => f.sha256 === hash)) {
+        continue
+      }
+
+      // 8. Budget check
+      const isFirstFileTotal = existingFileCount === 0 && acceptedInThisBatch === 0
+      const charCost = sectionStr.length
+        + (isFirstFileTotal ? BASE_BLOCK_OVERHEAD_CHARS : 0)
+        + ((existingFileCount + acceptedInThisBatch) > 0 ? 2 : 0) // separator \n\n
+
+      if (runningBytes + file.size > MAX_TOTAL_SIZE) {
+        errors.push(`${file.name}: would exceed total size limit`)
+        continue
+      }
+      if (runningChars + charCost > MAX_TOTAL_CHARS) {
+        errors.push(`${file.name}: would exceed total character limit`)
+        continue
+      }
+
+      // 9. Display-name dedup
+      const allDisplayNames = [...existingDisplayNames, ...newFiles.map((f) => f.displayName)]
+      const displayName = deduplicateDisplayName(file.name, allDisplayNames)
+
+      // 10. Accept
+      const accepted: AttachedFile = {
+        id: crypto.randomUUID(),
+        displayName,
+        originalName: file.name,
+        size: file.size,
+        content,
+        sha256: hash,
+        truncated,
+      }
+      newFiles.push(accepted)
+      existingHashes.add(hash)
+      remainingSlots--
+      acceptedInThisBatch++
+      runningBytes += file.size
+      runningChars += charCost
+    }
+
+    if (skippedCount > 0) {
+      errors.push(`Maximum ${MAX_FILE_COUNT} files (${skippedCount} skipped)`)
+    }
+
+    if (newFiles.length > 0) {
+      setAttachedFiles((prev) => [...prev, ...newFiles])
+      }
+    if (errors.length > 0) {
+      setFileError(errors.join('; '))
+    }
+  }, [attachedFiles])
+
+  // --- Drag-and-drop handlers ---
+  function handleDragOver(e: React.DragEvent): void {
+    e.preventDefault()
+    e.stopPropagation()
+    if (isStreaming) return
+    if (e.dataTransfer.types.includes('Files')) {
+      setIsDragOver(true)
+    }
+  }
+
+  function handleDragLeave(e: React.DragEvent): void {
+    e.preventDefault()
+    e.stopPropagation()
+    // Only clear if leaving the container (not entering a child)
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return
+    setIsDragOver(false)
+  }
+
+  function handleDrop(e: React.DragEvent): void {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+
+    if (isStreaming) return
+
+    // Directory detection via webkitGetAsEntry
+    if (e.dataTransfer.items) {
+      for (let i = 0; i < e.dataTransfer.items.length; i++) {
+        const item = e.dataTransfer.items[i]
+        if (item.kind === 'file') {
+          const entry = item.webkitGetAsEntry?.()
+          if (entry?.isDirectory) {
+            setFileError('Folders not supported — drop individual files')
+            return
+          }
+        }
+      }
+    }
+
+    // Collect files
+    const droppedFiles: File[] = []
+    if (e.dataTransfer.items) {
+      for (let i = 0; i < e.dataTransfer.items.length; i++) {
+        const item = e.dataTransfer.items[i]
+        if (item.kind === 'file') {
+          const file = item.getAsFile()
+          if (file) droppedFiles.push(file)
+        }
+      }
+    } else if (e.dataTransfer.files) {
+      for (let i = 0; i < e.dataTransfer.files.length; i++) {
+        droppedFiles.push(e.dataTransfer.files[i])
+      }
+    }
+
+    if (droppedFiles.length === 0) {
+      setFileError('No readable files found')
+      return
+    }
+
+    processFiles(droppedFiles)
+  }
+
+  // --- Attachment management ---
+  function handleRemoveFile(id: string): void {
+    setAttachedFiles((prev) => prev.filter((f) => f.id !== id))
+  }
+
+  function handleRemoveAllFiles(): void {
+    setAttachedFiles([])
+  }
+
+  function handleClearFileError(): void {
+    setFileError(null)
+  }
+
+  // --- Send with display/LLM split + confirm gate ---
   async function handleSend(): Promise<void> {
     const text = input.trim()
     if (!text || isStreaming) return
 
+    const attachmentMeta: AttachmentMeta[] | undefined = attachedFiles.length > 0
+      ? attachedFiles.map((f) => ({
+          filename: f.originalName,
+          sizeBytes: f.size,
+          sha256: f.sha256,
+          ...(f.truncated ? { truncated: true } : {}),
+        }))
+      : undefined
+
+    let llmContent = text
+    if (attachedFiles.length > 0) {
+      llmContent = `${buildLlmFileBlock(attachedFiles)}\n\n${text}`
+    }
+
     setInput('')
-    await sendMessage(text, domainId)
+    setAttachedFiles([])
+    await sendMessage(text, llmContent, domainId, attachmentMeta)
   }
 
   async function handleSuggestionClick(text: string): Promise<void> {
     if (isStreaming) return
-    await sendMessage(text, domainId)
+    await sendMessage(text, text, domainId)
   }
 
+  // --- Keyboard handlers ---
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>): void {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -171,8 +444,27 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
 
   const hasAssistantMessages = messages.some((m) => m.role === 'assistant')
 
+  // Attachment summary for display
+  const totalAttachSize = attachedFiles.reduce((s, f) => s + f.size, 0)
+  const totalAttachChars = attachedFiles.reduce((s, f) => s + f.content.length, 0)
+
   return (
-    <div className="flex min-h-0 h-full flex-col">
+    <div
+      className="relative flex min-h-0 h-full flex-col"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {/* Drop zone overlay */}
+      {isDragOver && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-accent/10 border-2 border-dashed border-accent rounded-lg pointer-events-none animate-fade-in">
+          <div className="flex flex-col items-center gap-2 text-accent">
+            <PaperclipIcon />
+            <span className="text-sm font-medium">Drop files to attach</span>
+          </div>
+        </div>
+      )}
+
       {/* Toast: extraction error */}
       {extractionError && (
         <div className="mx-4 mt-2 rounded border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger animate-fade-in">
@@ -224,6 +516,7 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
                 role={msg.role}
                 content={msg.content}
                 status={msg.status}
+                attachments={msg.attachments}
                 onExtractKb={msg.role === 'assistant' ? () => handleExtractSingle(i) : undefined}
               />
               {msg.role === 'assistant' && msg.stopBlocks?.length ? <StopAlert stopBlocks={msg.stopBlocks} /> : null}
@@ -282,6 +575,23 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
             Update All
           </button>
         </div>
+
+        {/* Attachments bar */}
+        <ChatAttachmentsBar
+          files={attachedFiles}
+          error={fileError}
+          onRemove={handleRemoveFile}
+          onRemoveAll={handleRemoveAllFiles}
+          onClearError={handleClearFileError}
+        />
+
+        {/* Attachment summary */}
+        {attachedFiles.length > 0 && (
+          <div className="mt-1 mb-1 text-[0.65rem] text-text-tertiary">
+            Attached: {attachedFiles.length} file{attachedFiles.length !== 1 ? 's' : ''} · {formatFileSize(totalAttachSize)} · {totalAttachChars.toLocaleString()} chars
+          </div>
+        )}
+
         <div className="flex gap-2">
           <textarea
             value={input}
@@ -289,7 +599,9 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
             onKeyDown={handleKeyDown}
             className="flex-1 min-w-0 resize-none rounded border border-border bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder-text-tertiary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
             rows={2}
-            placeholder="Type a message... (Enter to send, Shift+Enter for newline)"
+            placeholder={attachedFiles.length > 0
+              ? 'Type a message about attached files... (Enter to send)'
+              : 'Type a message... (Enter to send, Shift+Enter for newline)'}
             disabled={isStreaming}
           />
           {(isStreaming || isSending) ? (

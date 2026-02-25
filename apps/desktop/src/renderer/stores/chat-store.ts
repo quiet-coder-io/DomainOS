@@ -24,6 +24,7 @@ interface ChatMessage {
   stopBlocks?: Array<{ reason: string; actionNeeded: string }>
   gapFlags?: Array<{ category: string; description: string }>
   decisions?: Array<{ decisionId: string; decision: string }>
+  attachments?: Array<{ filename: string; sizeBytes: number; sha256: string; truncated?: boolean }>
 }
 
 interface ExtractionResult {
@@ -67,7 +68,12 @@ interface ChatState {
 
   // Actions
   switchDomain(domainId: string, domainName: string): void
-  sendMessage(content: string, domainId: string): Promise<void>
+  sendMessage(
+    displayContent: string,
+    llmContent: string,
+    domainId: string,
+    attachments?: Array<{ filename: string; sizeBytes: number; sha256: string; truncated?: boolean }>,
+  ): Promise<void>
   cancelChat(): void
   applyProposal(domainId: string, id: string): Promise<void>
   dismissProposal(id: string): void
@@ -211,7 +217,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       // Transport cancel is sender-scoped. onStreamDone handles flag cleanup.
     },
 
-    async sendMessage(content, domainId) {
+    async sendMessage(displayContent, llmContent, domainId, attachments) {
       const state = get()
 
       // Send guard: block any send while any request is in-flight
@@ -219,7 +225,12 @@ export const useChatStore = create<ChatState>((set, get) => {
 
       const requestId = crypto.randomUUID()
 
-      const userMessage: ChatMessage = { role: 'user', content }
+      // Store display content + attachment metadata (never file contents)
+      const userMessage: ChatMessage = {
+        role: 'user',
+        content: displayContent,
+        ...(attachments?.length ? { attachments } : {}),
+      }
       const currentMessages = [...(state.messagesByDomain[domainId] ?? []), userMessage]
 
       set((s) => ({
@@ -235,10 +246,21 @@ export const useChatStore = create<ChatState>((set, get) => {
       }))
 
       try {
+        // Build fresh IPC messages array — use llmContent for the last user message
+        const ipcMessages = currentMessages
+          .filter((m) => m.role !== 'system')
+          .map((m, _i, arr) => {
+            // For the last message (just added), use llmContent instead of displayContent
+            if (m === userMessage) {
+              return { role: m.role as 'user' | 'assistant', content: llmContent }
+            }
+            return { role: m.role as 'user' | 'assistant', content: m.content }
+          })
+
         const result = await window.domainOS.chat.send({
           requestId,
           domainId,
-          messages: currentMessages.filter((m) => m.role !== 'system') as Array<{ role: 'user' | 'assistant'; content: string }>,
+          messages: ipcMessages,
         })
 
         if (result.ok && result.value?.cancelled) {

@@ -236,6 +236,11 @@ const api: DomainOSAPI = {
     all: () => ipcRenderer.invoke('tags:all'),
   },
 
+  file: {
+    extractText: (filename: string, buffer: ArrayBuffer) =>
+      ipcRenderer.invoke('file:extract-text', filename, buffer),
+  },
+
   settings: {
     getApiKey: () => ipcRenderer.invoke('settings:get-api-key'),
     setApiKey: (key: string) => ipcRenderer.invoke('settings:set-api-key', key),

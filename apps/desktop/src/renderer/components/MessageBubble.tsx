@@ -2,8 +2,16 @@ interface Props {
   role: 'user' | 'assistant'
   content: string
   status?: 'cancelled'
+  attachments?: Array<{ filename: string; sizeBytes: number; sha256: string; truncated?: boolean }>
   onExtractKb?: () => void
 }
+
+const FileIcon = () => (
+  <svg width="10" height="10" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M3.5 1h4l2.5 2.5V10a.75.75 0 0 1-.75.75h-5.5A.75.75 0 0 1 3 10V1.75A.75.75 0 0 1 3.5 1z" stroke="currentColor" strokeWidth="1" fill="none" />
+    <path d="M7.5 1v2.5H10" stroke="currentColor" strokeWidth="1" fill="none" />
+  </svg>
+)
 
 // --- Table helpers ---
 
@@ -145,7 +153,7 @@ const ExtractIcon = () => (
   </svg>
 )
 
-export function MessageBubble({ role, content, status, onExtractKb }: Props): React.JSX.Element {
+export function MessageBubble({ role, content, status, attachments, onExtractKb }: Props): React.JSX.Element {
   const isUser = role === 'user'
 
   return (
@@ -157,6 +165,20 @@ export function MessageBubble({ role, content, status, onExtractKb }: Props): Re
             : 'rounded-2xl rounded-bl-sm border border-border-subtle bg-surface-2 text-text-primary'
         }`}
       >
+        {/* Attachment badges for user messages */}
+        {isUser && attachments && attachments.length > 0 && (
+          <div className="mb-1.5 flex flex-wrap gap-1">
+            {attachments.map((a, i) => (
+              <span
+                key={i}
+                className="inline-flex items-center gap-0.5 rounded-full bg-white/15 px-1.5 py-0.5 text-[0.6rem]"
+              >
+                <FileIcon />
+                {a.filename}
+              </span>
+            ))}
+          </div>
+        )}
         {isUser ? (
           <div className="whitespace-pre-wrap break-words">{content}</div>
         ) : (

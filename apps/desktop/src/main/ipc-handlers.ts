@@ -1992,4 +1992,45 @@ Rules:
       return { ok: true, value: tagRepo.getAllGroupedByDomain() }
     } catch (e) { return { ok: false, error: (e as Error).message } }
   })
+
+  // --- File text extraction (for binary attachments: PDF, Excel, Word) ---
+
+  ipcMain.handle('file:extract-text', async (_e: IpcMainInvokeEvent, filename: string, buffer: ArrayBuffer) => {
+    try {
+      const ext = filename.toLowerCase().split('.').pop() ?? ''
+      const buf = Buffer.from(buffer)
+
+      if (ext === 'pdf') {
+        const { getDocumentProxy, extractText } = await import('unpdf')
+        const pdf = await getDocumentProxy(new Uint8Array(buf))
+        const { text } = await extractText(pdf, { mergePages: true })
+        return { ok: true, value: text as string }
+      }
+
+      if (ext === 'xlsx' || ext === 'xls') {
+        const XLSX = await import('xlsx')
+        const workbook = XLSX.read(buf, { type: 'buffer' })
+        const sheets: string[] = []
+        for (const name of workbook.SheetNames) {
+          const csv = XLSX.utils.sheet_to_csv(workbook.Sheets[name])
+          sheets.push(`--- Sheet: ${name} ---\n${csv}`)
+        }
+        return { ok: true, value: sheets.join('\n\n') }
+      }
+
+      if (ext === 'docx') {
+        const mammoth = await import('mammoth')
+        const result = await mammoth.extractRawText({ buffer: buf })
+        return { ok: true, value: result.value }
+      }
+
+      if (ext === 'doc') {
+        return { ok: false, error: 'Legacy .doc format not supported — please convert to .docx' }
+      }
+
+      return { ok: false, error: `Unsupported binary format: .${ext}` }
+    } catch (e) {
+      return { ok: false, error: (e as Error).message }
+    }
+  })
 }
