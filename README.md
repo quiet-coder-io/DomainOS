@@ -126,6 +126,7 @@ DomainOS gives each area of your professional life its own AI-powered operating 
 - **Directed domain relationships** — link domains with typed dependencies: `blocks`, `depends_on`, `informs`, `parallel`, `monitor_only`; supports reciprocal relationships with different types per direction
 - **Sibling domain relationships** — lightweight link for related domains so the AI can surface cross-domain context without mixing knowledge bases
 - **Browser-to-app intake pipeline** — Chrome extension with "Send to DomainOS" that extracts web content and routes it to the right domain via AI classification
+- **Gmail email drag-and-drop** — drag emails directly from Gmail into the DomainOS chat panel to attach them as context for the AI; the Chrome extension injects drag handles that extract the email subject automatically, with a manual search fallback when the extension isn't installed
 - **Google Tasks as AI tools** — the chat assistant can search, read, complete, update, and delete Google Tasks via tool-use, enabling conversational task management within any domain
 - **KB file watching** — automatic filesystem monitoring with debounced re-scan when KB files change on disk
 
@@ -145,7 +146,7 @@ DomainOS gives each area of your professional life its own AI-powered operating 
 ```mermaid
 graph TB
     subgraph Browser["Chrome Browser"]
-        EXT["Chrome Extension<br/><i>Send to DomainOS</i>"]
+        EXT["Chrome Extension<br/><i>Send to DomainOS · Gmail Drag</i>"]
     end
 
     subgraph Electron["Desktop App (Electron)"]
@@ -233,6 +234,17 @@ flowchart LR
     E --> F["Ingest to<br/>domain KB"]
 ```
 
+### Gmail Email Drag-and-Drop
+
+```mermaid
+flowchart LR
+    A["Gmail inbox"] --> B["Drag ☰ handle<br/><small>Extension content script</small>"]
+    B -- "subject in URL param" --> C["Drop on chat panel"]
+    C --> D["Gmail API search<br/><small>Find email by subject</small>"]
+    D --> E["Preview card<br/><small>Subject · sender · snippet</small>"]
+    E --> F["Attach to<br/>chat message"]
+```
+
 ## Tech Stack
 
 | Layer | Technology |
@@ -261,6 +273,17 @@ npm run dev
 ```
 
 No cloud backend required. The app runs entirely on your machine.
+
+### Chrome Extension (Optional)
+
+The DomainOS Chrome extension adds two capabilities: web content intake ("Send to DomainOS") and Gmail email drag-and-drop.
+
+1. Open `chrome://extensions/` in Chrome
+2. Enable **Developer mode** (top-right toggle)
+3. Click **Load unpacked** and select the `extensions/chrome-dominos/` directory
+4. Click the extension icon and enter your DomainOS auth token (shown in the app sidebar)
+
+**Gmail drag-and-drop:** After installing the extension, hover over any email row in Gmail to see a blue ☰ drag handle on the left. Drag it to the DomainOS chat panel to attach the email as context for the AI. The extension automatically extracts the subject and finds the email via Gmail API.
 
 > If DomainOS is useful to you, consider giving it a [star on GitHub](https://github.com/quiet-coder-io/DomainOS) — it helps others discover the project.
 
@@ -295,7 +318,7 @@ domain-os/
 │               ├── components/  # Shared UI components
 │               ├── pages/       # Route-level pages
 │               └── stores/      # Zustand state management
-└── extensions/               # Chrome extension (intake pipeline)
+└── extensions/               # Chrome extension (intake pipeline + Gmail drag content script)
 ```
 
 ## Security & Privacy

@@ -71,6 +71,7 @@ This roadmap reflects current priorities and may shift as the project evolves. I
 - [x] Google Tasks read-write tools (search, read, complete, update, delete)
 - [x] Google Tasks inline editing in portfolio briefing
 - [x] Browser-to-app intake pipeline (Chrome extension)
+- [x] Gmail email drag-and-drop into chat (Chrome extension content script with drag handles, subject-in-URL encoding for cross-app transfer)
 - [x] Cross-domain directed relationships (blocks, depends_on, informs, parallel, monitor_only)
 
 ---

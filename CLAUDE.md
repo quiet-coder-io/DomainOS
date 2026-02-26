@@ -62,6 +62,7 @@ This loop validates the core value prop: domain-scoped AI that reads and writes 
 - **Cross-domain features** — directed domain relationships with dependency types (blocks, depends_on, informs, parallel, monitor_only) + sibling relationships
 - **Portfolio health briefing** — computed health scoring, cross-domain alerts, LLM-powered analysis with streaming, snapshot hashing for stale detection
 - **Browser ingestion pipeline** — Chrome extension → localhost intake server → AI classification
+- **Gmail drag-and-drop** — drag emails from Gmail directly into chat as LLM context via Chrome extension content script with drag handles; subject encoded in URL query param (only reliable cross-app drag channel)
 - **KB file watching** — filesystem monitoring with debounced auto-scan on domain switch
 - **Strategic advisory system** — mode-classified responses (brainstorm/challenge/review/scenario/general), persistent advisory artifacts with strict Zod-validated JSON fence blocks, 4 read-only advisory tools, deterministic task extraction, cross-domain contamination guard
 - **Decision quality gates** — confidence, horizon, reversibility class, category, authority source tier on decision records
@@ -75,6 +76,9 @@ This loop validates the core value prop: domain-scoped AI that reads and writes 
 
 ### Browser-to-App Ingestion Pipeline (Completed)
 Chrome Extension → localhost HTTP listener (Electron main process, token-authenticated) → AI domain classifier → user confirms classification → KB ingestion.
+
+### Gmail Email Drag-and-Drop (Completed)
+Drag emails from Gmail inbox directly into the DomainOS chat panel to attach them as LLM context. The Chrome extension injects drag handles (☰) on Gmail email rows that bypass Gmail's native drag blocking (`draggable="false"` + `preventDefault` on mousedown). On `dragstart`, the content script extracts the email subject via a 3-strategy heuristic (`data-thread-id` → `role="link"` → bold-text fallback) and encodes it as a `dominos_subject` query parameter in `text/uri-list` — the only MIME type whose value reliably survives macOS cross-app drag transfer (custom MIME types, `text/html`, and `text/plain` values are stripped or overwritten). The renderer extracts the subject from the URL, searches Gmail API (with `RE:`/`FW:` prefix stripping), and presents an email preview with Attach/Cancel. Falls back to manual subject search prompt when the extension isn't installed.
 
 ### Portfolio Health Briefing (Completed)
 Computed dashboard: per-domain health scoring (KB staleness × tiered importance, open gap flags, dependency status), cross-domain alerts (stale/blocked domain impacting dependents), snapshot hashing. LLM interpretive layer: streams structured analysis (alerts, prioritized actions, monitors) from health snapshot + KB digests.
@@ -136,6 +140,15 @@ Reusable analytical procedures stored globally and activated per-message. Full v
 | `src/gmail/` | `GmailClient` (search/read), `GmailPoller`, body parser |
 | `src/gtasks/client.ts` | `GTasksClient` (listTaskLists, search, read, completeTask, updateTask, deleteTask, getOverdue) — on-demand Google Tasks API v1, read-write |
 
+### Chrome Extension (`extensions/chrome-dominos/`)
+
+| File | Purpose |
+|------|---------|
+| `manifest.json` | MV3 manifest — popup, options, content script on `mail.google.com` |
+| `gmail-drag.js` | Content script: inject drag handles on Gmail rows, extract subject via 3-strategy heuristic, encode in URL query param for cross-app drag |
+| `popup.html` / `popup.js` | "Send to DomainOS" intake UI — extracts page content and sends to localhost intake server |
+| `options.html` / `options.js` | Extension settings (auth token, port) |
+
 ### Desktop App (`apps/desktop/`)
 
 | File | Purpose |
@@ -161,7 +174,7 @@ Reusable analytical procedures stored globally and activated per-message. Full v
 | `src/renderer/stores/briefing-store.ts` | Zustand store: `fetchHealth()`, `analyze()` with streaming + cancel, snapshot hash stale detection |
 | `src/renderer/common/file-attach-utils.ts` | Pure file attachment utilities: validation (`isAllowedFile`, `isBinaryFormat`), SHA-256 hashing, truncation, budget accounting, LLM block assembly, `AttachedFile` type |
 | `src/renderer/components/ChatAttachmentsBar.tsx` | File chips UI: displayName + size + truncation badge + hash tooltip, remove/remove-all, error toast with auto-dismiss |
-| `src/renderer/components/ChatPanel.tsx` | Chat input with drag-and-drop file attachment, `processFiles()` with budget enforcement, binary file extraction via IPC |
+| `src/renderer/components/ChatPanel.tsx` | Chat input with drag-and-drop file/email attachment, Gmail email drop detection (`dominos_subject` URL param + `text/uri-list` fallback), `processFiles()` with budget enforcement, binary file extraction via IPC |
 | `src/renderer/components/AdvisoryPanel.tsx` | Strategic History panel — status/type filters, expandable artifact cards, type-specific content renderers, archive/unarchive actions |
 | `src/renderer/stores/skill-store.ts` | Zustand store for skills: `activeSkillIdByDomain` (domain-scoped selection), `fetchSkills(force?)` with 5-min cache, auto-clear stale selections |
 | `src/renderer/components/SkillSelector.tsx` | Chip-based skill selector above chat textarea; per-message activation with auto-clear after send |
