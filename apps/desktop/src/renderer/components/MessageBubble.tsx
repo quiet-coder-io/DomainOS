@@ -43,7 +43,7 @@ function renderMarkdown(text: string): React.JSX.Element {
       // Code block
       const content = part.slice(3, -3).replace(/^\w*\n/, '') // strip language hint
       elements.push(
-        <pre key={key++} className="my-2 overflow-x-auto rounded bg-surface-0 border border-border-subtle p-2 font-mono text-xs leading-relaxed">
+        <pre key={key++} className="my-2 rounded bg-surface-0 border border-border-subtle p-2 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
           {content}
         </pre>
       )

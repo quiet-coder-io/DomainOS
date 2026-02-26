@@ -46,12 +46,12 @@ export function GapFlagPanel({ domainId }: Props): React.JSX.Element {
       )}
 
       {flags.map((flag) => (
-        <div key={flag.id} className="mb-2 rounded border border-border bg-surface-2 p-3 animate-fade-in">
-          <div className="flex items-start gap-2">
-            <span className="rounded-full bg-warning/20 px-2 py-0.5 text-[0.65rem] font-medium text-warning">
+        <div key={flag.id} className="mb-2 rounded border border-border bg-surface-2 p-3 animate-fade-in overflow-hidden">
+          <div className="flex items-start gap-2 min-w-0">
+            <span className="shrink-0 rounded-full bg-warning/20 px-2 py-0.5 text-[0.65rem] font-medium text-warning">
               {flag.category}
             </span>
-            <p className="flex-1 text-xs text-text-secondary">{flag.description}</p>
+            <p className="flex-1 min-w-0 text-xs text-text-secondary break-words">{flag.description}</p>
           </div>
           {flag.status === 'open' && (
             <div className="mt-2 flex gap-1">
