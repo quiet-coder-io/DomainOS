@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { DomainOSAPI, KBUpdateProposal, ToolUseEvent, ProviderConfig, DependencyType, DeadlineStatus, DeadlineSource, AdvisoryType, AdvisoryStatus, SaveDraftBlockInput, AutomationNotification, DomainTag, SkillOutputFormat, PersistedChatMessage } from './api'
+import type { DomainOSAPI, KBUpdateProposal, ToolUseEvent, ProviderConfig, DependencyType, DeadlineStatus, DeadlineSource, AdvisoryType, AdvisoryStatus, SaveDraftBlockInput, AutomationNotification, DomainTag, SkillOutputFormat, PersistedChatMessage, MissionProgressEventData } from './api'
 
 const api: DomainOSAPI = {
   platform: process.platform,
@@ -286,6 +286,31 @@ const api: DomainOSAPI = {
     listOllamaModels: (baseUrl?: string) => ipcRenderer.invoke('settings:list-ollama-models', baseUrl),
     testOllama: (baseUrl?: string) => ipcRenderer.invoke('settings:test-ollama', baseUrl),
     testTools: (provider: string, model: string) => ipcRenderer.invoke('settings:test-tools', provider, model),
+  },
+
+  mission: {
+    list: () => ipcRenderer.invoke('mission:list'),
+    listForDomain: (domainId: string) => ipcRenderer.invoke('mission:list-for-domain', domainId),
+    get: (id: string) => ipcRenderer.invoke('mission:get', id),
+    enableForDomain: (missionId: string, domainId: string) =>
+      ipcRenderer.invoke('mission:enable-for-domain', missionId, domainId),
+    disableForDomain: (missionId: string, domainId: string) =>
+      ipcRenderer.invoke('mission:disable-for-domain', missionId, domainId),
+    run: (missionId: string, domainId: string, inputs: Record<string, unknown>, requestId: string) =>
+      ipcRenderer.invoke('mission:run', missionId, domainId, inputs, requestId),
+    runStatus: (runId: string) => ipcRenderer.invoke('mission:run-status', runId),
+    runCancel: (runId: string) => ipcRenderer.invoke('mission:run-cancel', runId),
+    gateDecide: (runId: string, gateId: string, approved: boolean) =>
+      ipcRenderer.invoke('mission:gate-decide', runId, gateId, approved),
+    runHistory: (domainId: string, limit?: number) =>
+      ipcRenderer.invoke('mission:run-history', domainId, limit),
+    activeRun: () => ipcRenderer.invoke('mission:active-run'),
+    onRunProgress(callback: (event: MissionProgressEventData) => void) {
+      ipcRenderer.on('mission:run-progress', (_event, data: MissionProgressEventData) => callback(data))
+    },
+    offRunProgress() {
+      ipcRenderer.removeAllListeners('mission:run-progress')
+    },
   },
 }
 

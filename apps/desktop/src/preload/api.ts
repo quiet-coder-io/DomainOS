@@ -294,6 +294,22 @@ export interface DomainOSAPI {
     // Tool capability probe
     testTools(provider: string, model: string): Promise<IPCResult<ToolTestResult>>
   }
+
+  mission: {
+    list(): Promise<IPCResult<MissionSummary[]>>
+    listForDomain(domainId: string): Promise<IPCResult<MissionSummary[]>>
+    get(id: string): Promise<IPCResult<MissionDetail>>
+    enableForDomain(missionId: string, domainId: string): Promise<IPCResult<void>>
+    disableForDomain(missionId: string, domainId: string): Promise<IPCResult<void>>
+    run(missionId: string, domainId: string, inputs: Record<string, unknown>, requestId: string): Promise<IPCResult<MissionRunData>>
+    runStatus(runId: string): Promise<IPCResult<MissionRunDetailData>>
+    runCancel(runId: string): Promise<IPCResult<void>>
+    gateDecide(runId: string, gateId: string, approved: boolean): Promise<IPCResult<MissionRunData>>
+    runHistory(domainId: string, limit?: number): Promise<IPCResult<MissionRunSummaryData[]>>
+    activeRun(): Promise<IPCResult<MissionRunDetailData | null>>
+    onRunProgress(callback: (event: MissionProgressEventData) => void): void
+    offRunProgress(): void
+  }
 }
 
 // Simplified types for IPC boundary (no class instances, just plain data)
@@ -785,4 +801,121 @@ export interface PersistedChatMessage {
   status: string | null
   metadata: Record<string, unknown>
   createdAt: string
+}
+
+// ── Mission types ──
+
+export type MissionRunStatus = 'pending' | 'running' | 'gated' | 'success' | 'failed' | 'cancelled'
+export type MissionGateStatus = 'pending' | 'approved' | 'rejected'
+export type MissionActionStatus = 'pending' | 'success' | 'failed' | 'skipped'
+export type MissionActionType = 'create_deadline' | 'draft_email' | 'notification'
+export type MissionOutputType = 'alert' | 'action' | 'monitor' | 'raw'
+
+export interface MissionSummary {
+  id: string
+  name: string
+  version: number
+  description: string
+  isEnabled: boolean
+  parameters: Record<string, { type: string; default: unknown; description: string }>
+}
+
+export interface MissionDetail {
+  id: string
+  name: string
+  version: number
+  definition: {
+    type: string
+    description: string
+    steps: string[]
+    gates: Array<{ id: string; description: string; triggeredWhen: string }>
+    actions: Array<{ id: string; type: string; description: string }>
+    parameters: Record<string, { type: string; default: unknown; description: string }>
+  }
+  definitionHash: string
+  isEnabled: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface MissionRunData {
+  id: string
+  missionId: string
+  domainId: string
+  status: MissionRunStatus
+  inputsJson: Record<string, unknown>
+  missionDefinitionHash: string
+  promptHash: string
+  modelId: string
+  provider: string
+  contextJson: Record<string, unknown>
+  requestId: string | null
+  startedAt: string | null
+  endedAt: string | null
+  durationMs: number | null
+  error: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface MissionRunSummaryData {
+  id: string
+  missionId: string
+  domainId: string
+  status: MissionRunStatus
+  startedAt: string | null
+  endedAt: string | null
+  durationMs: number | null
+  error: string | null
+  createdAt: string
+}
+
+export interface MissionRunOutput {
+  id: string
+  runId: string
+  outputType: MissionOutputType
+  contentJson: Record<string, unknown>
+  artifactId: string | null
+  createdAt: string
+}
+
+export interface MissionRunGate {
+  id: string
+  runId: string
+  gateId: string
+  status: MissionGateStatus
+  message: string
+  decidedAt: string | null
+  decidedBy: string
+  createdAt: string
+}
+
+export interface MissionRunAction {
+  id: string
+  runId: string
+  actionId: string
+  type: MissionActionType
+  status: MissionActionStatus
+  resultJson: Record<string, unknown>
+  error: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface MissionRunDetailData {
+  run: MissionRunData
+  outputs: MissionRunOutput[]
+  gates: MissionRunGate[]
+  actions: MissionRunAction[]
+}
+
+export interface MissionProgressEventData {
+  requestId: string
+  runId: string
+  type: 'step_started' | 'step_completed' | 'llm_chunk' | 'gate_triggered' | 'run_complete' | 'run_failed'
+  step?: string
+  chunk?: string
+  gate?: MissionRunGate
+  status?: string
+  error?: string
 }

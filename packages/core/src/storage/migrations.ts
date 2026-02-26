@@ -3,6 +3,7 @@
  */
 
 import type Database from 'better-sqlite3'
+import { createHash } from 'node:crypto'
 
 interface Migration {
   version: number
@@ -584,6 +585,183 @@ const migrations: Migration[] = [
         runSQL(db, `ALTER TABLE chat_messages ADD COLUMN metadata TEXT`)
       }
       runSQL(db, `CREATE INDEX IF NOT EXISTS idx_chat_messages_domain_order ON chat_messages(domain_id, created_at, id)`)
+    },
+  },
+  {
+    version: 18,
+    description: 'Mission system — definitions, runs, outputs, gates, actions + audit_log CHECK drop',
+    up(db) {
+      // ── 1. Mission definitions (global, not domain-scoped) ──
+      runSQL(db, `
+        CREATE TABLE IF NOT EXISTS missions (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL UNIQUE CHECK(length(name) > 0 AND length(name) <= 100),
+          version INTEGER NOT NULL DEFAULT 1,
+          definition_json TEXT NOT NULL CHECK(json_valid(definition_json)),
+          definition_hash TEXT NOT NULL DEFAULT '',
+          seed_source TEXT NOT NULL DEFAULT 'system',
+          seed_version TEXT NOT NULL DEFAULT 'v1.0.0',
+          is_enabled INTEGER NOT NULL DEFAULT 1 CHECK(is_enabled IN (0,1)),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+      `)
+
+      // ── 2. Junction: which domains can run which missions ──
+      runSQL(db, `
+        CREATE TABLE IF NOT EXISTS mission_domain_assoc (
+          mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+          domain_id TEXT NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
+          is_enabled INTEGER NOT NULL DEFAULT 1 CHECK(is_enabled IN (0,1)),
+          created_at TEXT NOT NULL,
+          PRIMARY KEY (mission_id, domain_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_mission_domain_domain ON mission_domain_assoc(domain_id);
+      `)
+
+      // ── 3. Mission run instances (immutable audit spine) ──
+      runSQL(db, `
+        CREATE TABLE IF NOT EXISTS mission_runs (
+          id TEXT PRIMARY KEY,
+          mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+          domain_id TEXT NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
+          status TEXT NOT NULL DEFAULT 'pending'
+            CHECK(status IN ('pending','running','gated','success','failed','cancelled')),
+          inputs_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(inputs_json)),
+          mission_definition_hash TEXT NOT NULL DEFAULT '',
+          prompt_hash TEXT NOT NULL DEFAULT '',
+          model_id TEXT NOT NULL DEFAULT '',
+          provider TEXT NOT NULL DEFAULT '',
+          context_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(context_json)),
+          request_id TEXT,
+          started_at TEXT,
+          ended_at TEXT,
+          duration_ms INTEGER CHECK(duration_ms IS NULL OR duration_ms >= 0),
+          error TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_mission_runs_domain ON mission_runs(domain_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_mission_runs_status ON mission_runs(status) WHERE status IN ('pending','running','gated');
+      `)
+
+      // ── 4. Parsed outputs from a run ──
+      runSQL(db, `
+        CREATE TABLE IF NOT EXISTS mission_run_outputs (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL REFERENCES mission_runs(id) ON DELETE CASCADE,
+          output_type TEXT NOT NULL CHECK(length(output_type) > 0),
+          content_json TEXT NOT NULL CHECK(json_valid(content_json)),
+          artifact_id TEXT,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_mission_run_outputs_run ON mission_run_outputs(run_id);
+      `)
+
+      // ── 5. Approval gates ──
+      runSQL(db, `
+        CREATE TABLE IF NOT EXISTS mission_run_gates (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL REFERENCES mission_runs(id) ON DELETE CASCADE,
+          gate_id TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')),
+          message TEXT NOT NULL DEFAULT '',
+          decided_at TEXT,
+          decided_by TEXT NOT NULL DEFAULT 'user',
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_mission_run_gates_run ON mission_run_gates(run_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_mission_run_gates_unique ON mission_run_gates(run_id, gate_id);
+      `)
+
+      // ── 6. Side-effect actions ──
+      runSQL(db, `
+        CREATE TABLE IF NOT EXISTS mission_run_actions (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL REFERENCES mission_runs(id) ON DELETE CASCADE,
+          action_id TEXT NOT NULL,
+          type TEXT NOT NULL CHECK(type IN ('create_deadline','draft_email','notification')),
+          status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','success','failed','skipped')),
+          result_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(result_json)),
+          error TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_mission_run_actions_run ON mission_run_actions(run_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_mission_run_actions_unique ON mission_run_actions(run_id, action_id);
+      `)
+
+      // ── 7. Drop CHECK on audit_log.event_type (Zod-only enforcement going forward) ──
+      runSQL(db, `
+        CREATE TABLE IF NOT EXISTS audit_log_new (
+          id TEXT PRIMARY KEY,
+          domain_id TEXT NOT NULL,
+          session_id TEXT,
+          agent_name TEXT NOT NULL DEFAULT '',
+          file_path TEXT NOT NULL DEFAULT '',
+          change_description TEXT NOT NULL,
+          content_hash TEXT NOT NULL DEFAULT '',
+          event_type TEXT NOT NULL DEFAULT 'kb_write',
+          source TEXT NOT NULL DEFAULT 'agent',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (domain_id) REFERENCES domains(id) ON DELETE CASCADE
+        );
+        INSERT INTO audit_log_new (
+          id, domain_id, session_id, agent_name, file_path,
+          change_description, content_hash, event_type, source,
+          created_at, updated_at
+        )
+        SELECT
+          id, domain_id, session_id, agent_name, file_path,
+          change_description, content_hash, event_type, source,
+          created_at, updated_at
+        FROM audit_log;
+        DROP TABLE audit_log;
+        ALTER TABLE audit_log_new RENAME TO audit_log;
+        CREATE INDEX IF NOT EXISTS idx_audit_log_domain ON audit_log(domain_id, created_at);
+      `)
+
+      // ── 8. Seed Portfolio Briefing mission definition ──
+      const definition = {
+        type: 'portfolio-briefing',
+        description: 'Cross-domain portfolio health briefing with alerts, actions, monitors, and optional side effects (deadlines, email draft).',
+        steps: [
+          'compute-health',
+          'load-digests',
+          'build-prompt',
+          'stream-llm',
+          'parse-outputs',
+          'evaluate-gates',
+          'execute-actions',
+        ],
+        gates: [
+          {
+            id: 'side-effects',
+            description: 'Approve creation of deadlines and/or email draft',
+            triggeredWhen: 'actions-requested',
+          },
+        ],
+        actions: [
+          { id: 'create-deadlines', type: 'create_deadline', description: 'Create deadlines from parsed actions' },
+          { id: 'draft-email', type: 'draft_email', description: 'Draft summary email to specified recipient' },
+        ],
+        parameters: {
+          createDeadlines: { type: 'boolean', default: false, description: 'Auto-create deadlines from parsed actions' },
+          draftEmailTo: { type: 'string', default: '', description: 'Email recipient for summary draft (empty = skip)' },
+        },
+      }
+
+      // Canonical JSON: stable key sort → stringify → SHA-256
+      const canonicalJson = JSON.stringify(definition, Object.keys(definition).sort())
+      const definitionHash = createHash('sha256').update(canonicalJson).digest('hex')
+      const now = new Date().toISOString()
+      const missionId = 'portfolio-briefing'
+
+      db.prepare(`
+        INSERT OR IGNORE INTO missions (id, name, version, definition_json, definition_hash, seed_source, seed_version, is_enabled, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(missionId, 'Portfolio Briefing', 1, canonicalJson, definitionHash, 'system', 'v1.0.0', 1, now, now)
     },
   },
 ]

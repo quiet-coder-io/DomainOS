@@ -9,8 +9,8 @@ import type { DomainTag } from '../../preload/api'
 const PREDEFINED_TAG_KEYS = ['property', 'contact', 'type'] as const
 
 interface SidebarProps {
-  activeView: 'domains' | 'intake' | 'briefing'
-  onViewChange: (view: 'domains' | 'intake' | 'briefing') => void
+  activeView: 'domains' | 'intake' | 'briefing' | 'missions'
+  onViewChange: (view: 'domains' | 'intake' | 'briefing' | 'missions') => void
   theme: 'dark' | 'light'
   onToggleTheme: () => void
 }
@@ -276,6 +276,22 @@ export function Sidebar({ activeView, onViewChange, theme, onToggleTheme }: Side
             </svg>
           </button>
 
+          {/* Missions icon button */}
+          <button
+            onClick={() => {
+              onViewChange('missions')
+              setCollapsed(false)
+            }}
+            aria-label="Open Missions"
+            title="Mission Control"
+            className="flex h-10 w-10 items-center justify-center text-text-tertiary hover:text-text-secondary focus:outline-none focus:ring-2 focus:ring-accent rounded"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+              <path fillRule="evenodd" d="M4.606 12.97a.75.75 0 0 1-.134 1.051 2.494 2.494 0 0 0-.93 2.437 2.494 2.494 0 0 0 2.437-.93.75.75 0 1 1 1.186.918 3.995 3.995 0 0 1-4.482 1.332.75.75 0 0 1-.461-.461 3.994 3.994 0 0 1 1.332-4.482.75.75 0 0 1 1.052.134Z" clipRule="evenodd" />
+              <path fillRule="evenodd" d="M13.703 4.469a3.25 3.25 0 0 0-4.122.585l-5.317 5.92a.75.75 0 0 0 1.116 1.004l5.318-5.92a1.75 1.75 0 0 1 2.22-.316l.152.094c.268.165.588.252.913.252h.94a.75.75 0 0 0 0-1.5h-.94a.424.424 0 0 1-.168-.046l-.112-.073Z" clipRule="evenodd" />
+            </svg>
+          </button>
+
           {/* Divider */}
           <div className="mx-2 my-1 w-6 border-b border-border" />
 
@@ -329,7 +345,7 @@ export function Sidebar({ activeView, onViewChange, theme, onToggleTheme }: Side
           <div className="flex border-b border-border">
             <button
               onClick={() => onViewChange('domains')}
-              className={`flex-1 px-3 py-2 text-xs font-medium ${
+              className={`flex-1 px-1.5 py-2 text-xs font-medium ${
                 activeView === 'domains'
                   ? 'border-b-2 border-accent text-accent-text'
                   : 'text-text-tertiary hover:text-text-secondary'
@@ -339,7 +355,7 @@ export function Sidebar({ activeView, onViewChange, theme, onToggleTheme }: Side
             </button>
             <button
               onClick={() => onViewChange('briefing')}
-              className={`flex-1 px-3 py-2 text-xs font-medium ${
+              className={`flex-1 px-1.5 py-2 text-xs font-medium ${
                 activeView === 'briefing'
                   ? 'border-b-2 border-accent text-accent-text'
                   : 'text-text-tertiary hover:text-text-secondary'
@@ -348,8 +364,18 @@ export function Sidebar({ activeView, onViewChange, theme, onToggleTheme }: Side
               Briefing
             </button>
             <button
+              onClick={() => onViewChange('missions')}
+              className={`flex-1 px-1.5 py-2 text-xs font-medium ${
+                activeView === 'missions'
+                  ? 'border-b-2 border-accent text-accent-text'
+                  : 'text-text-tertiary hover:text-text-secondary'
+              }`}
+            >
+              Missions
+            </button>
+            <button
               onClick={() => onViewChange('intake')}
-              className={`flex items-center justify-center gap-1.5 flex-1 px-3 py-2 text-xs font-medium ${
+              className={`flex items-center justify-center gap-1.5 flex-1 px-1.5 py-2 text-xs font-medium ${
                 activeView === 'intake'
                   ? 'border-b-2 border-accent text-accent-text'
                   : 'text-text-tertiary hover:text-text-secondary'

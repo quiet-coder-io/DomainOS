@@ -14,6 +14,12 @@ export const AuditEventTypeSchema = z.enum([
   'session_start',
   'session_wrap',
   'deadline_lifecycle',
+  'mission_run_started',
+  'mission_run_completed',
+  'mission_run_failed',
+  'mission_gate_triggered',
+  'mission_gate_decided',
+  'mission_action_executed',
 ])
 export type AuditEventType = z.infer<typeof AuditEventTypeSchema>
 

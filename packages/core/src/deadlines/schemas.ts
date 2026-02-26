@@ -9,7 +9,7 @@ import { z } from 'zod'
 export const DeadlineStatusSchema = z.enum(['active', 'snoozed', 'completed', 'cancelled'])
 export type DeadlineStatus = z.infer<typeof DeadlineStatusSchema>
 
-export const DeadlineSourceSchema = z.enum(['manual', 'briefing'])
+export const DeadlineSourceSchema = z.enum(['manual', 'briefing', 'mission'])
 export type DeadlineSource = z.infer<typeof DeadlineSourceSchema>
 
 // ── Date format ──

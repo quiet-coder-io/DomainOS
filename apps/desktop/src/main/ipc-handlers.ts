@@ -55,6 +55,11 @@ import {
   skillToMarkdown,
   markdownToSkillInput,
   ChatMessageRepository,
+  MissionRepository,
+  MissionRunRepository,
+  MissionRunner,
+  initMissionParsers,
+  DomainOSError,
 } from '@domain-os/core'
 import type {
   CreateDomainInput,
@@ -73,6 +78,9 @@ import type {
   DomainStatusSnapshot,
   CreateAutomationInput,
   UpdateAutomationInput,
+  MissionProgressEvent,
+  MissionRunnerDeps,
+  Result,
 } from '@domain-os/core'
 import { getIntakeToken } from './intake-token'
 import { startKBWatcher, stopKBWatcher } from './kb-watcher'
@@ -2286,5 +2294,296 @@ Rules:
     } catch (e) {
       return { ok: false, error: (e as Error).message }
     }
+  })
+
+  // --- Missions ---
+
+  initMissionParsers()
+  const missionRepo = new MissionRepository(db)
+  const missionRunRepo = new MissionRunRepository(db)
+  const activeMissionRuns = new Map<string, AbortController>()
+
+  ipcMain.handle('mission:list', () => {
+    const result = missionRepo.listSummaries()
+    return result.ok
+      ? { ok: true, value: result.value }
+      : { ok: false, error: result.error.message }
+  })
+
+  ipcMain.handle('mission:list-for-domain', (_event, domainId: string) => {
+    const result = missionRepo.listSummariesForDomain(domainId)
+    return result.ok
+      ? { ok: true, value: result.value }
+      : { ok: false, error: result.error.message }
+  })
+
+  ipcMain.handle('mission:get', (_event, id: string) => {
+    const result = missionRepo.getById(id)
+    return result.ok
+      ? { ok: true, value: result.value }
+      : { ok: false, error: result.error.message }
+  })
+
+  ipcMain.handle('mission:enable-for-domain', (_event, missionId: string, domainId: string) => {
+    const result = missionRepo.enableForDomain(missionId, domainId)
+    return result.ok
+      ? { ok: true, value: undefined }
+      : { ok: false, error: result.error.message }
+  })
+
+  ipcMain.handle('mission:disable-for-domain', (_event, missionId: string, domainId: string) => {
+    const result = missionRepo.disableForDomain(missionId, domainId)
+    return result.ok
+      ? { ok: true, value: undefined }
+      : { ok: false, error: result.error.message }
+  })
+
+  ipcMain.handle('mission:run', async (event: IpcMainInvokeEvent, missionId: string, domainId: string, inputs: Record<string, unknown>, requestId: string) => {
+    const controller = new AbortController()
+
+    try {
+      // Resolve provider (same pattern as briefing:analyze)
+      const globalConfig = await loadProviderConfig()
+      const resolvedProvider = (globalConfig.defaultProvider ?? 'anthropic') as ProviderName
+      const resolvedModel = globalConfig.defaultModel ?? DEFAULT_MODELS[resolvedProvider]
+      const ollamaBaseUrl = globalConfig.ollamaBaseUrl ?? 'http://localhost:11434'
+
+      if (resolvedProvider !== 'ollama') {
+        const apiKey = await loadProviderKey(resolvedProvider)
+        if (!apiKey) {
+          return { ok: false, error: `No API key configured for ${resolvedProvider}. Open Settings to add one.` }
+        }
+      } else {
+        const reachable = await OllamaProvider.testConnection(ollamaBaseUrl)
+        if (!reachable) {
+          return { ok: false, error: `Ollama not reachable at ${ollamaBaseUrl}. Is it running?` }
+        }
+      }
+
+      // Build deps
+      const deps: MissionRunnerDeps = {
+        db,
+        async streamLLM(systemPrompt, userMessage, onChunk, signal) {
+          const apiKey = resolvedProvider !== 'ollama' ? await loadProviderKey(resolvedProvider) : undefined
+          const provider = createProvider({
+            provider: resolvedProvider,
+            model: resolvedModel,
+            apiKey,
+            ollamaBaseUrl,
+          })
+
+          let fullResponse = ''
+          for await (const chunk of provider.chat(
+            [{ role: 'user' as const, content: userMessage }],
+            systemPrompt,
+          )) {
+            if (signal.aborted) break
+            fullResponse += chunk
+            onChunk(chunk)
+          }
+          return fullResponse
+        },
+        async createDeadline(domainId, text, dueDate, priority) {
+          return deadlineRepo.create({
+            domainId,
+            text,
+            dueDate,
+            priority,
+            source: 'mission',
+            sourceRef: `mission:${missionId}`,
+          })
+        },
+        async createGmailDraft(to, subject, body) {
+          // Placeholder — use gmail tool if available
+          console.log(`[missions] Draft email requested: to=${to}, subject=${subject}`)
+          return 'draft-placeholder'
+        },
+        async loadDigests(domains: Array<{ id: string; name: string; kbPath: string }>) {
+          // Load all domains if none specified
+          let targetDomains: Array<{ id: string; name: string; kbPath: string }>
+          if (domains.length > 0) {
+            targetDomains = domains
+          } else {
+            const domainsResult = domainRepo.list()
+            if (!domainsResult.ok) return []
+            targetDomains = domainsResult.value.map((d) => ({ id: d.id, name: d.name, kbPath: d.kbPath }))
+          }
+          const digests: Array<{ domainId: string; domainName: string; content: string }> = []
+
+          for (const domain of targetDomains) {
+            try {
+              const digestPath = join(domain.kbPath, 'kb_digest.md')
+              const raw = await readFile(digestPath, 'utf-8')
+              digests.push({ domainId: domain.id, domainName: domain.name, content: raw.slice(0, 6000) })
+            } catch {
+              digests.push({ domainId: domain.id, domainName: domain.name, content: '(kb_digest.md missing)' })
+            }
+          }
+
+          return digests
+        },
+        async loadGlobalOverdueGTasks() {
+          const creds = await loadGTasksCredentials()
+          if (!creds) return 0
+          try {
+            const gtClient = new GTasksClient({
+              clientId: creds.clientId,
+              clientSecret: creds.clientSecret,
+              refreshToken: creds.refreshToken,
+            })
+            return (await gtClient.getOverdue()).length
+          } catch {
+            return 0
+          }
+        },
+        buildPrompt(context) {
+          return buildBriefingPrompt({
+            health: context.health as import('@domain-os/core').PortfolioHealth,
+            digests: context.digests,
+            currentDate: context.currentDate,
+            globalOverdueGTasks: context.globalOverdueGTasks,
+          })
+        },
+        async computeHealth(database: Database.Database) {
+          const result = await computePortfolioHealth(database)
+          return result as Result<unknown, DomainOSError>
+        },
+        emitProgress(runId: string, progressEvent: MissionProgressEvent) {
+          if (!event.sender.isDestroyed()) {
+            event.sender.send('mission:run-progress', progressEvent)
+          }
+        },
+        auditLog(input: { domainId: string; changeDescription: string; eventType: string; source: string }) {
+          auditRepo.logChange({
+            domainId: input.domainId,
+            changeDescription: input.changeDescription,
+            eventType: input.eventType as AuditEventType,
+            source: input.source,
+          })
+        },
+      }
+
+      const runner = new MissionRunner(deps)
+
+      // Store abort controller mapped by requestId (we'll get runId from result)
+      activeMissionRuns.set(requestId, controller)
+
+      const result = await runner.start(
+        missionId,
+        domainId,
+        { ...inputs, _requestId: requestId },
+        resolvedModel,
+        resolvedProvider,
+        controller.signal,
+      )
+
+      if (result.ok) {
+        // Map runId → controller for cancel-by-runId
+        activeMissionRuns.set(result.value.id, controller)
+      }
+
+      return result.ok
+        ? { ok: true, value: result.value }
+        : { ok: false, error: result.error.message }
+    } catch (err) {
+      if (controller.signal.aborted) {
+        return { ok: false, error: 'CANCELLED' }
+      }
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    } finally {
+      activeMissionRuns.delete(requestId)
+    }
+  })
+
+  ipcMain.handle('mission:run-cancel', (_event, runId: string) => {
+    // Try both runId and requestId mappings
+    const controller = activeMissionRuns.get(runId)
+    if (controller) {
+      controller.abort()
+      activeMissionRuns.delete(runId)
+    }
+    const cancelResult = missionRunRepo.updateStatus(runId, 'cancelled')
+    return cancelResult.ok
+      ? { ok: true, value: undefined }
+      : { ok: false, error: cancelResult.error.message }
+  })
+
+  ipcMain.handle('mission:run-status', (_event, runId: string) => {
+    const result = missionRunRepo.getRunDetail(runId)
+    return result.ok
+      ? { ok: true, value: result.value }
+      : { ok: false, error: result.error.message }
+  })
+
+  ipcMain.handle('mission:gate-decide', async (event: IpcMainInvokeEvent, runId: string, gateId: string, approved: boolean) => {
+    try {
+      // Resolve provider for potential action execution
+      const globalConfig = await loadProviderConfig()
+      const resolvedProvider = (globalConfig.defaultProvider ?? 'anthropic') as ProviderName
+      const resolvedModel = globalConfig.defaultModel ?? DEFAULT_MODELS[resolvedProvider]
+      const ollamaBaseUrl = globalConfig.ollamaBaseUrl ?? 'http://localhost:11434'
+
+      const deps: MissionRunnerDeps = {
+        db,
+        async streamLLM() { return '' },
+        async createDeadline(domainId, text, dueDate, priority) {
+          return deadlineRepo.create({
+            domainId,
+            text,
+            dueDate,
+            priority,
+            source: 'mission',
+            sourceRef: `mission:gate-resume`,
+          })
+        },
+        async createGmailDraft(to, subject, body) {
+          console.log(`[missions] Draft email requested: to=${to}, subject=${subject}`)
+          return 'draft-placeholder'
+        },
+        async loadDigests() { return [] },
+        async loadGlobalOverdueGTasks() { return 0 },
+        buildPrompt() { return '' },
+        async computeHealth(database: Database.Database) { const r = await computePortfolioHealth(database); return r as Result<unknown, DomainOSError> },
+        emitProgress(runId: string, progressEvent: MissionProgressEvent) {
+          if (!event.sender.isDestroyed()) {
+            event.sender.send('mission:run-progress', progressEvent)
+          }
+        },
+        auditLog(input: { domainId: string; changeDescription: string; eventType: string; source: string }) {
+          auditRepo.logChange({
+            domainId: input.domainId,
+            changeDescription: input.changeDescription,
+            eventType: input.eventType as AuditEventType,
+            source: input.source,
+          })
+        },
+      }
+
+      const runner = new MissionRunner(deps)
+      const result = await runner.resumeAfterGate(runId, gateId, approved)
+
+      return result.ok
+        ? { ok: true, value: result.value }
+        : { ok: false, error: result.error.message }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('mission:run-history', (_event, domainId: string, limit?: number) => {
+    const result = missionRunRepo.listByDomain(domainId, limit)
+    return result.ok
+      ? { ok: true, value: result.value }
+      : { ok: false, error: result.error.message }
+  })
+
+  ipcMain.handle('mission:active-run', () => {
+    const result = missionRunRepo.getActiveRun()
+    if (!result.ok) return { ok: false, error: result.error.message }
+    if (!result.value) return { ok: true, value: null }
+    const detail = missionRunRepo.getRunDetail(result.value.id)
+    return detail.ok
+      ? { ok: true, value: detail.value }
+      : { ok: false, error: detail.error.message }
   })
 }

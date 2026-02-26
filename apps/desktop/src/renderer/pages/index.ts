@@ -5,3 +5,4 @@
 export { DomainListPage } from './DomainListPage'
 export { DomainChatPage } from './DomainChatPage'
 export { BriefingPage } from './BriefingPage'
+export { MissionControlPage } from './MissionControlPage'
