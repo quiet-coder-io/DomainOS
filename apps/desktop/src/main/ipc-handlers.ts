@@ -95,6 +95,9 @@ import { GTASKS_TOOLS } from './gtasks-tools'
 import { runToolLoop } from './tool-loop'
 import { sendChatChunk, sendChatDone } from './chat-events'
 import { GmailClient, GTasksClient } from '@domain-os/integrations'
+import type { GmailAttachmentMeta, GmailMessage } from '@domain-os/integrations'
+import type { GmailContextMessage, GmailContextAttachment } from '../preload/api'
+import { extractTextFromBuffer, isFormatSupported, resolveFormat } from './text-extractor'
 import { emitAutomationEvent } from './automation-events'
 import { triggerManualRun } from './automation-engine'
 
@@ -1559,6 +1562,163 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
     }
   })
 
+  // ── Attachment enrichment for gmail:fetch-for-context ──
+
+  const MAX_ATTACHMENT_BYTES = 5_000_000
+  const MAX_TEXT_PER_ATTACHMENT = 10_000
+  const MAX_ATTACHMENTS_PER_MESSAGE = 5
+  const MAX_TOTAL_TEXT_PER_MESSAGE = 20_000
+  const MAX_TOTAL_BYTES_PER_MESSAGE = 10_000_000
+  const MAX_ELIGIBLE_ATTACHMENTS_PER_FETCH = 25
+  const ATTACH_CONCURRENCY_LIMIT = 2
+
+  interface SkippedAttachment {
+    filename: string
+    reason: string
+  }
+
+  interface TaggedAttachment {
+    att: GmailAttachmentMeta
+    msgIndex: number
+    eligible: boolean
+    skipReason?: string
+  }
+
+  async function enrichWithAttachments(
+    client: GmailClient,
+    messages: GmailMessage[],
+  ): Promise<GmailContextMessage[]> {
+    // Simple concurrency limiter
+    let active = 0
+    const queue: Array<() => void> = []
+    function acquire(): Promise<void> {
+      if (active < ATTACH_CONCURRENCY_LIMIT) { active++; return Promise.resolve() }
+      return new Promise(resolve => queue.push(() => { active++; resolve() }))
+    }
+    function release(): void {
+      active--
+      if (queue.length > 0) queue.shift()!()
+    }
+
+    // ── Step 1: Deterministic pre-walk ──
+    const taggedByMsg: TaggedAttachment[][] = messages.map(() => [])
+    let threadAttemptCount = 0
+    const perMsgCounters: number[] = messages.map(() => 0)
+
+    for (let mi = 0; mi < messages.length; mi++) {
+      for (const att of messages[mi].attachments) {
+        if (threadAttemptCount >= MAX_ELIGIBLE_ATTACHMENTS_PER_FETCH) {
+          taggedByMsg[mi].push({ att, msgIndex: mi, eligible: false, skipReason: 'thread limit reached' })
+          continue
+        }
+        if (perMsgCounters[mi] >= MAX_ATTACHMENTS_PER_MESSAGE) {
+          taggedByMsg[mi].push({ att, msgIndex: mi, eligible: false, skipReason: 'limit reached' })
+          continue
+        }
+        if (!isFormatSupported(att.filename, att.mimeType)) {
+          taggedByMsg[mi].push({ att, msgIndex: mi, eligible: false, skipReason: 'unsupported' })
+          continue
+        }
+        // Quick inline size estimate
+        if (att.inlineData) {
+          const estimatedBytes = Math.floor(att.inlineData.length * 3 / 4)
+          if (estimatedBytes > MAX_ATTACHMENT_BYTES * 1.05) {
+            const sizeMB = (estimatedBytes / 1_000_000).toFixed(1)
+            taggedByMsg[mi].push({ att, msgIndex: mi, eligible: false, skipReason: `too large (~${sizeMB}MB)` })
+            continue
+          }
+        }
+        taggedByMsg[mi].push({ att, msgIndex: mi, eligible: true })
+        perMsgCounters[mi]++
+        threadAttemptCount++
+      }
+    }
+
+    // ── Step 2: Async extraction (concurrency-limited) ──
+    return Promise.all(messages.map(async (msg, mi) => {
+      const myTags = taggedByMsg[mi]
+      const extracted: GmailContextAttachment[] = []
+      const skipped: SkippedAttachment[] = []
+      let totalTextChars = 0
+      let totalDecodedBytes = 0
+
+      for (const tag of myTags) {
+        if (!tag.eligible) {
+          skipped.push({ filename: tag.att.filename, reason: tag.skipReason! })
+          continue
+        }
+
+        if (totalTextChars >= MAX_TOTAL_TEXT_PER_MESSAGE) {
+          skipped.push({ filename: tag.att.filename, reason: 'message text limit reached' })
+          continue
+        }
+        if (totalDecodedBytes >= MAX_TOTAL_BYTES_PER_MESSAGE) {
+          skipped.push({ filename: tag.att.filename, reason: 'message byte limit reached' })
+          continue
+        }
+
+        await acquire()
+        try {
+          const att = tag.att
+          const buf = att.inlineData
+            ? Buffer.from(att.inlineData, 'base64url')
+            : att.attachmentId
+              ? await client.getAttachmentData(msg.messageId, att.attachmentId)
+              : null
+
+          if (!buf) {
+            skipped.push({ filename: att.filename, reason: 'no data' })
+          } else if (buf.length > MAX_ATTACHMENT_BYTES) {
+            const sizeMB = (buf.length / 1_000_000).toFixed(1)
+            skipped.push({ filename: att.filename, reason: `too large (${sizeMB}MB)` })
+          } else if (totalDecodedBytes + buf.length > MAX_TOTAL_BYTES_PER_MESSAGE) {
+            skipped.push({ filename: att.filename, reason: 'message byte limit reached' })
+          } else {
+            totalDecodedBytes += buf.length
+            let text = await extractTextFromBuffer(att.filename, buf, att.mimeType)
+            // Low-signal guard: PDF-only (scanned without OCR → whitespace/artifacts)
+            const format = resolveFormat(att.filename, att.mimeType)
+            const nonWs = text.replace(/\s/g, '').length
+            if (format === 'pdf' && nonWs < 40) {
+              skipped.push({ filename: att.filename, reason: 'low text content (likely scanned)' })
+            } else {
+              const charBudget = Math.min(
+                MAX_TEXT_PER_ATTACHMENT,
+                MAX_TOTAL_TEXT_PER_MESSAGE - totalTextChars,
+              )
+              if (text.length > charBudget) {
+                text = text.slice(0, charBudget) + '\n[truncated]'
+              }
+              extracted.push({ filename: att.filename, mimeType: att.mimeType, text })
+              totalTextChars += text.length
+            }
+          }
+        } catch (err) {
+          console.warn('[gmail-attach]', {
+            filename: tag.att.filename, reason: 'extraction failed',
+            messageId: msg.messageId, threadId: msg.threadId,
+            error: err instanceof Error ? err.message : String(err),
+          })
+          skipped.push({ filename: tag.att.filename, reason: 'extraction failed' })
+        } finally {
+          release()
+        }
+      }
+
+      return {
+        messageId: msg.messageId,
+        threadId: msg.threadId,
+        from: msg.from,
+        to: msg.to,
+        subject: msg.subject,
+        date: msg.date,
+        body: msg.body,
+        attachments: extracted.length > 0 ? extracted : undefined,
+        skippedAttachments: skipped.length > 0 ? skipped : undefined,
+      }
+    }))
+  }
+
   ipcMain.handle('gmail:fetch-for-context', async (_event, payload: { url: string; subjectHint?: string }) => {
     try {
       const creds = await loadGmailCredentials()
@@ -1577,7 +1737,7 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
       // Strategy A: threadId → direct thread API
       if (parsed.threadId) {
         const messages = await client.getThread(parsed.threadId)
-        if (messages.length > 0) return { ok: true, value: messages }
+        if (messages.length > 0) return { ok: true, value: await enrichWithAttachments(client, messages) }
 
         // Strategy A2: opaque ID might be a message ID — try reading directly
         const singleMsg = await client.read(parsed.threadId)
@@ -1585,9 +1745,9 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           // If we got a message, try fetching its full thread
           if (singleMsg.threadId && singleMsg.threadId !== parsed.threadId) {
             const threadMsgs = await client.getThread(singleMsg.threadId)
-            if (threadMsgs.length > 0) return { ok: true, value: threadMsgs }
+            if (threadMsgs.length > 0) return { ok: true, value: await enrichWithAttachments(client, threadMsgs) }
           }
-          return { ok: true, value: [singleMsg] }
+          return { ok: true, value: await enrichWithAttachments(client, [singleMsg]) }
         }
       }
 
@@ -1604,10 +1764,10 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           // Try to get the full thread for richer context
           if (best.threadId) {
             const threadMsgs = await client.getThread(best.threadId)
-            if (threadMsgs.length > 0) return { ok: true, value: threadMsgs }
+            if (threadMsgs.length > 0) return { ok: true, value: await enrichWithAttachments(client, threadMsgs) }
           }
           const msg = await client.read(best.messageId)
-          return msg ? { ok: true, value: [msg] } : { ok: false, error: 'Could not read email' }
+          return msg ? { ok: true, value: await enrichWithAttachments(client, [msg]) } : { ok: false, error: 'Could not read email' }
         }
       }
 
@@ -2260,37 +2420,12 @@ Rules:
   ipcMain.handle('file:extract-text', async (_e: IpcMainInvokeEvent, filename: string, buffer: ArrayBuffer) => {
     try {
       const ext = filename.toLowerCase().split('.').pop() ?? ''
-      const buf = Buffer.from(buffer)
-
-      if (ext === 'pdf') {
-        const { getDocumentProxy, extractText } = await import('unpdf')
-        const pdf = await getDocumentProxy(new Uint8Array(buf))
-        const { text } = await extractText(pdf, { mergePages: true })
-        return { ok: true, value: text as string }
-      }
-
-      if (ext === 'xlsx' || ext === 'xls') {
-        const XLSX = await import('xlsx')
-        const workbook = XLSX.read(buf, { type: 'buffer' })
-        const sheets: string[] = []
-        for (const name of workbook.SheetNames) {
-          const csv = XLSX.utils.sheet_to_csv(workbook.Sheets[name])
-          sheets.push(`--- Sheet: ${name} ---\n${csv}`)
-        }
-        return { ok: true, value: sheets.join('\n\n') }
-      }
-
-      if (ext === 'docx') {
-        const mammoth = await import('mammoth')
-        const result = await mammoth.extractRawText({ buffer: buf })
-        return { ok: true, value: result.value }
-      }
-
       if (ext === 'doc') {
         return { ok: false, error: 'Legacy .doc format not supported — please convert to .docx' }
       }
-
-      return { ok: false, error: `Unsupported binary format: .${ext}` }
+      const buf = Buffer.from(buffer)
+      const text = await extractTextFromBuffer(filename, buf)
+      return { ok: true, value: text }
     } catch (e) {
       return { ok: false, error: (e as Error).message }
     }

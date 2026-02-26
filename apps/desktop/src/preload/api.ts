@@ -616,6 +616,17 @@ export interface Deadline {
 
 // ── Gmail context types (for drag-and-drop email attachment) ──
 
+export interface GmailContextAttachment {
+  filename: string
+  mimeType: string
+  text: string
+}
+
+export interface GmailSkippedAttachment {
+  filename: string
+  reason: string
+}
+
 export interface GmailContextMessage {
   messageId: string
   threadId: string
@@ -624,6 +635,8 @@ export interface GmailContextMessage {
   subject: string
   date: string
   body: string
+  attachments?: GmailContextAttachment[]
+  skippedAttachments?: GmailSkippedAttachment[]
 }
 
 // ── Multi-provider types ──

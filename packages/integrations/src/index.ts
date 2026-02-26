@@ -7,7 +7,8 @@
 
 export { GmailPoller } from './gmail/index.js'
 export { GmailClient } from './gmail/index.js'
-export { extractTextBody } from './gmail/index.js'
+export { extractTextBody, extractAttachmentMeta } from './gmail/index.js'
+export type { GmailAttachmentMeta } from './gmail/index.js'
 export type { GmailPollerConfig, GmailMessageMeta } from './gmail/index.js'
 export type { GmailClientConfig, GmailSearchResult, GmailMessage } from './gmail/index.js'
 

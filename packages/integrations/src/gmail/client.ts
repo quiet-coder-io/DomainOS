@@ -8,7 +8,8 @@
 
 import { google } from 'googleapis'
 import type { gmail_v1 } from 'googleapis'
-import { extractTextBody } from './body-parser.js'
+import { extractTextBody, extractAttachmentMeta } from './body-parser.js'
+import type { GmailAttachmentMeta } from './body-parser.js'
 
 export interface GmailClientConfig {
   clientId: string
@@ -34,6 +35,7 @@ export interface GmailMessage {
   date: string
   body: string
   labels: string[]
+  attachments: GmailAttachmentMeta[]
 }
 
 /** Strip control chars, zero-width chars, and collapse whitespace. */
@@ -241,6 +243,19 @@ export class GmailClient {
       date: iso,
       body,
       labels: msg.labelIds ?? [],
+      attachments: extractAttachmentMeta(msg.payload),
+    }
+  }
+
+  async getAttachmentData(messageId: string, attachmentId: string): Promise<Buffer | null> {
+    try {
+      const res = await this.gmail.users.messages.attachments.get({
+        userId: 'me', messageId, id: attachmentId,
+      })
+      if (!res.data.data) return null
+      return Buffer.from(res.data.data, 'base64url')
+    } catch {
+      return null
     }
   }
 }

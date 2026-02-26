@@ -341,10 +341,45 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
     if (!emailPreview) return
     const { messages } = emailPreview
 
-    // Format each message with structured headers
+    // Format each message with structured headers + attachment text
     const formatted = messages.map((m) => {
       const toStr = Array.isArray(m.to) ? m.to.join(', ') : m.to
-      return `From: ${m.from}\nTo: ${toStr}\nSubject: ${m.subject}\nDate: ${m.date}\n\n${m.body}`
+      let text = `From: ${m.from}\nTo: ${toStr}\nSubject: ${m.subject}\nDate: ${m.date}\n\n${m.body}`
+
+      // Attachment digest header
+      const nExtracted = m.attachments?.length ?? 0
+      const nSkipped = m.skippedAttachments?.length ?? 0
+      if (nExtracted > 0 || nSkipped > 0) {
+        const parts: string[] = []
+        if (nExtracted > 0) parts.push(`${nExtracted} extracted`)
+        if (nSkipped > 0) parts.push(`${nSkipped} skipped`)
+        text += `\n\nAttachments: ${parts.join(', ')}`
+      }
+
+      // Extracted attachment text with provenance
+      if (m.attachments?.length) {
+        for (const att of m.attachments) {
+          const truncNote = att.text.endsWith('[truncated]') ? ' (truncated)' : ''
+          const chars = att.text.length
+          text += `\n\n--- Attachment (extracted text): ${att.filename}${truncNote} [${chars} chars] ---\n${att.text}`
+        }
+      }
+
+      // Skipped attachments summary for LLM transparency (capped at 10)
+      if (m.skippedAttachments?.length) {
+        const MAX_SKIPPED_LINES = 10
+        const shown = m.skippedAttachments.slice(0, MAX_SKIPPED_LINES)
+        const remaining = m.skippedAttachments.length - shown.length
+        text += '\n\n--- Attachments skipped ---'
+        for (const s of shown) {
+          text += `\n- ${s.filename} (${s.reason})`
+        }
+        if (remaining > 0) {
+          text += `\n... +${remaining} more skipped`
+        }
+      }
+
+      return text
     }).join('\n\n---\n\n')
 
     // Truncate first, then compute size from final content
@@ -828,6 +863,12 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
             .join(' · ')
             .slice(0, 120)
           const msgCount = emailPreview.messages.length
+          const attCount = emailPreview.messages.reduce(
+            (n, m) => n + (m.attachments?.length ?? 0), 0,
+          )
+          const skippedCount = emailPreview.messages.reduce(
+            (n, m) => n + (m.skippedAttachments?.length ?? 0), 0,
+          )
 
           return (
             <div className="mx-0 mt-1 rounded border border-accent/30 bg-accent/5 px-3 py-2 text-xs animate-fade-in">
@@ -839,6 +880,8 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
                   </div>
                   <div className="mt-0.5 text-text-tertiary truncate">
                     {msgCount > 1 && <span className="font-medium">Will attach last {msgCount} messages · </span>}
+                    {attCount > 0 && <span className="font-medium text-green-600">{attCount} attachment{attCount !== 1 ? 's' : ''} extracted · </span>}
+                    {skippedCount > 0 && <span className="text-text-tertiary">{skippedCount} skipped · </span>}
                     {bodySnippet}{latest.body.length > 120 ? '...' : ''}
                   </div>
                 </div>
