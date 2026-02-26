@@ -1,7 +1,8 @@
 interface Props {
   role: 'user' | 'assistant'
   content: string
-  status?: 'cancelled'
+  status?: 'cancelled' | 'error'
+  metadata?: Record<string, unknown>
   attachments?: Array<{ filename: string; sizeBytes: number; sha256: string; truncated?: boolean }>
   onExtractKb?: () => void
 }
@@ -153,7 +154,7 @@ const ExtractIcon = () => (
   </svg>
 )
 
-export function MessageBubble({ role, content, status, attachments, onExtractKb }: Props): React.JSX.Element {
+export function MessageBubble({ role, content, status, metadata, attachments, onExtractKb }: Props): React.JSX.Element {
   const isUser = role === 'user'
 
   return (
@@ -186,6 +187,14 @@ export function MessageBubble({ role, content, status, attachments, onExtractKb 
         )}
         {status === 'cancelled' && (
           <span className="mt-1 inline-block text-[10px] text-text-tertiary italic">Stopped</span>
+        )}
+        {status === 'error' && (
+          <span
+            className="mt-1 inline-block rounded bg-danger/10 px-1.5 py-0.5 text-[10px] text-danger"
+            title={typeof metadata?.errorMessage === 'string' ? metadata.errorMessage : undefined}
+          >
+            Error
+          </span>
         )}
       </div>
       {/* Per-message "Update KB" button — hover-visible on assistant messages */}

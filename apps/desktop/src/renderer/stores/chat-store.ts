@@ -20,7 +20,9 @@ interface StoredRejectedProposal extends RejectedProposal {
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
-  status?: 'cancelled'
+  id?: string
+  status?: 'cancelled' | 'error'
+  metadata?: Record<string, unknown>
   stopBlocks?: Array<{ reason: string; actionNeeded: string }>
   gapFlags?: Array<{ category: string; description: string }>
   decisions?: Array<{ decisionId: string; decision: string }>
@@ -67,7 +69,7 @@ interface ChatState {
   extractionResult: ExtractionResult | null
 
   // Actions
-  switchDomain(domainId: string, domainName: string): void
+  switchDomain(domainId: string, domainName: string): Promise<void>
   sendMessage(
     displayContent: string,
     llmContent: string,
@@ -80,7 +82,7 @@ interface ChatState {
   dismissProposal(id: string): void
   editProposal(id: string, newContent: string): void
   dismissRejectedProposal(id: string): void
-  clearMessages(): void
+  clearMessages(): Promise<void>
   extractKbUpdates(domainId: string, content: string, messageIndex?: number): Promise<void>
   clearExtractionError(): void
   clearExtractionResult(): void
@@ -114,6 +116,23 @@ function toStoredRejected(
     sourceMessageIndex: messageIndex,
   }
 }
+
+// Module-level clear tokens — outside Zustand to avoid re-renders.
+// Each domain gets a token bumped on clear; in-flight persistOnce checks it.
+const clearTokenByDomain = new Map<string, string>()
+
+function getClearToken(domainId: string): string {
+  let t = clearTokenByDomain.get(domainId)
+  if (!t) { t = crypto.randomUUID(); clearTokenByDomain.set(domainId, t) }
+  return t
+}
+
+function bumpClearToken(domainId: string): void {
+  clearTokenByDomain.set(domainId, crypto.randomUUID())
+}
+
+// Per-domain message cache: tracks whether we've loaded from DB this session
+const loadedDomains = new Set<string>()
 
 let listenersRegistered = false
 
@@ -199,18 +218,59 @@ export const useChatStore = create<ChatState>((set, get) => {
     extractionError: null,
     extractionResult: null,
 
-    switchDomain(domainId, domainName) {
-      set((s) => ({
-        activeDomainId: domainId,
-        ...(s.messagesByDomain[domainId] ? {} : {
-          messagesByDomain: {
-            ...s.messagesByDomain,
-            [domainId]: [{ role: 'system' as const, content: domainName }],
-          },
-        }),
-        extractionError: null,
-        extractionResult: null,
-      }))
+    async switchDomain(domainId, domainName) {
+      const s = get()
+
+      // Already cached in memory → use it
+      if (s.messagesByDomain[domainId] || loadedDomains.has(domainId)) {
+        set({
+          activeDomainId: domainId,
+          extractionError: null,
+          extractionResult: null,
+        })
+        return
+      }
+
+      // Try loading from DB
+      loadedDomains.add(domainId)
+      try {
+        const result = await window.domainOS.chatHistory.loadHistory(domainId)
+        const systemMsg: ChatMessage = { role: 'system', content: domainName }
+
+        if (result.ok && result.value && result.value.length > 0) {
+          const restored: ChatMessage[] = [
+            systemMsg,
+            ...result.value.map((m) => ({
+              role: m.role as 'user' | 'assistant',
+              content: m.content,
+              id: m.id,
+              ...(m.status ? { status: m.status as 'cancelled' | 'error' } : {}),
+              ...(m.metadata && Object.keys(m.metadata).length > 0 ? { metadata: m.metadata } : {}),
+            })),
+          ]
+          set((s2) => ({
+            activeDomainId: domainId,
+            messagesByDomain: { ...s2.messagesByDomain, [domainId]: restored },
+            extractionError: null,
+            extractionResult: null,
+          }))
+        } else {
+          set((s2) => ({
+            activeDomainId: domainId,
+            messagesByDomain: { ...s2.messagesByDomain, [domainId]: [systemMsg] },
+            extractionError: null,
+            extractionResult: null,
+          }))
+        }
+      } catch {
+        // DB load failed — start with empty
+        set((s2) => ({
+          activeDomainId: domainId,
+          messagesByDomain: { ...s2.messagesByDomain, [domainId]: [{ role: 'system' as const, content: domainName }] },
+          extractionError: null,
+          extractionResult: null,
+        }))
+      }
     },
 
     cancelChat() {
@@ -226,10 +286,32 @@ export const useChatStore = create<ChatState>((set, get) => {
 
       const requestId = crypto.randomUUID()
 
+      // Renderer-generated IDs and timestamp for persistence
+      const userMsgId = crypto.randomUUID()
+      const assistantMsgId = crypto.randomUUID()
+      const createdAt = new Date().toISOString()
+      const runDomainId = domainId
+      const runClearToken = getClearToken(domainId)
+      let persisted = false
+
+      // Persist helper — runs at most once, checks clear token + domain
+      function persistOnce(msgs: Array<{ id: string; role: string; content: string; status?: string | null; metadata?: Record<string, unknown>; createdAt: string }>) {
+        if (persisted) return
+        if (getClearToken(runDomainId) !== runClearToken) return
+        if (get().activeDomainId !== runDomainId) {
+          // Still persist even if switched away — just don't block
+        }
+        persisted = true
+        window.domainOS.chatHistory.persistMessages(runDomainId, msgs).catch(() => {
+          // Non-fatal: persistence failed
+        })
+      }
+
       // Store display content + attachment metadata (never file contents)
       const userMessage: ChatMessage = {
         role: 'user',
         content: displayContent,
+        id: userMsgId,
         ...(attachments?.length ? { attachments } : {}),
       }
       const currentMessages = [...(state.messagesByDomain[domainId] ?? []), userMessage]
@@ -250,7 +332,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         // Build fresh IPC messages array — use llmContent for the last user message
         const ipcMessages = currentMessages
           .filter((m) => m.role !== 'system')
-          .map((m, _i, arr) => {
+          .map((m) => {
             // For the last message (just added), use llmContent instead of displayContent
             if (m === userMessage) {
               return { role: m.role as 'user' | 'assistant', content: llmContent }
@@ -269,26 +351,34 @@ export const useChatStore = create<ChatState>((set, get) => {
           const s = get()
           const partialContent = s.streamingContentByDomain[domainId] || result.value.content || ''
           const newMessages: ChatMessage[] = partialContent
-            ? [...currentMessages, { role: 'assistant' as const, content: partialContent, status: 'cancelled' as const }]
+            ? [...currentMessages, { role: 'assistant' as const, content: partialContent, id: assistantMsgId, status: 'cancelled' as const }]
             : currentMessages
           set((s) => ({
             messagesByDomain: { ...s.messagesByDomain, [domainId]: newMessages },
             streamingContentByDomain: { ...s.streamingContentByDomain, [domainId]: '' },
           }))
+          // Persist: user + cancelled assistant
+          if (partialContent) {
+            persistOnce([
+              { id: userMsgId, role: 'user', content: displayContent, createdAt },
+              { id: assistantMsgId, role: 'assistant', content: partialContent, status: 'cancelled', createdAt },
+            ])
+          } else {
+            persistOnce([{ id: userMsgId, role: 'user', content: displayContent, createdAt }])
+          }
           return
         }
 
         if (result.ok && result.value) {
-          const newMessages = [
-            ...currentMessages,
-            {
-              role: 'assistant' as const,
-              content: result.value.content,
-              stopBlocks: result.value.stopBlocks,
-              gapFlags: result.value.gapFlags,
-              decisions: result.value.decisions,
-            },
-          ]
+          const assistantMsg: ChatMessage = {
+            role: 'assistant' as const,
+            content: result.value.content,
+            id: assistantMsgId,
+            stopBlocks: result.value.stopBlocks,
+            gapFlags: result.value.gapFlags,
+            decisions: result.value.decisions,
+          }
+          const newMessages = [...currentMessages, assistantMsg]
           const messageIndex = newMessages.length - 1
           const incomingProposals = result.value.proposals.map((p) => toStoredProposal(p, 'chat-send', messageIndex))
           const incomingRejected = (result.value.rejectedProposals ?? []).map((r) => toStoredRejected(r, 'chat-send', messageIndex))
@@ -303,6 +393,15 @@ export const useChatStore = create<ChatState>((set, get) => {
               rejectedProposalsByDomain: { ...s.rejectedProposalsByDomain, [domainId]: newRejected },
             }
           })
+          // Persist: user + success assistant with metadata
+          const meta: Record<string, unknown> = {}
+          if (result.value.stopBlocks?.length) meta.stopBlocks = result.value.stopBlocks
+          if (result.value.gapFlags?.length) meta.gapFlags = result.value.gapFlags
+          if (result.value.decisions?.length) meta.decisions = result.value.decisions
+          persistOnce([
+            { id: userMsgId, role: 'user', content: displayContent, createdAt },
+            { id: assistantMsgId, role: 'assistant', content: result.value.content, metadata: meta, createdAt },
+          ])
         } else {
           let errorContent = result.error ?? 'Unknown error occurred'
           // Try to extract human-readable message from API error JSON
@@ -316,18 +415,27 @@ export const useChatStore = create<ChatState>((set, get) => {
           }
           const newMessages = [
             ...currentMessages,
-            { role: 'assistant' as const, content: `Error: ${errorContent}` },
+            { role: 'assistant' as const, content: `Error: ${errorContent}`, id: assistantMsgId, status: 'error' as const },
           ]
           set((s) => ({
             messagesByDomain: { ...s.messagesByDomain, [domainId]: newMessages },
             streamingContentByDomain: { ...s.streamingContentByDomain, [domainId]: '' },
           }))
+          // Persist: user + error assistant
+          persistOnce([
+            { id: userMsgId, role: 'user', content: displayContent, createdAt },
+            { id: assistantMsgId, role: 'assistant', content: `Error: ${errorContent}`, status: 'error', metadata: { errorMessage: result.error ?? 'Unknown error occurred' }, createdAt },
+          ])
         }
-      } catch {
-        // Unexpected error — clean up streaming state
+      } catch (err) {
+        // Unexpected error — clean up streaming state + persist pair
         set((s) => ({
           streamingContentByDomain: { ...s.streamingContentByDomain, [domainId]: '' },
         }))
+        persistOnce([
+          { id: userMsgId, role: 'user', content: displayContent, createdAt },
+          { id: assistantMsgId, role: 'assistant', content: `Error: ${String(err)}`, status: 'error', metadata: { errorMessage: String(err) }, createdAt },
+        ])
       }
       // Note: isStreaming/isSending/activeToolCall/activeRequestId are NOT touched here.
       // onStreamDone handles those — it's the authoritative lifecycle marker.
@@ -379,9 +487,24 @@ export const useChatStore = create<ChatState>((set, get) => {
       }))
     },
 
-    clearMessages() {
+    async clearMessages() {
       const domainId = get().activeDomainId
       if (!domainId) return
+
+      // Bump clear token first — prevents any in-flight persistOnce from writing
+      bumpClearToken(domainId)
+
+      // Cancel any active stream (best-effort)
+      if (get().isStreamingByDomain[domainId]) {
+        window.domainOS.chat.sendCancel()
+      }
+
+      // Clear DB (awaited to prevent ghost reload race)
+      await window.domainOS.chatHistory.clearHistory(domainId).catch(() => {})
+
+      // Drop in-memory cache so next switchDomain reloads from DB truth
+      loadedDomains.delete(domainId)
+
       set((s) => ({
         messagesByDomain: { ...s.messagesByDomain, [domainId]: [] },
         streamingContentByDomain: { ...s.streamingContentByDomain, [domainId]: '' },

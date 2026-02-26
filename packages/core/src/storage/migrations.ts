@@ -571,6 +571,21 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    version: 17,
+    description: 'Chat message persistence — status, metadata, ordering index',
+    up(db) {
+      const cols = db.pragma('table_info(chat_messages)') as Array<{ name: string }>
+      const colNames = new Set(cols.map(c => c.name))
+      if (!colNames.has('status')) {
+        runSQL(db, `ALTER TABLE chat_messages ADD COLUMN status TEXT`)
+      }
+      if (!colNames.has('metadata')) {
+        runSQL(db, `ALTER TABLE chat_messages ADD COLUMN metadata TEXT`)
+      }
+      runSQL(db, `CREATE INDEX IF NOT EXISTS idx_chat_messages_domain_order ON chat_messages(domain_id, created_at, id)`)
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

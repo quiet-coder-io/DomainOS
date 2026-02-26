@@ -1,5 +1,5 @@
-import { ipcMain, dialog, safeStorage, app } from 'electron'
-import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
+import { ipcMain, dialog, safeStorage, app, BrowserWindow } from 'electron'
+import type { IpcMainInvokeEvent } from 'electron'
 import type Database from 'better-sqlite3'
 import { writeFile, readFile, unlink, realpath, stat, copyFile } from 'node:fs/promises'
 import { join, resolve, sep, extname } from 'node:path'
@@ -54,6 +54,7 @@ import {
   SkillRepository,
   skillToMarkdown,
   markdownToSkillInput,
+  ChatMessageRepository,
 } from '@domain-os/core'
 import type {
   CreateDomainInput,
@@ -96,6 +97,7 @@ interface ProviderConfigFile {
   defaultProvider: ProviderName
   defaultModel: string
   ollamaBaseUrl: string
+  windowPinned?: boolean
 }
 
 const DEFAULT_PROVIDER_CONFIG: ProviderConfigFile = {
@@ -103,6 +105,7 @@ const DEFAULT_PROVIDER_CONFIG: ProviderConfigFile = {
   defaultProvider: 'anthropic',
   defaultModel: 'claude-sonnet-4-20250514',
   ollamaBaseUrl: 'http://localhost:11434',
+  windowPinned: false,
 }
 
 // ── Sender-scoped chat abort controllers ──
@@ -136,6 +139,7 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
   const advisoryRepo = new AdvisoryRepository(db)
   const tagRepo = new DomainTagRepository(db)
   const skillRepo = new SkillRepository(db)
+  const chatMessageRepo = new ChatMessageRepository(db)
 
   // Seed default shared protocols (STOP + Gap Detection) — idempotent
   seedDefaultProtocols(sharedProtocolRepo)
@@ -2099,6 +2103,63 @@ Rules:
       return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
     } catch (e) {
       return { ok: false, error: (e as Error).message }
+    }
+  })
+
+  // --- Chat History Persistence ---
+
+  ipcMain.handle('chat:load-history', (_event, domainId: string, limit?: number) => {
+    return chatMessageRepo.getByDomain(domainId, limit)
+  })
+
+  ipcMain.handle('chat:persist-messages', (_event, domainId: string, messages: Array<{
+    id: string; role: string; content: string; status?: string | null
+    metadata?: Record<string, unknown>; createdAt: string
+  }>) => {
+    return chatMessageRepo.appendMessages(domainId, messages)
+  })
+
+  ipcMain.handle('chat:clear-history', (_event, domainId: string) => {
+    return chatMessageRepo.clearByDomain(domainId)
+  })
+
+  // --- Window Pin ---
+
+  ipcMain.handle('appWindow:get-pinned', async () => {
+    try {
+      const config = await loadProviderConfig()
+      return { ok: true, value: config.windowPinned ?? false }
+    } catch {
+      return { ok: true, value: false }
+    }
+  })
+
+  ipcMain.handle('appWindow:set-pinned', async (event, pinned: boolean) => {
+    try {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      if (!win) return { ok: false, error: 'No window found' }
+
+      if (process.platform === 'darwin') {
+        win.setAlwaysOnTop(pinned, 'floating')
+      } else {
+        win.setAlwaysOnTop(pinned)
+      }
+
+      // Save to config
+      const config = await loadProviderConfig()
+      await saveProviderConfig({ ...config, windowPinned: pinned })
+
+      // Broadcast to all renderers
+      const allWindows = BrowserWindow.getAllWindows()
+      for (const w of allWindows) {
+        if (!w.isDestroyed()) {
+          w.webContents.send('appWindow:pinned-changed', { pinned, windowId: win.id })
+        }
+      }
+
+      return { ok: true, value: undefined }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
 

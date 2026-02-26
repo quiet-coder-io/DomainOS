@@ -262,6 +262,21 @@ export interface DomainOSAPI {
     extractText(filename: string, buffer: ArrayBuffer): Promise<IPCResult<string>>
   }
 
+  chatHistory: {
+    loadHistory(domainId: string, limit?: number): Promise<IPCResult<PersistedChatMessage[]>>
+    persistMessages(domainId: string, messages: Array<{
+      id: string; role: string; content: string; status?: string | null
+      metadata?: Record<string, unknown>; createdAt: string
+    }>): Promise<IPCResult<{ inserted: number; skipped: number }>>
+    clearHistory(domainId: string): Promise<IPCResult<{ deleted: number }>>
+  }
+
+  appWindow: {
+    getPinned(): Promise<IPCResult<boolean>>
+    setPinned(pinned: boolean): Promise<IPCResult<void>>
+    onPinnedChanged(callback: (data: { pinned: boolean; windowId: number }) => void): () => void
+  }
+
   settings: {
     getApiKey(): Promise<IPCResult<string>>
     setApiKey(key: string): Promise<IPCResult<void>>
@@ -745,4 +760,16 @@ export interface Skill {
   sortOrder: number
   createdAt: string
   updatedAt: string
+}
+
+// ── Chat History Persistence types ──
+
+export interface PersistedChatMessage {
+  id: string
+  domainId: string
+  role: 'user' | 'assistant'
+  content: string
+  status: string | null
+  metadata: Record<string, unknown>
+  createdAt: string
 }

@@ -57,6 +57,19 @@ app.whenReady().then(() => {
 
   registerIPCHandlers(db, mainWindow)
 
+  // Restore window pin state
+  loadProviderConfig().then((config) => {
+    if (config.windowPinned && mainWindow && !mainWindow.isDestroyed()) {
+      if (process.platform === 'darwin') {
+        mainWindow.setAlwaysOnTop(true, 'floating')
+      } else {
+        mainWindow.setAlwaysOnTop(true)
+      }
+    }
+  }).catch(() => {
+    // Non-fatal: pin restore failed
+  })
+
   startIntakeServer(db, (item) => {
     mainWindow?.webContents.send('intake:new-item', item.id)
   })
@@ -77,7 +90,7 @@ app.whenReady().then(() => {
     }
   }
 
-  async function loadProviderConfig(): Promise<{ defaultProvider: ProviderName; defaultModel: string; ollamaBaseUrl: string }> {
+  async function loadProviderConfig(): Promise<{ defaultProvider: ProviderName; defaultModel: string; ollamaBaseUrl: string; windowPinned?: boolean }> {
     try {
       const raw = await readFile(resolve(userDataPath, 'provider-config.json'), 'utf-8')
       const parsed = JSON.parse(raw)
@@ -85,9 +98,10 @@ app.whenReady().then(() => {
         defaultProvider: parsed.defaultProvider ?? 'anthropic',
         defaultModel: parsed.defaultModel ?? 'claude-sonnet-4-20250514',
         ollamaBaseUrl: parsed.ollamaBaseUrl ?? 'http://localhost:11434',
+        windowPinned: parsed.windowPinned ?? false,
       }
     } catch {
-      return { defaultProvider: 'anthropic', defaultModel: 'claude-sonnet-4-20250514', ollamaBaseUrl: 'http://localhost:11434' }
+      return { defaultProvider: 'anthropic', defaultModel: 'claude-sonnet-4-20250514', ollamaBaseUrl: 'http://localhost:11434', windowPinned: false }
     }
   }
 

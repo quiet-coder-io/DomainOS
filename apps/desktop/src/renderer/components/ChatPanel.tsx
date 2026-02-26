@@ -525,6 +525,7 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
                 role={msg.role}
                 content={msg.content}
                 status={msg.status}
+                metadata={msg.metadata}
                 attachments={msg.attachments}
                 onExtractKb={msg.role === 'assistant' ? () => handleExtractSingle(i) : undefined}
               />

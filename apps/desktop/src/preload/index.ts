@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { DomainOSAPI, KBUpdateProposal, ToolUseEvent, ProviderConfig, DependencyType, DeadlineStatus, DeadlineSource, AdvisoryType, AdvisoryStatus, SaveDraftBlockInput, AutomationNotification, DomainTag, SkillOutputFormat } from './api'
+import type { DomainOSAPI, KBUpdateProposal, ToolUseEvent, ProviderConfig, DependencyType, DeadlineStatus, DeadlineSource, AdvisoryType, AdvisoryStatus, SaveDraftBlockInput, AutomationNotification, DomainTag, SkillOutputFormat, PersistedChatMessage } from './api'
 
 const api: DomainOSAPI = {
   platform: process.platform,
@@ -251,6 +251,27 @@ const api: DomainOSAPI = {
   file: {
     extractText: (filename: string, buffer: ArrayBuffer) =>
       ipcRenderer.invoke('file:extract-text', filename, buffer),
+  },
+
+  chatHistory: {
+    loadHistory: (domainId: string, limit?: number) =>
+      ipcRenderer.invoke('chat:load-history', domainId, limit),
+    persistMessages: (domainId: string, messages: Array<{
+      id: string; role: string; content: string; status?: string | null
+      metadata?: Record<string, unknown>; createdAt: string
+    }>) => ipcRenderer.invoke('chat:persist-messages', domainId, messages),
+    clearHistory: (domainId: string) =>
+      ipcRenderer.invoke('chat:clear-history', domainId),
+  },
+
+  appWindow: {
+    getPinned: () => ipcRenderer.invoke('appWindow:get-pinned'),
+    setPinned: (pinned: boolean) => ipcRenderer.invoke('appWindow:set-pinned', pinned),
+    onPinnedChanged(callback: (data: { pinned: boolean; windowId: number }) => void) {
+      const handler = (_event: unknown, data: { pinned: boolean; windowId: number }) => callback(data)
+      ipcRenderer.on('appWindow:pinned-changed', handler as (...args: unknown[]) => void)
+      return () => { ipcRenderer.removeListener('appWindow:pinned-changed', handler as (...args: unknown[]) => void) }
+    },
   },
 
   settings: {
