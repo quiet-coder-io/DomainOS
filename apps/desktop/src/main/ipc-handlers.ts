@@ -80,6 +80,8 @@ import type {
   UpdateAutomationInput,
   MissionProgressEvent,
   MissionRunnerDeps,
+  CreateSkillInput,
+  UpdateSkillInput,
   Result,
 } from '@domain-os/core'
 import { getIntakeToken } from './intake-token'
@@ -2301,18 +2303,12 @@ Rules:
     return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
   })
 
-  ipcMain.handle('skill:create', async (_e: IpcMainInvokeEvent, input: {
-    name: string; description?: string; content: string; outputFormat?: 'freeform' | 'structured'
-    outputSchema?: string | null; toolHints?: string[]; isEnabled?: boolean; sortOrder?: number
-  }) => {
+  ipcMain.handle('skill:create', async (_e: IpcMainInvokeEvent, input: CreateSkillInput) => {
     const result = skillRepo.create(input)
     return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
   })
 
-  ipcMain.handle('skill:update', async (_e: IpcMainInvokeEvent, id: string, input: {
-    name?: string; description?: string; content?: string; outputFormat?: 'freeform' | 'structured'
-    outputSchema?: string | null; toolHints?: string[]; isEnabled?: boolean; sortOrder?: number
-  }) => {
+  ipcMain.handle('skill:update', async (_e: IpcMainInvokeEvent, id: string, input: UpdateSkillInput) => {
     const result = skillRepo.update(id, input)
     return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
   })
