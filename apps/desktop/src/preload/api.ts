@@ -307,6 +307,7 @@ export interface DomainOSAPI {
     gateDecide(runId: string, gateId: string, approved: boolean): Promise<IPCResult<MissionRunData>>
     runHistory(domainId: string, limit?: number): Promise<IPCResult<MissionRunSummaryData[]>>
     activeRun(): Promise<IPCResult<MissionRunDetailData | null>>
+    latestRun(domainId: string): Promise<IPCResult<MissionRunDetailData | null>>
     onRunProgress(callback: (event: MissionProgressEventData) => void): void
     offRunProgress(): void
   }

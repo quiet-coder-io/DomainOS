@@ -542,6 +542,23 @@ export class MissionRunRepository {
     }
   }
 
+  getLatestRunForDomain(domainId: string): Result<MissionRunDetail | null, DomainOSError> {
+    try {
+      const row = this.db
+        .prepare(`
+          SELECT id FROM mission_runs
+          WHERE domain_id = ? AND status IN ('success','failed','cancelled')
+          ORDER BY COALESCE(ended_at, updated_at, created_at) DESC
+          LIMIT 1
+        `)
+        .get(domainId) as { id: string } | undefined
+      if (!row) return Ok(null)
+      return this.getRunDetail(row.id)
+    } catch (e) {
+      return Err(DomainOSError.db((e as Error).message))
+    }
+  }
+
   getActions(runId: string): Result<MissionRunAction[], DomainOSError> {
     try {
       const rows = this.db

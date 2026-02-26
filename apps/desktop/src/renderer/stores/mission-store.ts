@@ -8,16 +8,25 @@ import type {
   MissionProgressEventData,
 } from '../../preload/api'
 
+type PendingGate = { runId: string; gateId: string; message: string }
+
 interface MissionState {
   allMissions: MissionSummary[]
   missions: MissionSummary[]
   missionsLoading: boolean
-  activeRun: MissionRunDetailData | null
-  activeRunId: string | null
+
+  // Per-domain run state
+  activeRunByDomain: Record<string, MissionRunDetailData | null>
+  streamingTextByDomain: Record<string, string>
+  runErrorByDomain: Record<string, string | null>
+  pendingGateByDomain: Record<string, PendingGate | null>
+  activeRequestIdByDomain: Record<string, string | null>
+
+  // Global run tracking (only one run at a time)
   running: boolean
-  streamingText: string
-  runError: string | null
-  pendingGate: { runId: string; gateId: string; message: string } | null
+  runningDomainId: string | null
+  runningRunId: string | null
+
   runHistory: MissionRunSummaryData[]
   historyLoading: boolean
 
@@ -27,24 +36,45 @@ interface MissionState {
   disableForDomain(missionId: string, domainId: string): Promise<void>
   startRun(missionId: string, domainId: string, inputs: Record<string, unknown>): Promise<void>
   cancelRun(): void
-  decideGate(approved: boolean): Promise<void>
-  fetchRunStatus(runId: string): Promise<void>
+  decideGate(approved: boolean, domainId: string): Promise<void>
+  fetchRunStatus(runId: string, domainId: string): Promise<void>
   fetchHistory(domainId: string): Promise<void>
+  switchDomain(domainId: string): Promise<void>
   checkActiveRun(): Promise<void>
-  clearRun(): void
+  clearRun(domainId: string): void
   reset(): void
+}
+
+// Module-level tracking (outside Zustand, mirrors chat pattern)
+const loadedDomains = new Set<string>()
+const clearedDomains = new Set<string>()
+const switchTokenByDomain = new Map<string, number>()
+
+function getSwitchToken(domainId: string): number {
+  return switchTokenByDomain.get(domainId) ?? 0
+}
+
+function incrementSwitchToken(domainId: string): number {
+  const next = getSwitchToken(domainId) + 1
+  switchTokenByDomain.set(domainId, next)
+  return next
 }
 
 export const useMissionStore = create<MissionState>((set, get) => ({
   allMissions: [],
   missions: [],
   missionsLoading: false,
-  activeRun: null,
-  activeRunId: null,
+
+  activeRunByDomain: {},
+  streamingTextByDomain: {},
+  runErrorByDomain: {},
+  pendingGateByDomain: {},
+  activeRequestIdByDomain: {},
+
   running: false,
-  streamingText: '',
-  runError: null,
-  pendingGate: null,
+  runningDomainId: null,
+  runningRunId: null,
+
   runHistory: [],
   historyLoading: false,
 
@@ -63,7 +93,6 @@ export const useMissionStore = create<MissionState>((set, get) => ({
     try {
       const result = await window.domainOS.mission.enableForDomain(missionId, domainId)
       if (result.ok) {
-        // Refresh both lists
         await Promise.all([get().fetchAllMissions(), get().fetchMissions(domainId)])
       }
     } catch (err) {
@@ -104,36 +133,54 @@ export const useMissionStore = create<MissionState>((set, get) => ({
 
     const requestId = crypto.randomUUID()
 
-    set({
+    // Clear domain slot and set running state
+    clearedDomains.delete(domainId)
+    set((s) => ({
       running: true,
-      runError: null,
-      streamingText: '',
-      pendingGate: null,
-      activeRunId: null,
-      activeRun: null,
-    })
+      runningDomainId: domainId,
+      runningRunId: null,
+      activeRunByDomain: { ...s.activeRunByDomain, [domainId]: null },
+      streamingTextByDomain: { ...s.streamingTextByDomain, [domainId]: '' },
+      runErrorByDomain: { ...s.runErrorByDomain, [domainId]: null },
+      pendingGateByDomain: { ...s.pendingGateByDomain, [domainId]: null },
+      activeRequestIdByDomain: { ...s.activeRequestIdByDomain, [domainId]: requestId },
+    }))
 
     // Subscribe to progress BEFORE IPC call to avoid first-chunk race
     window.domainOS.mission.onRunProgress((event: MissionProgressEventData) => {
       const state = get()
-      // Filter by activeRunId or requestId to avoid cross-run bleed
-      if (state.activeRunId && event.runId !== state.activeRunId) return
+      // Filter: mute if domain was cleared or requestId doesn't match
+      const currentRequestId = state.activeRequestIdByDomain[domainId]
+      if (!currentRequestId || currentRequestId !== requestId) return
 
       if (event.type === 'llm_chunk' && event.chunk) {
-        set((s) => ({ streamingText: s.streamingText + event.chunk }))
-      } else if (event.type === 'gate_triggered' && event.gate) {
-        set({
-          pendingGate: {
-            runId: event.runId,
-            gateId: event.gate.gateId,
-            message: event.gate.message,
+        set((s) => ({
+          streamingTextByDomain: {
+            ...s.streamingTextByDomain,
+            [domainId]: (s.streamingTextByDomain[domainId] ?? '') + event.chunk,
           },
-        })
+        }))
+      } else if (event.type === 'gate_triggered' && event.gate) {
+        const gate = event.gate
+        set((s) => ({
+          pendingGateByDomain: {
+            ...s.pendingGateByDomain,
+            [domainId]: {
+              runId: event.runId,
+              gateId: gate.gateId,
+              message: gate.message,
+            },
+          },
+        }))
       } else if (event.type === 'run_complete') {
-        // Fetch final run detail
-        get().fetchRunStatus(event.runId)
+        get().fetchRunStatus(event.runId, domainId)
       } else if (event.type === 'run_failed') {
-        set({ runError: event.error ?? 'Run failed' })
+        set((s) => ({
+          runErrorByDomain: {
+            ...s.runErrorByDomain,
+            [domainId]: event.error ?? 'Run failed',
+          },
+        }))
       }
     })
 
@@ -142,43 +189,60 @@ export const useMissionStore = create<MissionState>((set, get) => ({
 
       if (result.ok && result.value) {
         const runData = result.value
-        set({ activeRunId: runData.id })
-
-        // Fetch full detail
-        await get().fetchRunStatus(runData.id)
+        set({ runningRunId: runData.id })
+        await get().fetchRunStatus(runData.id, domainId)
       } else if (result.error === 'CANCELLED') {
         // Cancellation is not an error
       } else {
-        set({ runError: result.error ?? 'Run failed' })
+        set((s) => ({
+          runErrorByDomain: {
+            ...s.runErrorByDomain,
+            [domainId]: result.error ?? 'Run failed',
+          },
+        }))
       }
     } catch (err) {
       console.error('[missions] Run IPC error:', err)
-      set({ runError: err instanceof Error ? err.message : String(err) })
+      set((s) => ({
+        runErrorByDomain: {
+          ...s.runErrorByDomain,
+          [domainId]: err instanceof Error ? err.message : String(err),
+        },
+      }))
     } finally {
       window.domainOS.mission.offRunProgress()
-      set({ running: false })
+      set({ running: false, runningDomainId: null, runningRunId: null })
     }
   },
 
   cancelRun() {
-    const { activeRunId } = get()
-    if (activeRunId) {
-      window.domainOS.mission.runCancel(activeRunId)
+    const { runningRunId, runningDomainId, activeRunByDomain } = get()
+    const runId = runningRunId ?? (runningDomainId ? activeRunByDomain[runningDomainId]?.run.id : null)
+    if (runId) {
+      window.domainOS.mission.runCancel(runId)
     }
   },
 
-  async decideGate(approved: boolean) {
-    const { pendingGate } = get()
+  async decideGate(approved: boolean, domainId: string) {
+    const { pendingGateByDomain, runningDomainId } = get()
+    const pendingGate = pendingGateByDomain[domainId]
     if (!pendingGate) return
 
-    set({ pendingGate: null })
+    set((s) => ({
+      pendingGateByDomain: { ...s.pendingGateByDomain, [domainId]: null },
+    }))
 
     // Re-subscribe to progress for action execution
     window.domainOS.mission.onRunProgress((event: MissionProgressEventData) => {
       if (event.type === 'run_complete') {
-        get().fetchRunStatus(event.runId)
+        get().fetchRunStatus(event.runId, domainId)
       } else if (event.type === 'run_failed') {
-        set({ runError: event.error ?? 'Run failed' })
+        set((s) => ({
+          runErrorByDomain: {
+            ...s.runErrorByDomain,
+            [domainId]: event.error ?? 'Run failed',
+          },
+        }))
       }
     })
 
@@ -190,23 +254,39 @@ export const useMissionStore = create<MissionState>((set, get) => ({
       )
 
       if (result.ok && result.value) {
-        await get().fetchRunStatus(result.value.id)
+        await get().fetchRunStatus(result.value.id, domainId)
       } else {
-        set({ runError: result.error ?? 'Gate decision failed' })
+        set((s) => ({
+          runErrorByDomain: {
+            ...s.runErrorByDomain,
+            [domainId]: result.error ?? 'Gate decision failed',
+          },
+        }))
       }
     } catch (err) {
       console.error('[missions] Gate decide IPC error:', err)
-      set({ runError: err instanceof Error ? err.message : String(err) })
+      set((s) => ({
+        runErrorByDomain: {
+          ...s.runErrorByDomain,
+          [domainId]: err instanceof Error ? err.message : String(err),
+        },
+      }))
     } finally {
       window.domainOS.mission.offRunProgress()
     }
   },
 
-  async fetchRunStatus(runId: string) {
+  async fetchRunStatus(runId: string, domainId: string) {
     try {
       const result = await window.domainOS.mission.runStatus(runId)
       if (result.ok && result.value) {
-        set({ activeRun: result.value, activeRunId: runId })
+        const detail = result.value
+        const isTerminal = detail.run.status === 'success' || detail.run.status === 'failed' || detail.run.status === 'cancelled'
+        set((s) => ({
+          activeRunByDomain: { ...s.activeRunByDomain, [domainId]: detail },
+          // Clear streaming text when terminal detail arrives — output cards become canonical display
+          ...(isTerminal ? { streamingTextByDomain: { ...s.streamingTextByDomain, [domainId]: '' } } : {}),
+        }))
       }
     } catch (err) {
       console.error('[missions] Run status IPC error:', err)
@@ -228,6 +308,66 @@ export const useMissionStore = create<MissionState>((set, get) => ({
     }
   },
 
+  async switchDomain(domainId: string) {
+    // Memory cache hit — already loaded, state intact
+    if (loadedDomains.has(domainId)) return
+
+    // Respect user's clear — don't reload from DB
+    if (clearedDomains.has(domainId)) {
+      loadedDomains.add(domainId)
+      return
+    }
+
+    loadedDomains.add(domainId)
+    const token = incrementSwitchToken(domainId)
+
+    const { running } = get()
+
+    try {
+      // Check for an active (non-terminal) run first
+      const activeResult = await window.domainOS.mission.activeRun()
+      if (getSwitchToken(domainId) !== token) return // stale
+
+      if (activeResult.ok && activeResult.value) {
+        const detail = activeResult.value
+        if (detail.run.domainId === domainId) {
+          set((s) => ({
+            activeRunByDomain: { ...s.activeRunByDomain, [domainId]: detail },
+          }))
+          // Restore gate if gated
+          if (detail.run.status === 'gated') {
+            const pending = detail.gates.find((g) => g.status === 'pending')
+            if (pending) {
+              set((s) => ({
+                pendingGateByDomain: {
+                  ...s.pendingGateByDomain,
+                  [domainId]: {
+                    runId: detail.run.id,
+                    gateId: pending.gateId,
+                    message: pending.message,
+                  },
+                },
+              }))
+            }
+          }
+          return
+        }
+      }
+
+      // No active run for this domain — load latest completed run
+      const latestResult = await window.domainOS.mission.latestRun(domainId)
+      if (getSwitchToken(domainId) !== token) return // stale
+
+      if (latestResult.ok && latestResult.value) {
+        set((s) => ({
+          activeRunByDomain: { ...s.activeRunByDomain, [domainId]: latestResult.value! },
+        }))
+      }
+    } catch (err) {
+      console.error('[missions] switchDomain failed:', err)
+    }
+  },
+
   async checkActiveRun() {
     const { running } = get()
     if (running) return // startRun() in progress, don't interfere
@@ -238,19 +378,27 @@ export const useMissionStore = create<MissionState>((set, get) => ({
 
       const detail = result.value
       const run = detail.run
+      const domainId = run.domainId
 
-      set({ activeRun: detail, activeRunId: run.id })
+      loadedDomains.add(domainId)
+
+      set((s) => ({
+        activeRunByDomain: { ...s.activeRunByDomain, [domainId]: detail },
+      }))
 
       if (run.status === 'gated') {
         const pending = detail.gates.find((g) => g.status === 'pending')
         if (pending) {
-          set({
-            pendingGate: {
-              runId: run.id,
-              gateId: pending.gateId,
-              message: pending.message,
+          set((s) => ({
+            pendingGateByDomain: {
+              ...s.pendingGateByDomain,
+              [domainId]: {
+                runId: run.id,
+                gateId: pending.gateId,
+                message: pending.message,
+              },
             },
-          })
+          }))
         }
       }
     } catch (err) {
@@ -258,27 +406,40 @@ export const useMissionStore = create<MissionState>((set, get) => ({
     }
   },
 
-  clearRun() {
-    window.domainOS.mission.offRunProgress()
-    set({
-      activeRun: null,
-      activeRunId: null,
-      running: false,
-      streamingText: '',
-      runError: null,
-      pendingGate: null,
-    })
+  clearRun(domainId: string) {
+    const { runningDomainId } = get()
+
+    // Only tear down the progress listener if this domain owns the in-flight run
+    if (runningDomainId === domainId) {
+      window.domainOS.mission.offRunProgress()
+    }
+
+    clearedDomains.add(domainId)
+    loadedDomains.delete(domainId)
+
+    set((s) => ({
+      activeRunByDomain: { ...s.activeRunByDomain, [domainId]: null },
+      streamingTextByDomain: { ...s.streamingTextByDomain, [domainId]: '' },
+      runErrorByDomain: { ...s.runErrorByDomain, [domainId]: null },
+      pendingGateByDomain: { ...s.pendingGateByDomain, [domainId]: null },
+      activeRequestIdByDomain: { ...s.activeRequestIdByDomain, [domainId]: null },
+    }))
   },
 
   reset() {
     window.domainOS.mission.offRunProgress()
+    loadedDomains.clear()
+    clearedDomains.clear()
+    switchTokenByDomain.clear()
     set({
-      activeRun: null,
-      activeRunId: null,
+      activeRunByDomain: {},
+      streamingTextByDomain: {},
+      runErrorByDomain: {},
+      pendingGateByDomain: {},
+      activeRequestIdByDomain: {},
       running: false,
-      streamingText: '',
-      runError: null,
-      pendingGate: null,
+      runningDomainId: null,
+      runningRunId: null,
     })
   },
 }))

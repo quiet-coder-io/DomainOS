@@ -184,16 +184,13 @@ export function MissionControlPage({ onViewChange }: { onViewChange: (view: Acti
   const enableForDomain = useMissionStore((s) => s.enableForDomain)
   const disableForDomain = useMissionStore((s) => s.disableForDomain)
   const running = useMissionStore((s) => s.running)
-  const streamingText = useMissionStore((s) => s.streamingText)
-  const runError = useMissionStore((s) => s.runError)
-  const pendingGate = useMissionStore((s) => s.pendingGate)
-  const activeRun = useMissionStore((s) => s.activeRun)
+  const runningDomainId = useMissionStore((s) => s.runningDomainId)
   const startRun = useMissionStore((s) => s.startRun)
   const cancelRun = useMissionStore((s) => s.cancelRun)
   const decideGate = useMissionStore((s) => s.decideGate)
   const runHistory = useMissionStore((s) => s.runHistory)
   const fetchHistory = useMissionStore((s) => s.fetchHistory)
-  const checkActiveRun = useMissionStore((s) => s.checkActiveRun)
+  const switchDomain = useMissionStore((s) => s.switchDomain)
   const clearRun = useMissionStore((s) => s.clearRun)
 
   // State for the selected domain and mission inputs
@@ -201,6 +198,12 @@ export function MissionControlPage({ onViewChange }: { onViewChange: (view: Acti
   const [createDeadlines, setCreateDeadlines] = useState(false)
   const [draftEmailTo, setDraftEmailTo] = useState('')
   const [selectedMission, setSelectedMission] = useState<MissionSummary | null>(null)
+
+  // Per-domain selectors (depend on selectedDomainId)
+  const activeRun = useMissionStore((s) => s.activeRunByDomain[selectedDomainId] ?? null)
+  const streamingText = useMissionStore((s) => s.streamingTextByDomain[selectedDomainId] ?? '')
+  const runError = useMissionStore((s) => s.runErrorByDomain[selectedDomainId] ?? null)
+  const pendingGate = useMissionStore((s) => s.pendingGateByDomain[selectedDomainId] ?? null)
 
   // Load all missions + domain-specific missions
   useEffect(() => {
@@ -211,8 +214,9 @@ export function MissionControlPage({ onViewChange }: { onViewChange: (view: Acti
     if (selectedDomainId) {
       fetchMissions(selectedDomainId)
       fetchHistory(selectedDomainId)
+      switchDomain(selectedDomainId)
     }
-  }, [selectedDomainId, fetchMissions, fetchHistory])
+  }, [selectedDomainId, fetchMissions, fetchHistory, switchDomain])
 
   // Auto-select first mission
   useEffect(() => {
@@ -230,11 +234,6 @@ export function MissionControlPage({ onViewChange }: { onViewChange: (view: Acti
 
   // Derive which missions are enabled for this domain
   const enabledMissionIds = new Set(missions.map((m) => m.id))
-
-  // Recover active run state (handles tab switch, app restart, HMR)
-  useEffect(() => {
-    checkActiveRun()
-  }, [checkActiveRun])
 
   const handleRun = useCallback(async () => {
     if (!selectedMission || !selectedDomainId || running) return
@@ -408,7 +407,7 @@ export function MissionControlPage({ onViewChange }: { onViewChange: (view: Acti
             )}
             {!running && activeRun && (
               <button
-                onClick={clearRun}
+                onClick={() => clearRun(selectedDomainId)}
                 className="rounded border border-border px-4 py-2 text-xs font-medium text-text-secondary hover:bg-surface-2"
               >
                 Clear
@@ -425,7 +424,7 @@ export function MissionControlPage({ onViewChange }: { onViewChange: (view: Acti
         )}
 
         {/* Streaming output */}
-        {(running || streamingText) && (
+        {((running && runningDomainId === selectedDomainId) || streamingText) && (
           <div className="rounded-lg border border-border bg-surface-1 p-4">
             <h3 className="mb-2 text-xs font-medium text-text-secondary">Output</h3>
             <pre className="max-h-60 overflow-y-auto whitespace-pre-wrap text-xs text-text-primary font-mono">
@@ -490,8 +489,8 @@ export function MissionControlPage({ onViewChange }: { onViewChange: (view: Acti
           message={pendingGate.message}
           outputs={gateOutputSummary}
           pendingActions={gatePendingActions}
-          onApprove={() => decideGate(true)}
-          onReject={() => decideGate(false)}
+          onApprove={() => decideGate(true, selectedDomainId)}
+          onReject={() => decideGate(false, selectedDomainId)}
         />
       )}
     </div>

@@ -2717,4 +2717,10 @@ Rules:
       ? { ok: true, value: detail.value }
       : { ok: false, error: detail.error.message }
   })
+
+  ipcMain.handle('mission:latest-run', (_event, domainId: string) => {
+    const result = missionRunRepo.getLatestRunForDomain(domainId)
+    if (!result.ok) return { ok: false, error: result.error.message }
+    return { ok: true, value: result.value }
+  })
 }

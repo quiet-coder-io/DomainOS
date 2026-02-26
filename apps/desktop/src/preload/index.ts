@@ -305,6 +305,7 @@ const api: DomainOSAPI = {
     runHistory: (domainId: string, limit?: number) =>
       ipcRenderer.invoke('mission:run-history', domainId, limit),
     activeRun: () => ipcRenderer.invoke('mission:active-run'),
+    latestRun: (domainId: string) => ipcRenderer.invoke('mission:latest-run', domainId),
     onRunProgress(callback: (event: MissionProgressEventData) => void) {
       ipcRenderer.on('mission:run-progress', (_event, data: MissionProgressEventData) => callback(data))
     },
