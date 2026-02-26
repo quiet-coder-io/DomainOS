@@ -68,6 +68,7 @@ This loop validates the core value prop: domain-scoped AI that reads and writes 
 - **Decision quality gates** — confidence, horizon, reversibility class, category, authority source tier on decision records
 - **File attachments in chat** — drag-and-drop files onto chat as context for the LLM. Supports text files (.md, .ts, .json, etc.) and binary documents (PDF, Excel, Word) with server-side text extraction. Files are sent as user message preamble; only metadata (filename, size, sha256) stored in chat history. Budget enforcement: 100KB/file text, 2MB/file binary, 500KB total, 200K chars total, max 20 files. Hash-based dedup, encoding validation, deterministic truncation.
 - **Skill library** — reusable analytical procedures (e.g., "CMBS loan review") with per-message activation, freeform/structured output, tool hints, import/export as `.skill.md` files, and full CRUD management dialog. Skills inject into the system prompt between shared protocols and domain protocols with protocol precedence enforcement.
+- **Mission system** — reusable mission definitions with a 10-step lifecycle runner (validate → context → prompt → LLM → parse → persist → gate → actions → audit → finalize). Approval gates for side effects (deadlines, email drafts), streaming progress, per-run provenance (definition hash, prompt hash, model, KB digest timestamps). Portfolio Briefing seeded as the first mission. Per-domain enable/disable, run history, gate modal.
 
 ### Out of scope (future)
 - Protocol marketplace/sharing
@@ -94,6 +95,9 @@ Drag-and-drop files from Finder onto the chat panel as LLM context. Split transp
 
 ### Skill Library (Completed)
 Reusable analytical procedures stored globally and activated per-message. Full vertical slice: DB migration v16 (`skills` table with COLLATE NOCASE, CHECK constraints, JSON1 validation) → Zod schemas with `.superRefine()` cross-field validation (structured ↔ outputSchema) → Repository with merged-state validation on update → Prompt injection (between shared protocols and domain protocols, with protocol precedence enforcement, 12K char budget) → IPC handlers (9 channels: CRUD + toggle + import/export) → Preload bridge → Zustand store (`activeSkillIdByDomain` for domain-scoped selection, 5-min cache TTL) → UI (SkillSelector chips, SkillEditor form, SkillLibraryDialog with search/filter/toggle/import/export). Import/export uses `.skill.md` format with frontmatter + fenced outputSchema block. Skills support freeform or structured JSON output with schema enforcement, and tool hints for recommending specific tools.
+
+### Mission System v1 (Completed)
+Reusable mission definitions with a 10-step lifecycle runner, approval gates, and full provenance. DB migration v18 adds 6 tables (`missions`, `mission_domain_assoc`, `mission_runs`, `mission_run_outputs`, `mission_run_gates`, `mission_run_actions`) + drops audit_log CHECK constraint for extensibility. Portfolio Briefing seeded as first mission with output parser wrapping existing `parseBriefingAnalysis()`. **Runner** (`MissionRunner`): framework-agnostic 10-step lifecycle (validate inputs → check permissions → assemble context → build prompt → stream LLM → parse outputs → persist → evaluate gates → execute actions → finalize). All deps injected via `MissionRunnerDeps` (no Electron imports in core). **Gates**: side-effect intent check — deadlines gated if parsed actions > 0, email always gated if recipient provided. Gate rejection ≠ cancellation (run succeeds with actions skipped; `cancelled` reserved for user abort). **Provenance**: every run stores `definition_hash`, `prompt_hash`, `model_id`, `provider`, `context_json` (KB digest timestamps, domain list, prompt chars). **Output parser registry**: `Map<missionId, MissionOutputParser>` with `initMissionParsers()` bootstrap. **State transitions**: enforced in `MissionRunRepository` (pending → running → gated → success/failed/cancelled). Single active run per app. **UI**: MissionControlPage with enable/disable per domain, parameter form, capabilities disclosure, streaming output, parsed alerts/actions/monitors, provenance panel, run history. Gate modal (`MissionGateModal`) shows pending actions for approval. Zustand store (`mission-store`) with tab-switch-safe state management (`checkActiveRun()` recovers gated/running state on remount instead of aggressive reset on unmount). 11 IPC channels + 1 streaming event channel.
 
 ## Key Files Reference
 
@@ -130,7 +134,12 @@ Reusable analytical procedures stored globally and activated per-message. Full v
 | `src/skills/schemas.ts` | Zod schemas for skill create/update with `.superRefine()` cross-field validation (structured ↔ outputSchema); `SkillOutputFormatSchema`, `CreateSkillInputSchema`, `UpdateSkillInputSchema` |
 | `src/skills/repository.ts` | `SkillRepository` — CRUD with merged-state validation on update, COLLATE NOCASE duplicate guard, JSON roundtrip for toolHints, toggleEnabled |
 | `src/skills/serialization.ts` | `.skill.md` import/export: `skillToMarkdown()` / `markdownToSkillInput()` with frontmatter + fenced outputSchema block |
-| `src/storage/` | SQLite schema, migrations (v1–v16). v8: per-domain model override. v9: directed relationships. v11: decision quality columns. v12: advisory_artifacts table. v14: brainstorm_sessions table. v16: skills table |
+| `src/missions/schemas.ts` | Zod schemas + TS types for missions, runs, outputs, gates, actions; `MissionRunStatus`, `MissionOutputType`, `CreateMissionRunInputSchema`, `GateDecisionInputSchema` |
+| `src/missions/repository.ts` | `MissionRepository` — mission CRUD, domain association (enable/disable), `listSummaries()`, `listSummariesForDomain()`, canonical definition hashing (SHA-256) |
+| `src/missions/run-repository.ts` | `MissionRunRepository` — run lifecycle with enforced state transitions, outputs, gates (with resume validation), actions, `getActiveRun()`, `getRunDetail()` |
+| `src/missions/runner.ts` | `MissionRunner` — 10-step lifecycle orchestrator; deps injected via `MissionRunnerDeps` (no Electron imports); `start()`, `resumeAfterGate()`, `cancel()` |
+| `src/missions/output-parser.ts` | `MissionOutputParser` interface + registry (`Map<missionId, parser>`); Portfolio Briefing parser wraps `parseBriefingAnalysis()`; `initMissionParsers()` bootstrap |
+| `src/storage/` | SQLite schema, migrations (v1–v18). v8: per-domain model override. v9: directed relationships. v11: decision quality columns. v12: advisory_artifacts table. v14: brainstorm_sessions table. v16: skills table. v18: missions (6 tables + audit_log CHECK drop + seed data) |
 | `src/common/` | Result type, shared Zod schemas |
 
 ### Integrations (`packages/integrations/`)
@@ -153,7 +162,7 @@ Reusable analytical procedures stored globally and activated per-message. Full v
 
 | File | Purpose |
 |------|---------|
-| `src/main/ipc-handlers.ts` | 70+ IPC handlers: domains, KB, chat, briefing, intake, protocols, sessions, relationships, gap flags, decisions, audit, advisory, skills, Gmail, GTasks, settings, file text extraction |
+| `src/main/ipc-handlers.ts` | 80+ IPC handlers: domains, KB, chat, briefing, intake, protocols, sessions, relationships, gap flags, decisions, audit, advisory, skills, missions, Gmail, GTasks, settings, file text extraction |
 | `src/main/tool-loop.ts` | **Provider-agnostic** tool-use loop — works with Anthropic, OpenAI, Ollama; prefix-based dispatch (`gmail_*`, `gtasks_*`, `advisory_*`), ROWYS Gmail guard, tool output sanitization, transcript validation, size guards (75KB/result, 400KB total), capability cache management |
 | `src/main/advisory-tools.ts` | `ADVISORY_TOOLS` as `ToolDefinition[]` (advisory_search_decisions, advisory_search_deadlines, advisory_cross_domain_context, advisory_risk_snapshot), executors with output caps (10 items, 300 char truncation), `schemaVersion` wrapper |
 | `src/main/brainstorm-tools.ts` | `BRAINSTORM_TOOLS` as `ToolDefinition[]` (brainstorm_start_session, brainstorm_get_techniques, brainstorm_capture_ideas, brainstorm_session_status, brainstorm_synthesize, brainstorm_session_control), `executeBrainstormTool()` |
@@ -164,7 +173,7 @@ Reusable analytical procedures stored globally and activated per-message. Full v
 | `src/main/gtasks-oauth.ts` | Google Tasks OAuth PKCE flow — scope `tasks` (read-write), falls back to Gmail client ID/secret |
 | `src/main/gtasks-credentials.ts` | Encrypted GTasks credential storage (`gtasks-creds.enc`, safeStorage) |
 | `src/main/kb-watcher.ts` | Filesystem monitoring for KB directories — `startKBWatcher()`, `stopKBWatcher()`, debounced (500ms), sends `kb:files-changed` to renderer |
-| `src/preload/api.ts` | IPC type contract: `DomainOSAPI`, `ProviderConfig`, `ProviderKeysStatus`, `ToolTestResult`, `PortfolioHealth`, `BriefingAnalysis` |
+| `src/preload/api.ts` | IPC type contract: `DomainOSAPI`, `ProviderConfig`, `ProviderKeysStatus`, `ToolTestResult`, `PortfolioHealth`, `BriefingAnalysis`, `MissionRunDetailData`, `MissionProgressEventData` |
 | `src/renderer/components/SettingsDialog.tsx` | Multi-provider settings modal (API keys, Ollama connection, model defaults, tool test) |
 | `src/renderer/pages/DomainChatPage.tsx` | Chat page with per-domain model override UI (tri-state: global default / override / clear) |
 | `src/renderer/pages/BriefingPage.tsx` | Portfolio health dashboard + LLM analysis streaming UI with alerts, actions, monitors + GTasks connect/disconnect + overdue badge |
@@ -180,6 +189,9 @@ Reusable analytical procedures stored globally and activated per-message. Full v
 | `src/renderer/components/SkillSelector.tsx` | Chip-based skill selector above chat textarea; per-message activation with auto-clear after send |
 | `src/renderer/components/SkillLibraryDialog.tsx` | Full CRUD dialog: search, filter (all/enabled/disabled), toggle, edit, delete with confirm, import/export |
 | `src/renderer/components/SkillEditor.tsx` | Skill form: name, description, content textarea, output format radio, JSON schema (validated on blur), tool hints |
+| `src/renderer/pages/MissionControlPage.tsx` | Mission Control page — enable/disable missions per domain, parameter form, capabilities disclosure, streaming output, parsed alerts/actions/monitors, provenance panel, run history |
+| `src/renderer/components/MissionGateModal.tsx` | Gate approval dialog — shows pending actions (deadlines, email drafts) for user approval/rejection |
+| `src/renderer/stores/mission-store.ts` | Zustand store for missions: `startRun()` with streaming progress, `decideGate()`, `checkActiveRun()` for tab-switch recovery, `clearRun()` |
 
 ## Multi-Provider LLM Architecture
 
@@ -225,7 +237,7 @@ Key: ${providerName}:${model} (or ${providerName}:${model}:${ollamaBaseUrl} for 
 
 ### Per-Domain Model Override
 
-Database columns (migration v8): `model_provider TEXT`, `model_name TEXT`, `force_tool_attempt INTEGER` (latest migration: v12 — advisory artifacts)
+Database columns (migration v8): `model_provider TEXT`, `model_name TEXT`, `force_tool_attempt INTEGER` (latest migration: v18 — missions)
 - NULL = use global default
 - Override = specific provider + model
 - `forceToolAttempt` = try tools even when cache says `not_observed`
@@ -293,6 +305,18 @@ Decrypted keys cached in-memory after first read. Keys never cross IPC to render
 | `skill:toggle` | renderer→main | Toggle skill enabled/disabled |
 | `skill:export` | renderer→main | Export skill as `.skill.md` file (save dialog) |
 | `skill:import` | renderer→main | Import skill from `.skill.md` file (open dialog) |
+| `mission:list` | renderer→main | List all enabled missions (global) |
+| `mission:list-for-domain` | renderer→main | List missions enabled for a domain |
+| `mission:get` | renderer→main | Get mission by ID |
+| `mission:enable-for-domain` | renderer→main | Enable a mission for a domain |
+| `mission:disable-for-domain` | renderer→main | Disable a mission for a domain |
+| `mission:run` | renderer→main | Start a mission run (streams progress via `mission:run-progress`) |
+| `mission:run-cancel` | renderer→main | Cancel active run by runId |
+| `mission:run-status` | renderer→main | Get run detail (run + outputs + gates + actions) |
+| `mission:gate-decide` | renderer→main | Approve/reject a pending gate |
+| `mission:run-history` | renderer→main | List past runs for a domain |
+| `mission:active-run` | renderer→main | Get any non-terminal run (for state recovery on remount) |
+| `mission:run-progress` | main→renderer | Streaming events: `llm_chunk`, `gate_triggered`, `run_complete`, `run_failed` |
 
 ## Environment Variables
 
