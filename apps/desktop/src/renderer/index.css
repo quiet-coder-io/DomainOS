@@ -123,6 +123,10 @@ html.light ::-webkit-scrollbar-thumb:hover {
   animation: pulse-dot 1.4s ease-in-out infinite;
 }
 
+/* ─── Titlebar drag regions ────────────────────────────────────────── */
+.titlebar-drag { -webkit-app-region: drag; }
+.titlebar-no-drag { -webkit-app-region: no-drag; }
+
 /* ─── Global transition defaults ────────────────────────────────────── */
 button,
 a,

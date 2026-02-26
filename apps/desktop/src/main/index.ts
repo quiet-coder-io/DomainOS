@@ -80,12 +80,14 @@ function showWindow(): void {
 // ── Window creation ──
 
 function createWindow(): BrowserWindow {
+  const isMac = process.platform === 'darwin'
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 900,
     minHeight: 500,
     show: false,
+    ...(isMac ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 12, y: 12 } } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.mjs'),
       sandbox: false,

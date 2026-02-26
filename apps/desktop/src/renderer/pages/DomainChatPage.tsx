@@ -30,19 +30,6 @@ const GearIcon = () => (
   </svg>
 )
 
-const PinIcon = ({ pinned }: { pinned: boolean }) => (
-  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path
-      d="M9.5 1.5L14.5 6.5L10 8L11.5 14.5L8 11L4.5 14.5L6 8L1.5 6.5L6.5 1.5"
-      stroke="currentColor"
-      strokeWidth="1.2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      fill={pinned ? 'currentColor' : 'none'}
-    />
-  </svg>
-)
-
 type ProviderName = 'anthropic' | 'openai' | 'ollama'
 
 const KNOWN_MODELS: Record<ProviderName, string[]> = {
@@ -81,26 +68,6 @@ export function DomainChatPage(): React.JSX.Element {
   const [showSettings, setShowSettings] = useState(false)
   const [showAutomations, setShowAutomations] = useState(false)
   const [showSkillLibrary, setShowSkillLibrary] = useState(false)
-
-  // --- Window pin state ---
-  const [isPinned, setIsPinned] = useState(false)
-
-  useEffect(() => {
-    window.domainOS.appWindow.getPinned().then((res) => {
-      if (res.ok && res.value != null) setIsPinned(res.value)
-    })
-    const unsub = window.domainOS.appWindow.onPinnedChanged((data) => {
-      setIsPinned(data.pinned)
-    })
-    return unsub
-  }, [])
-
-  async function handleTogglePin(): Promise<void> {
-    const next = !isPinned
-    setIsPinned(next) // optimistic
-    const res = await window.domainOS.appWindow.setPinned(next)
-    if (!res.ok) setIsPinned(!next) // revert on failure
-  }
 
   // --- Per-domain model override state ---
   const [overrideExpanded, setOverrideExpanded] = useState(false)
@@ -369,19 +336,6 @@ export function DomainChatPage(): React.JSX.Element {
             title="Settings"
           >
             <GearIcon />
-          </button>
-
-          {/* Pin to top toggle */}
-          <button
-            onClick={handleTogglePin}
-            className={`flex h-7 w-7 items-center justify-center rounded transition-colors ${
-              isPinned
-                ? 'text-accent hover:bg-accent/10'
-                : 'text-text-tertiary hover:bg-surface-2 hover:text-text-secondary'
-            }`}
-            title={isPinned ? 'Unpin window' : 'Pin window on top'}
-          >
-            <PinIcon pinned={isPinned} />
           </button>
 
           {/* Automations */}
