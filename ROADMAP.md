@@ -66,8 +66,22 @@ This roadmap reflects current priorities and may shift as the project evolves. I
 - [x] Session lifecycle: start → techniques → facilitate → pause/resume → synthesize → artifact
 - [x] One active session per domain, 500-idea soft cap, recovery-safe synthesis previews
 
+### Mission System
+- [x] Mission definitions with 10-step lifecycle runner (validate → context → prompt → LLM → parse → persist → gate → actions → audit → finalize)
+- [x] Portfolio Briefing as first seeded mission
+- [x] Approval gates for side effects (deadlines, email drafts)
+- [x] Per-run provenance (definition hash, prompt hash, model, KB digest timestamps, context hash)
+- [x] Generalized runner with optional dep hooks (`buildContext`, `buildPrompts`, `shouldGate`, `buildEmailBody`, `buildEmailSubject`)
+- [x] Loan Document Review mission — CMBS methodology, fenced-block output parser (attorney memo + risk heatmap JSON), doc-path scoping with per-file provenance
+- [x] Data-driven mission metadata (`methodology`, `outputLabels`) for self-describing missions
+- [x] Dynamic parameter form rendered from mission definition (`parameters` + `parametersOrder`)
+- [x] Mission selector UI for switching between enabled missions
+- [x] Cancel-by-requestId for aborting missions during streaming (before runId is available)
+- [x] Real Gmail draft creation via gate-approved actions
+
 ### Integrations
 - [x] Gmail read-only tools (search, read) via OAuth PKCE
+- [x] Gmail draft creation (real Gmail API drafts via mission gate actions)
 - [x] Google Tasks read-write tools (search, read, complete, update, delete)
 - [x] Google Tasks inline editing in portfolio briefing
 - [x] Browser-to-app intake pipeline (Chrome extension)
@@ -77,6 +91,12 @@ This roadmap reflects current priorities and may shift as the project evolves. I
 ---
 
 ## Next Up
+
+### Mission Builder
+- [ ] User-created missions via template system (configure skills, protocols, tools — similar to Claude Code plugins)
+- [ ] Mission import/export as `.mission.md` or JSON
+- [ ] Custom output parsers defined via schema (no code required)
+- [ ] Mission marketplace / sharing
 
 ### Advisory System Enhancements
 - [ ] Extended advisory protocols (Strategic Advisor, Interaction Modes, Email Response Advisor) as seedable shared protocols
