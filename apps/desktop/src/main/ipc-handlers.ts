@@ -102,6 +102,18 @@ import type { GmailContextMessage, GmailContextAttachment } from '../preload/api
 import { extractTextFromBuffer, isFormatSupported, resolveFormat } from './text-extractor'
 import { emitAutomationEvent } from './automation-events'
 import { triggerManualRun } from './automation-engine'
+import { EventEmitter } from 'node:events'
+
+// ── Mission event bus (module scope for lifecycle stability) ──
+
+type MissionStartPayload = { requestId: string; domainId: string }
+type MissionTerminalPayload = { requestId: string; domainId: string; status: 'success' | 'failed' | 'cancelled' | 'unknown' }
+
+export const missionEvents = new EventEmitter()
+
+// Mission run tracking — module scope so abort controllers survive across IPC calls
+const activeMissionRuns = new Map<string, AbortController>()
+const requestIdByRunId = new Map<string, string>()
 
 // ── Gmail URL parser (for drag-and-drop context) ──
 
@@ -2432,7 +2444,6 @@ Rules:
   initMissionParsers()
   const missionRepo = new MissionRepository(db)
   const missionRunRepo = new MissionRunRepository(db)
-  const activeMissionRuns = new Map<string, AbortController>()
 
   ipcMain.handle('mission:list', () => {
     const result = missionRepo.listSummaries()
@@ -2596,44 +2607,92 @@ Rules:
 
       const runner = new MissionRunner(deps)
 
-      // Store abort controller mapped by requestId (we'll get runId from result)
+      // Store abort controller keyed by requestId only
       activeMissionRuns.set(requestId, controller)
+      missionEvents.emit('mission-start', { requestId, domainId } satisfies MissionStartPayload)
 
-      const result = await runner.start(
-        missionId,
-        domainId,
-        { ...inputs, _requestId: requestId },
-        resolvedModel,
-        resolvedProvider,
-        controller.signal,
-      )
+      let terminalEmitted = false
 
-      if (result.ok) {
-        // Map runId → controller for cancel-by-runId
-        activeMissionRuns.set(result.value.id, controller)
+      try {
+        const result = await runner.start(
+          missionId,
+          domainId,
+          { ...inputs, _requestId: requestId },
+          resolvedModel,
+          resolvedProvider,
+          controller.signal,
+        )
+
+        if (result.ok) {
+          if (result.value.status === 'gated') {
+            // Store reverse lookup — only needed for gate-decide
+            requestIdByRunId.set(result.value.id, requestId)
+          } else {
+            // Terminal: success, failed, cancelled (gated excluded by if-branch above)
+            missionEvents.emit('mission-terminal', { requestId, domainId, status: result.value.status } as MissionTerminalPayload)
+            terminalEmitted = true
+          }
+        } else {
+          // Validation/creation error — no run in DB; clear mission-start
+          missionEvents.emit('mission-terminal', { requestId, domainId, status: 'failed' } satisfies MissionTerminalPayload)
+          terminalEmitted = true
+        }
+
+        return result.ok
+          ? { ok: true, value: result.value }
+          : { ok: false, error: result.error.message }
+      } catch (err) {
+        if (!terminalEmitted) {
+          const status = controller.signal.aborted ? 'cancelled' : 'failed'
+          missionEvents.emit('mission-terminal', { requestId, domainId, status } satisfies MissionTerminalPayload)
+        }
+        if (controller.signal.aborted) {
+          return { ok: false, error: 'CANCELLED' }
+        }
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      } finally {
+        activeMissionRuns.delete(requestId)
+        // No event emission in finally — handled above
       }
-
-      return result.ok
-        ? { ok: true, value: result.value }
-        : { ok: false, error: result.error.message }
     } catch (err) {
-      if (controller.signal.aborted) {
-        return { ok: false, error: 'CANCELLED' }
-      }
-      return { ok: false, error: err instanceof Error ? err.message : String(err) }
-    } finally {
+      // Outer catch: provider resolution or deps setup failed before runner.start()
+      missionEvents.emit('mission-terminal', { requestId, domainId, status: 'failed' } satisfies MissionTerminalPayload)
       activeMissionRuns.delete(requestId)
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
 
+  // Renderer passes DB runId. Resolve requestId from DB (MissionRun.requestId is
+  // persisted at run creation, before streaming) to abort in-flight controller.
   ipcMain.handle('mission:run-cancel', (_event, runId: string) => {
-    // Try both runId and requestId mappings
-    const controller = activeMissionRuns.get(runId)
-    if (controller) {
-      controller.abort()
-      activeMissionRuns.delete(runId)
+    // Resolve requestId: try DB first, fall back to gated reverse map
+    let resolvedRequestId = ''
+    const runResult = missionRunRepo.getById(runId)
+    if (runResult.ok && runResult.value.requestId) {
+      resolvedRequestId = runResult.value.requestId
     }
+    if (!resolvedRequestId) {
+      resolvedRequestId = requestIdByRunId.get(runId) ?? ''
+    }
+
+    // Abort in-flight controller if found
+    if (resolvedRequestId) {
+      activeMissionRuns.get(resolvedRequestId)?.abort()
+      // Don't delete from activeMissionRuns — mission:run finally handles cleanup
+    }
+
+    // Clean up gated reverse map
+    requestIdByRunId.delete(runId)
+
+    // Update DB status
     const cancelResult = missionRunRepo.updateStatus(runId, 'cancelled')
+    if (cancelResult.ok) {
+      missionEvents.emit('mission-terminal', {
+        requestId: resolvedRequestId,
+        domainId: '',
+        status: 'cancelled',
+      } satisfies MissionTerminalPayload)
+    }
     return cancelResult.ok
       ? { ok: true, value: undefined }
       : { ok: false, error: cancelResult.error.message }
@@ -2693,10 +2752,28 @@ Rules:
       const runner = new MissionRunner(deps)
       const result = await runner.resumeAfterGate(runId, gateId, approved)
 
+      if (result.ok) {
+        const recoveredRequestId = requestIdByRunId.get(runId) ?? ''
+        missionEvents.emit('mission-terminal', {
+          requestId: recoveredRequestId,
+          domainId: result.value.domainId,
+          status: result.value.status,
+        } as MissionTerminalPayload)
+        requestIdByRunId.delete(runId)
+      }
+
       return result.ok
         ? { ok: true, value: result.value }
         : { ok: false, error: result.error.message }
     } catch (err) {
+      // Best-effort: tell main to re-check DB state
+      const recoveredRequestId = requestIdByRunId.get(runId) ?? ''
+      requestIdByRunId.delete(runId)
+      missionEvents.emit('mission-terminal', {
+        requestId: recoveredRequestId,
+        domainId: '',
+        status: 'unknown',
+      } satisfies MissionTerminalPayload)
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   })

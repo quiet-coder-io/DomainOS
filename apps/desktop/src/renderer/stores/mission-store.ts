@@ -131,6 +131,16 @@ export const useMissionStore = create<MissionState>((set, get) => ({
     const { running } = get()
     if (running) return
 
+    // Cancel any stale active run in DB (e.g. from crash, clear-then-rerun)
+    try {
+      const stale = await window.domainOS.mission.activeRun()
+      if (stale.ok && stale.value) {
+        await window.domainOS.mission.runCancel(stale.value.run.id)
+      }
+    } catch {
+      // Best-effort — proceed even if cancel fails
+    }
+
     const requestId = crypto.randomUUID()
 
     // Clear domain slot and set running state

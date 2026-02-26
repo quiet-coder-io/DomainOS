@@ -1,19 +1,83 @@
-import { app, BrowserWindow, shell, safeStorage } from 'electron'
+import { app, BrowserWindow, shell, safeStorage, Tray, Menu, nativeImage, Notification } from 'electron'
 import { join, resolve } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { is } from '@electron-toolkit/utils'
-import { initDatabase, closeDatabase } from './database'
-import { registerIPCHandlers } from './ipc-handlers'
+import { initDatabase, closeDatabase, getDatabase } from './database'
+import { registerIPCHandlers, missionEvents } from './ipc-handlers'
 import { generateIntakeToken } from './intake-token'
 import { startIntakeServer, stopIntakeServer } from './intake-server'
 import { stopAllKBWatchers } from './kb-watcher'
 import { startAutomationEngine, stopAutomationEngine } from './automation-engine'
-import { DomainRepository, createProvider, DEFAULT_MODELS } from '@domain-os/core'
+import { DomainRepository, MissionRunRepository, createProvider, DEFAULT_MODELS } from '@domain-os/core'
 import type { ProviderName } from '@domain-os/core'
 import { GTasksClient } from '@domain-os/integrations'
 import { loadGTasksCredentials } from './gtasks-credentials'
 
 let mainWindow: BrowserWindow | null = null
+let tray: Tray | null = null
+let isQuitting = false
+let hasActiveMission = false
+
+// ── Mission state helpers ──
+
+function refreshHasActiveMission(): void {
+  try {
+    const repo = new MissionRunRepository(getDatabase())
+    const res = repo.getActiveRun()
+    hasActiveMission = res.ok && res.value !== null
+  } catch {
+    hasActiveMission = false
+  }
+}
+
+// ── Tray icon — programmatic 16x16 macOS template image ──
+
+function createTrayIcon(): Electron.NativeImage {
+  const size = 16
+  const buf = Buffer.alloc(size * size * 4)
+  const cx = 8, cy = 8, r = 5
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dist = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2)
+      const idx = (y * size + x) * 4
+      if (dist <= r) {
+        buf[idx] = 0; buf[idx + 1] = 0; buf[idx + 2] = 0; buf[idx + 3] = 255
+      }
+    }
+  }
+  const img = nativeImage.createFromBuffer(buf, { width: size, height: size })
+  img.setTemplateImage(true)
+  return img
+}
+
+// ── Tray + window helpers ──
+
+function createTray(): void {
+  if (tray) return
+  tray = new Tray(createTrayIcon())
+  tray.setToolTip('DomainOS — Mission running')
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Show DomainOS', click: showWindow },
+    { type: 'separator' },
+    { label: 'Force Quit', click: () => { isQuitting = true; app.quit() } },
+  ]))
+  tray.on('click', showWindow)
+}
+
+function destroyTray(): void {
+  tray?.destroy()
+  tray = null
+}
+
+function showWindow(): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show()
+    mainWindow.focus()
+  }
+  destroyTray()
+}
+
+// ── Window creation ──
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -51,11 +115,64 @@ function createWindow(): BrowserWindow {
 app.whenReady().then(() => {
   const db = initDatabase()
 
+  // ── Startup reconciliation: mark stale non-terminal runs as failed ──
+  // updated_at is ISO 8601; lexical comparison is valid for chronological ordering
+  try {
+    const now = new Date().toISOString()
+    const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString()
+    db.prepare(`
+      UPDATE mission_runs SET status = 'failed', error = 'App terminated unexpectedly',
+        ended_at = ?, updated_at = ?
+      WHERE status IN ('pending', 'running') AND updated_at < ?
+    `).run(now, now, cutoff)
+  } catch { /* non-fatal */ }
+
+  // Seed cached state from DB (gated runs survive restart)
+  refreshHasActiveMission()
+
   generateIntakeToken()
 
   mainWindow = createWindow()
 
+  // ── Window close interception: hide to tray during active mission ──
+  mainWindow.on('close', (e) => {
+    if (isQuitting) return
+    if (hasActiveMission) {
+      e.preventDefault()
+      mainWindow?.hide()
+      if (!tray) createTray()
+    }
+  })
+
   registerIPCHandlers(db, mainWindow)
+
+  // ── Mission lifecycle listeners ──
+  missionEvents.on('mission-start', () => {
+    hasActiveMission = true
+    tray?.setToolTip('DomainOS — Mission running')
+  })
+
+  missionEvents.on('mission-terminal', (payload?: { status?: 'success' | 'failed' | 'cancelled' | 'unknown' }) => {
+    refreshHasActiveMission()
+
+    // Only notify when window is hidden behind tray
+    if (!tray) return
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    if (mainWindow.isVisible()) return
+
+    if (!hasActiveMission) {
+      const status = payload?.status ?? 'unknown'
+      const body = status === 'success' ? 'Mission complete'
+        : status === 'cancelled' ? 'Mission cancelled'
+        : status === 'failed' ? 'Mission failed'
+        : 'Mission ended'
+
+      if (Notification.isSupported()) {
+        new Notification({ title: 'DomainOS', body }).show()
+      }
+      tray?.setToolTip(`DomainOS — ${body}`)
+    }
+  })
 
   // Restore window pin state
   loadProviderConfig().then((config) => {
@@ -135,7 +252,11 @@ app.whenReady().then(() => {
   })
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show()
+      mainWindow.focus()
+      destroyTray()
+    } else {
       mainWindow = createWindow()
     }
   })
@@ -146,6 +267,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  isQuitting = true
   stopAutomationEngine()
   stopAllKBWatchers()
   stopIntakeServer()
