@@ -52,6 +52,7 @@ const api: DomainOSAPI = {
     startOAuth: () => ipcRenderer.invoke('gmail:start-oauth'),
     checkConnected: () => ipcRenderer.invoke('gmail:check-connected'),
     disconnect: () => ipcRenderer.invoke('gmail:disconnect'),
+    fetchForContext: (payload) => ipcRenderer.invoke('gmail:fetch-for-context', payload),
   },
 
   gtasks: {

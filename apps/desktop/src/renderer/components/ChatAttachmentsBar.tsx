@@ -17,6 +17,13 @@ const FileIcon = () => (
   </svg>
 )
 
+const EmailIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect x="1" y="2.5" width="10" height="7" rx="1" stroke="currentColor" strokeWidth="1" fill="none" />
+    <path d="M1.5 3L6 6.5L10.5 3" stroke="currentColor" strokeWidth="1" fill="none" />
+  </svg>
+)
+
 const CloseIcon = () => (
   <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
     <path d="M2.5 2.5l5 5M7.5 2.5l-5 5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
@@ -53,7 +60,7 @@ export function ChatAttachmentsBar({ files, error, onRemove, onRemoveAll, onClea
               className="flex items-center gap-1 rounded-full border border-border bg-surface-0 px-2 py-0.5 text-[0.65rem] text-text-secondary animate-fade-in"
               title={`${f.originalName} · ${formatFileSize(f.size)} · sha256: ${f.sha256.slice(0, 12)}...`}
             >
-              <FileIcon />
+              {f.kind === 'email' ? <EmailIcon /> : <FileIcon />}
               <span className="max-w-[120px] truncate">{f.displayName}</span>
               <span className="text-text-tertiary">{formatFileSize(f.size)}</span>
               {f.truncated && (

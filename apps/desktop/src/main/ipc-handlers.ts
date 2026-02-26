@@ -90,6 +90,26 @@ import { GmailClient, GTasksClient } from '@domain-os/integrations'
 import { emitAutomationEvent } from './automation-events'
 import { triggerManualRun } from './automation-engine'
 
+// ── Gmail URL parser (for drag-and-drop context) ──
+
+function parseGmailUrl(url: string): { threadId?: string } | null {
+  try {
+    const u = new URL(url)
+    if (!u.hostname.endsWith('mail.google.com')) return null
+    const hash = u.hash.replace(/^#/, '')
+    const segments = hash.split('/')
+    const lastSeg = segments[segments.length - 1]
+    if (!lastSeg || lastSeg.length < 10) return {}
+    // Accept any sufficiently long alphanumeric segment as a potential thread ID.
+    // Gmail uses multiple formats: pure hex (18f3a2b4c5d6e7f8), FMfcgz..., jrjt...
+    // We try it with the API — if invalid, getThread returns [] and we fall back to search.
+    if (/^[a-zA-Z0-9_-]{10,}$/.test(lastSeg)) return { threadId: lastSeg }
+    return {}
+  } catch {
+    return null
+  }
+}
+
 // ── Provider config types (D20) ──
 
 interface ProviderConfigFile {
@@ -1526,6 +1546,68 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
     try {
       await disconnectGmail()
       return { ok: true, value: undefined }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('gmail:fetch-for-context', async (_event, payload: { url: string; subjectHint?: string }) => {
+    try {
+      const creds = await loadGmailCredentials()
+      if (!creds) return { ok: false, error: 'Gmail not connected' }
+
+      const client = new GmailClient({
+        clientId: creds.clientId,
+        clientSecret: creds.clientSecret,
+        refreshToken: creds.refreshToken,
+      })
+
+      // Parse Gmail URL in main process
+      const parsed = parseGmailUrl(payload.url)
+      if (!parsed) return { ok: false, error: 'Not a valid Gmail URL' }
+
+      // Strategy A: threadId → direct thread API
+      if (parsed.threadId) {
+        const messages = await client.getThread(parsed.threadId)
+        if (messages.length > 0) return { ok: true, value: messages }
+
+        // Strategy A2: opaque ID might be a message ID — try reading directly
+        const singleMsg = await client.read(parsed.threadId)
+        if (singleMsg) {
+          // If we got a message, try fetching its full thread
+          if (singleMsg.threadId && singleMsg.threadId !== parsed.threadId) {
+            const threadMsgs = await client.getThread(singleMsg.threadId)
+            if (threadMsgs.length > 0) return { ok: true, value: threadMsgs }
+          }
+          return { ok: true, value: [singleMsg] }
+        }
+      }
+
+      // Strategy B: constrained search fallback (requires a real subject hint)
+      if (payload.subjectHint) {
+        const query = `subject:"${payload.subjectHint}" newer_than:7d`
+        const results = await client.search(query, 3)
+
+        if (results.length >= 1) {
+          // Take the first (most recent) match — the preview UI lets the user verify
+          const best = results[0]
+          // Try to get the full thread for richer context
+          if (best.threadId) {
+            const threadMsgs = await client.getThread(best.threadId)
+            if (threadMsgs.length > 0) return { ok: true, value: threadMsgs }
+          }
+          const msg = await client.read(best.messageId)
+          return msg ? { ok: true, value: [msg] } : { ok: false, error: 'Could not read email' }
+        }
+      }
+
+      // If we had a threadId but couldn't resolve it, and no subject hint was available,
+      // signal the renderer to prompt the user for a subject search
+      if (parsed.threadId && !payload.subjectHint) {
+        return { ok: false, error: 'NEEDS_SUBJECT' }
+      }
+
+      return { ok: false, error: 'Could not find the email. Make sure it exists in your Gmail.' }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }

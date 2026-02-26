@@ -104,7 +104,7 @@ export class GmailClient {
     if (messageRefs.length === 0) return []
 
     // Fetch metadata in batches of 5
-    const results: GmailSearchResult[] = []
+    const results: Array<GmailSearchResult & { _ts: number }> = []
     for (let i = 0; i < messageRefs.length; i += 5) {
       const batch = messageRefs.slice(i, i + 5)
       const fetched = await Promise.all(
@@ -146,18 +146,14 @@ export class GmailClient {
           subject,
           date: iso,
           snippet,
+          _ts: ts,
         })
       }
     }
 
-    // Sort by date descending
-    results.sort((a, b) => {
-      const tsA = Date.parse(a.date) || 0
-      const tsB = Date.parse(b.date) || 0
-      return tsB - tsA
-    })
-
-    return results
+    // Sort by numeric timestamp descending, then strip internal _ts field
+    results.sort((a, b) => b._ts - a._ts)
+    return results.map(({ _ts, ...rest }) => rest)
   }
 
   /**
@@ -171,47 +167,80 @@ export class GmailClient {
         id: messageId,
         format: 'full',
       })
-
-      const msg = res.data
-      if (!msg.id) return null
-
-      const headers = msg.payload?.headers ?? []
-      const getHeader = (name: string) =>
-        headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())?.value ?? ''
-
-      const rawSubject = getHeader('Subject')
-      const subject = rawSubject
-        ? sanitizeText(rawSubject).slice(0, 300)
-        : '(no subject)'
-
-      const rawTo = getHeader('To')
-      const toList = rawTo
-        .split(',')
-        .map((s) => sanitizeText(s))
-        .filter(Boolean)
-      const to = toList.length > 20
-        ? [...toList.slice(0, 20), `(+${toList.length - 20} more)`]
-        : toList
-
-      const { iso } = parseDate(getHeader('Date'), msg.internalDate)
-
-      let body = extractTextBody(msg.payload)
-      if (body.length > 10_000) {
-        body = body.slice(0, 10_000) + '\n[truncated]'
-      }
-
-      return {
-        messageId: msg.id,
-        threadId: msg.threadId ?? '',
-        from: sanitizeText(getHeader('From')),
-        to,
-        subject,
-        date: iso,
-        body,
-        labels: msg.labelIds ?? [],
-      }
+      return this.extractMessage(res.data)
     } catch {
       return null
+    }
+  }
+
+  /**
+   * Fetch the last 3 messages of a thread, sorted oldest-first.
+   * Uses the same sanitization as read() via extractMessage().
+   */
+  async getThread(threadId: string): Promise<GmailMessage[]> {
+    try {
+      const res = await this.gmail.users.threads.get({
+        userId: 'me',
+        id: threadId,
+        format: 'full',
+      })
+      const rawMessages = res.data.messages ?? []
+      if (rawMessages.length === 0) return []
+
+      // Sort by internalDate (numeric millis), oldest first
+      const sorted = [...rawMessages].sort(
+        (a, b) => Number(a.internalDate ?? '0') - Number(b.internalDate ?? '0'),
+      )
+
+      // Take last 3 (most recent)
+      const tail = sorted.slice(-3)
+
+      return tail
+        .map((msg) => this.extractMessage(msg))
+        .filter((m): m is GmailMessage => m !== null)
+    } catch {
+      return []
+    }
+  }
+
+  /** Shared extraction: headers, sanitization, body truncation (10K), To cap (20). */
+  private extractMessage(msg: gmail_v1.Schema$Message): GmailMessage | null {
+    if (!msg.id) return null
+
+    const headers = msg.payload?.headers ?? []
+    const getHeader = (name: string) =>
+      headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())?.value ?? ''
+
+    const rawSubject = getHeader('Subject')
+    const subject = rawSubject
+      ? sanitizeText(rawSubject).slice(0, 300)
+      : '(no subject)'
+
+    const rawTo = getHeader('To')
+    const toList = rawTo
+      .split(',')
+      .map((s) => sanitizeText(s))
+      .filter(Boolean)
+    const to = toList.length > 20
+      ? [...toList.slice(0, 20), `(+${toList.length - 20} more)`]
+      : toList
+
+    const { iso } = parseDate(getHeader('Date'), msg.internalDate)
+
+    let body = extractTextBody(msg.payload)
+    if (body.length > 10_000) {
+      body = body.slice(0, 10_000) + '\n[truncated]'
+    }
+
+    return {
+      messageId: msg.id,
+      threadId: msg.threadId ?? '',
+      from: sanitizeText(getHeader('From')),
+      to,
+      subject,
+      date: iso,
+      body,
+      labels: msg.labelIds ?? [],
     }
   }
 }

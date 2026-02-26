@@ -79,6 +79,7 @@ export interface DomainOSAPI {
     startOAuth(): Promise<IPCResult<void>>
     checkConnected(): Promise<IPCResult<{ connected: boolean; blocked?: boolean; email?: string }>>
     disconnect(): Promise<IPCResult<void>>
+    fetchForContext(payload: { url: string; subjectHint?: string }): Promise<IPCResult<GmailContextMessage[]>>
   }
 
   gtasks: {
@@ -595,6 +596,18 @@ export interface Deadline {
   cancelledAt: string | null
   createdAt: string
   updatedAt: string
+}
+
+// ── Gmail context types (for drag-and-drop email attachment) ──
+
+export interface GmailContextMessage {
+  messageId: string
+  threadId: string
+  from: string
+  to: string[]
+  subject: string
+  date: string
+  body: string
 }
 
 // ── Multi-provider types ──
