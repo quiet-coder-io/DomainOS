@@ -3,6 +3,10 @@
  *
  * Framework-agnostic: no Electron imports. All platform concerns
  * injected via MissionRunnerDeps.
+ *
+ * Extension points: optional hooks (buildContext, buildPrompts, shouldGate,
+ * buildEmailBody, buildEmailSubject) allow mission-specific behavior
+ * without modifying the runner. When absent, falls back to portfolio-briefing logic.
  */
 
 import type Database from 'better-sqlite3'
@@ -13,7 +17,31 @@ import type { Result } from '../common/result.js'
 import { MissionRepository } from './repository.js'
 import { MissionRunRepository } from './run-repository.js'
 import { getOutputParser } from './output-parser.js'
+import type { MissionParseResult } from './output-parser.js'
 import type { MissionRun, MissionRunGate, MissionContextSnapshot } from './schemas.js'
+
+// ── Context types for dep hooks ──
+
+export interface MissionContext {
+  [key: string]: unknown
+}
+
+export interface MissionContextSnapshotPartial {
+  domainsRead?: string[]
+  kbDigests?: MissionContextSnapshot['kbDigests']
+  healthSnapshotHash?: string
+  overdueGTasks?: number
+  missionType?: string
+  inputsHash?: string
+  [key: string]: unknown
+}
+
+export interface GateEvaluation {
+  needsGate: boolean
+  actionIds: string[]
+  message: string
+  warnings?: Array<{ code: string; message: string }>
+}
 
 // ── Dependencies (injected from platform layer) ──
 
@@ -50,6 +78,37 @@ export interface MissionRunnerDeps {
     eventType: string
     source: string
   }) => void
+
+  // ── Optional hooks for mission-specific behavior ──
+
+  /** Assemble mission-specific context + provenance snapshot. */
+  buildContext?: (domainId: string, inputs: Record<string, unknown>) => Promise<{
+    context: MissionContext
+    snapshot: MissionContextSnapshotPartial
+  }>
+
+  /** Build system + user prompts from context + inputs. */
+  buildPrompts?: (
+    context: MissionContext,
+    inputs: Record<string, unknown>,
+  ) => { system: string; user: string }
+
+  /** Mission-specific gate evaluation (includes input validation like email format). */
+  shouldGate?: (
+    inputs: Record<string, unknown>,
+    parseResult: MissionParseResult,
+  ) => GateEvaluation
+
+  /** Email body from stored outputs. */
+  buildEmailBody?: (
+    outputs: Array<{ contentJson: Record<string, unknown>; outputType: string }>,
+  ) => string
+
+  /** Email subject from stored inputs + outputs (content-aware). */
+  buildEmailSubject?: (
+    inputs: Record<string, unknown>,
+    outputs: Array<{ contentJson: Record<string, unknown>; outputType: string }>,
+  ) => string
 }
 
 // ── Progress events ──
@@ -82,10 +141,6 @@ export class MissionRunner {
     provider: string,
     signal: AbortSignal,
   ): Promise<Result<MissionRun, DomainOSError>> {
-    const emit = (event: Omit<MissionProgressEvent, 'requestId' | 'runId'>) => {
-      // Will be filled once we have a run
-    }
-
     // ── Step 1: Validate inputs ──
     const missionResult = this.missionRepo.getById(missionId)
     if (!missionResult.ok) return missionResult
@@ -111,41 +166,97 @@ export class MissionRunner {
     }
 
     // ── Step 3: Assemble context ──
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let health: any
-    let digests: Array<{ domainId: string; domainName: string; content: string }>
-    let overdueGTasks: number
+    let systemPrompt: string
+    let userMessage: string
+    let contextSnapshot: MissionContextSnapshot
 
-    try {
-      const healthResult = await this.deps.computeHealth(this.deps.db)
-      if (!healthResult.ok) return healthResult
-      health = healthResult.value
+    if (this.deps.buildContext && this.deps.buildPrompts) {
+      // Mission-specific context + prompt building
+      let missionContext: MissionContext
+      let snapshotPartial: MissionContextSnapshotPartial
 
-      digests = await this.deps.loadDigests([]) // Will be filled from domain list
-      overdueGTasks = await this.deps.loadGlobalOverdueGTasks()
-    } catch (e) {
-      return Err(DomainOSError.db(`Context assembly failed: ${(e as Error).message}`))
+      try {
+        const built = await this.deps.buildContext(domainId, mergedInputs)
+        missionContext = built.context
+        snapshotPartial = built.snapshot
+      } catch (e) {
+        return Err(DomainOSError.db(`Context assembly failed: ${(e as Error).message}`))
+      }
+
+      // ── Step 4: Build prompt ──
+      const prompts = this.deps.buildPrompts(missionContext, mergedInputs)
+      systemPrompt = prompts.system
+      userMessage = prompts.user
+
+      // Build provenance snapshot
+      const promptHash = createHash('sha256').update(systemPrompt + '\n---\n' + userMessage).digest('hex')
+      contextSnapshot = {
+        domainsRead: snapshotPartial.domainsRead ?? [domainId],
+        kbDigests: snapshotPartial.kbDigests ?? [],
+        missionType: snapshotPartial.missionType ?? mission.definition.type,
+        inputsHash: createHash('sha256').update(JSON.stringify(mergedInputs)).digest('hex'),
+        promptHash,
+        systemPromptChars: systemPrompt.length,
+        userPromptChars: userMessage.length,
+      }
+      // Compute contextHash from the full snapshot
+      contextSnapshot.contextHash = createHash('sha256')
+        .update(JSON.stringify(contextSnapshot))
+        .digest('hex')
+    } else {
+      // Portfolio-briefing fallback (current behavior)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let health: any
+      let digests: Array<{ domainId: string; domainName: string; content: string }>
+      let overdueGTasks: number
+
+      try {
+        const healthResult = await this.deps.computeHealth(this.deps.db)
+        if (!healthResult.ok) return healthResult
+        health = healthResult.value
+
+        digests = await this.deps.loadDigests([])
+        overdueGTasks = await this.deps.loadGlobalOverdueGTasks()
+      } catch (e) {
+        return Err(DomainOSError.db(`Context assembly failed: ${(e as Error).message}`))
+      }
+
+      // ── Step 4: Build prompt ──
+      const currentDate = new Intl.DateTimeFormat('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZoneName: 'short',
+      }).format(new Date())
+
+      systemPrompt = this.deps.buildPrompt({
+        health,
+        digests,
+        currentDate,
+        globalOverdueGTasks: overdueGTasks,
+      })
+      userMessage = 'Analyze this portfolio and produce briefing blocks.'
+
+      contextSnapshot = {
+        domainsRead: digests.map((d) => d.domainId),
+        kbDigests: digests.map((d) => ({
+          domainId: d.domainId,
+          path: 'kb_digest.md',
+          modified: new Date().toISOString(),
+          chars: d.content.length,
+          contentHash: createHash('sha256').update(d.content).digest('hex'),
+        })),
+        healthSnapshotHash: health.snapshotHash,
+        overdueGTasks,
+        systemPromptChars: systemPrompt.length,
+        userPromptChars: userMessage.length,
+      }
     }
 
-    // ── Step 4: Build prompt ──
-    const currentDate = new Intl.DateTimeFormat('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      timeZoneName: 'short',
-    }).format(new Date())
-
-    const systemPrompt = this.deps.buildPrompt({
-      health,
-      digests,
-      currentDate,
-      globalOverdueGTasks: overdueGTasks,
-    })
-
-    const promptHash = createHash('sha256').update(systemPrompt).digest('hex')
+    const promptHash = createHash('sha256').update(systemPrompt + '\n---\n' + userMessage).digest('hex')
 
     // ── Create run record ──
     const requestId = mergedInputs._requestId as string || crypto.randomUUID()
@@ -175,19 +286,6 @@ export class MissionRunner {
       run = runningResult.value
 
       // Store context snapshot
-      const contextSnapshot: MissionContextSnapshot = {
-        domainsRead: digests.map((d) => d.domainId),
-        kbDigests: digests.map((d) => ({
-          domainId: d.domainId,
-          path: 'kb_digest.md',
-          modified: new Date().toISOString(),
-          chars: d.content.length,
-          contentHash: createHash('sha256').update(d.content).digest('hex'),
-        })),
-        healthSnapshotHash: health.snapshotHash,
-        overdueGTasks,
-        promptChars: systemPrompt.length,
-      }
       this.runRepo.updateContextJson(run.id, contextSnapshot as unknown as Record<string, unknown>)
 
       // Audit: run started
@@ -200,7 +298,6 @@ export class MissionRunner {
 
       // ── Step 5: Execute LLM (streaming) ──
       emitProgress({ type: 'step_started', step: 'llm' })
-      const userMessage = 'Analyze this portfolio and produce briefing blocks.'
       let fullResponse = ''
 
       try {
@@ -248,53 +345,97 @@ export class MissionRunner {
 
       // ── Step 8: Evaluate gates ──
       emitProgress({ type: 'step_started', step: 'gates' })
-      const createDeadlines = mergedInputs.createDeadlines === true
-      const draftEmailTo = (mergedInputs.draftEmailTo as string) || ''
-      const parsedActions = parseResult.outputs.filter((o) => o.type === 'action')
-      const needsGate = (createDeadlines && parsedActions.length > 0) || draftEmailTo.length > 0
 
-      if (needsGate) {
-        // Create pending actions first
-        if (createDeadlines && parsedActions.length > 0) {
-          for (let i = 0; i < parsedActions.length; i++) {
-            this.runRepo.addAction(run.id, `deadline-${i}`, 'create_deadline')
+      if (this.deps.shouldGate) {
+        // Mission-specific gate evaluation
+        const gateEval = this.deps.shouldGate(mergedInputs, parseResult)
+
+        // Store warnings in context if present
+        if (gateEval.warnings && gateEval.warnings.length > 0) {
+          const currentCtx = contextSnapshot as unknown as Record<string, unknown>
+          currentCtx.warnings = gateEval.warnings
+          this.runRepo.updateContextJson(run.id, currentCtx)
+        }
+
+        if (gateEval.needsGate) {
+          // Validate actionIds against mission definition
+          for (const actionId of gateEval.actionIds) {
+            const definedAction = mission.definition.actions.find((a) => a.id === actionId)
+            if (!definedAction) {
+              const errMsg = `Gate references unknown actionId "${actionId}" not in mission definition`
+              this.runRepo.updateStatus(run.id, 'failed', errMsg)
+              emitProgress({ type: 'run_failed', error: errMsg })
+              return this.runRepo.getById(run.id)
+            }
+            // Create pending action
+            this.runRepo.addAction(run.id, actionId, definedAction.type as 'create_deadline' | 'draft_email' | 'notification')
+          }
+
+          const gateResult = this.runRepo.createGate(run.id, 'side-effects', gateEval.message)
+          if (gateResult.ok) {
+            const gatedResult = this.runRepo.updateStatus(run.id, 'gated')
+            if (!gatedResult.ok) return gatedResult
+            run = gatedResult.value
+
+            this.deps.auditLog({
+              domainId,
+              changeDescription: `Mission gate triggered: ${gateEval.message} (run ${run.id})`,
+              eventType: 'mission_gate_triggered',
+              source: 'mission',
+            })
+
+            emitProgress({ type: 'gate_triggered', gate: gateResult.value })
+            emitProgress({ type: 'step_completed', step: 'gates' })
+            return Ok(run)
           }
         }
-        if (draftEmailTo) {
-          this.runRepo.addAction(run.id, 'draft-email', 'draft_email')
-        }
+      } else {
+        // Portfolio-briefing fallback (current behavior)
+        const createDeadlines = mergedInputs.createDeadlines === true
+        const draftEmailTo = (mergedInputs.draftEmailTo as string) || ''
+        const parsedActions = parseResult.outputs.filter((o) => o.type === 'action')
+        const needsGate = (createDeadlines && parsedActions.length > 0) || draftEmailTo.length > 0
 
-        // Build gate message
-        const parts: string[] = []
-        if (createDeadlines && parsedActions.length > 0) {
-          parts.push(`Create ${parsedActions.length} deadline(s)`)
-        }
-        if (draftEmailTo) {
-          parts.push(`Draft email to ${draftEmailTo}`)
-        }
+        if (needsGate) {
+          if (createDeadlines && parsedActions.length > 0) {
+            for (let i = 0; i < parsedActions.length; i++) {
+              this.runRepo.addAction(run.id, `deadline-${i}`, 'create_deadline')
+            }
+          }
+          if (draftEmailTo) {
+            this.runRepo.addAction(run.id, 'draft-email', 'draft_email')
+          }
 
-        const gateResult = this.runRepo.createGate(
-          run.id,
-          'side-effects',
-          `Approve: ${parts.join(', ')}`,
-        )
+          const parts: string[] = []
+          if (createDeadlines && parsedActions.length > 0) {
+            parts.push(`Create ${parsedActions.length} deadline(s)`)
+          }
+          if (draftEmailTo) {
+            parts.push(`Draft email to ${draftEmailTo}`)
+          }
 
-        if (gateResult.ok) {
-          const gatedResult = this.runRepo.updateStatus(run.id, 'gated')
-          if (!gatedResult.ok) return gatedResult
-          run = gatedResult.value
+          const gateResult = this.runRepo.createGate(
+            run.id,
+            'side-effects',
+            `Approve: ${parts.join(', ')}`,
+          )
 
-          // Audit: gate triggered
-          this.deps.auditLog({
-            domainId,
-            changeDescription: `Mission gate triggered: ${parts.join(', ')} (run ${run.id})`,
-            eventType: 'mission_gate_triggered',
-            source: 'mission',
-          })
+          if (gateResult.ok) {
+            const gatedResult = this.runRepo.updateStatus(run.id, 'gated')
+            if (!gatedResult.ok) return gatedResult
+            run = gatedResult.value
 
-          emitProgress({ type: 'gate_triggered', gate: gateResult.value })
-          emitProgress({ type: 'step_completed', step: 'gates' })
-          return Ok(run)
+            this.deps.auditLog({
+              domainId,
+              changeDescription: `Mission gate triggered: ${parts.join(', ')} (run ${run.id})`,
+              eventType: 'mission_gate_triggered',
+              source: 'mission',
+            })
+
+            emitProgress({ type: 'gate_triggered', gate: gateResult.value })
+            emitProgress({ type: 'step_completed', step: 'gates' })
+            return Ok(run)
+          }
         }
       }
       emitProgress({ type: 'step_completed', step: 'gates' })
@@ -355,7 +496,8 @@ export class MissionRunner {
     const outputsResult = this.runRepo.getOutputs(runId)
     if (!outputsResult.ok) return outputsResult
 
-    const parsedActions = outputsResult.value.filter((o) => o.outputType === 'action')
+    const storedOutputs = outputsResult.value
+    const parsedActions = storedOutputs.filter((o) => o.outputType === 'action')
 
     for (const action of actionsResult.value) {
       if (action.status !== 'pending') continue
@@ -382,14 +524,21 @@ export class MissionRunner {
             this.runRepo.updateAction(action.id, 'skipped', { reason: 'no matching parsed action' })
           }
         } else if (action.type === 'draft_email') {
-          const inputs = run.inputsJson
-          const to = inputs.draftEmailTo as string
+          const storedInputs = run.inputsJson
+          const to = storedInputs.draftEmailTo as string
           if (to) {
-            // Assemble email from outputs
-            const alerts = outputsResult.value.filter((o) => o.outputType === 'alert')
-            const actions = outputsResult.value.filter((o) => o.outputType === 'action')
-            const subject = `Portfolio Briefing — ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
-            const body = this.buildEmailBody(alerts, actions)
+            // Build email subject + body using hooks or fallback
+            const subject = this.deps.buildEmailSubject
+              ? this.deps.buildEmailSubject(storedInputs, storedOutputs)
+              : `Portfolio Briefing — ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+
+            const body = this.deps.buildEmailBody
+              ? this.deps.buildEmailBody(storedOutputs)
+              : this.buildEmailBody(
+                  storedOutputs.filter((o) => o.outputType === 'alert'),
+                  storedOutputs.filter((o) => o.outputType === 'action'),
+                )
+
             const draftId = await this.deps.createGmailDraft(to, subject, body)
             this.runRepo.updateAction(action.id, 'success', { draftId })
           } else {

@@ -35,7 +35,7 @@ export type {
   MissionContextSnapshot,
 } from './schemas.js'
 
-export { MissionRepository, computeDefinitionHash } from './repository.js'
+export { MissionRepository, computeDefinitionHash, deepSortKeys } from './repository.js'
 
 export { MissionRunRepository } from './run-repository.js'
 
@@ -55,6 +55,9 @@ export { MissionRunner } from './runner.js'
 export type {
   MissionRunnerDeps,
   MissionProgressEvent,
+  MissionContext,
+  MissionContextSnapshotPartial,
+  GateEvaluation,
 } from './runner.js'
 
 // Ensure parsers are registered on module load

@@ -7,6 +7,7 @@
  */
 
 import { parseBriefingAnalysis } from '../briefing/output-parser.js'
+import { parseLoanReview } from '../loan-review/output-parser.js'
 import type { MissionOutputType } from './schemas.js'
 
 // ── Parser interface ──
@@ -47,6 +48,14 @@ registerOutputParser('portfolio-briefing', {
       rawText,
       diagnostics: result.diagnostics,
     }
+  },
+})
+
+// ── Loan Document Review parser ──
+
+registerOutputParser('loan-document-review', {
+  parse(rawText: string): MissionParseResult {
+    return parseLoanReview(rawText)
   },
 })
 

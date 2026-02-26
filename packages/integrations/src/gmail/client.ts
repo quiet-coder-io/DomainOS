@@ -247,6 +247,29 @@ export class GmailClient {
     }
   }
 
+  /**
+   * Create a draft email in Gmail.
+   * Returns the draft ID on success.
+   */
+  async createDraft(to: string, subject: string, body: string): Promise<string> {
+    // Build RFC 2822 message
+    const lines = [
+      `To: ${to}`,
+      `Subject: ${subject}`,
+      'Content-Type: text/plain; charset=utf-8',
+      '',
+      body,
+    ]
+    const raw = Buffer.from(lines.join('\r\n')).toString('base64url')
+
+    const res = await this.gmail.users.drafts.create({
+      userId: 'me',
+      requestBody: { message: { raw } },
+    })
+
+    return res.data.id ?? ''
+  }
+
   async getAttachmentData(messageId: string, attachmentId: string): Promise<Buffer | null> {
     try {
       const res = await this.gmail.users.messages.attachments.get({

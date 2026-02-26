@@ -26,7 +26,7 @@ export type MissionActionStatus = z.infer<typeof MissionActionStatusSchema>
 export const MissionActionTypeSchema = z.enum(['create_deadline', 'draft_email', 'notification'])
 export type MissionActionType = z.infer<typeof MissionActionTypeSchema>
 
-export const MissionOutputTypeSchema = z.enum(['alert', 'action', 'monitor', 'raw'])
+export const MissionOutputTypeSchema = z.enum(['alert', 'action', 'monitor', 'raw', 'loan_review_memo'])
 export type MissionOutputType = z.infer<typeof MissionOutputTypeSchema>
 
 export const ProviderNameSchema = z.enum(['anthropic', 'openai', 'ollama'])
@@ -53,6 +53,12 @@ export interface MissionDefinition {
     default: unknown
     description: string
   }>
+  scope?: 'single-domain' | 'cross-domain'
+  parametersOrder?: string[]
+  /** Human-readable methodology name (e.g. "CMBS Loan Review"). */
+  methodology?: string
+  /** Labels for what this mission produces (e.g. ["Attorney Memo", "Risk Heatmap"]). */
+  outputLabels?: string[]
 }
 
 // ── Domain types ──
@@ -161,6 +167,10 @@ export interface MissionSummary {
   description: string
   isEnabled: boolean
   parameters: MissionDefinition['parameters']
+  scope?: MissionDefinition['scope']
+  parametersOrder?: MissionDefinition['parametersOrder']
+  methodology?: MissionDefinition['methodology']
+  outputLabels?: MissionDefinition['outputLabels']
 }
 
 export interface MissionRunSummary {
@@ -193,7 +203,12 @@ export interface MissionContextSnapshot {
     chars: number
     contentHash: string
   }>
-  healthSnapshotHash: string
-  overdueGTasks: number
-  promptChars: number
+  healthSnapshotHash?: string
+  overdueGTasks?: number
+  missionType?: string
+  inputsHash?: string
+  contextHash?: string
+  promptHash?: string
+  systemPromptChars?: number
+  userPromptChars?: number
 }

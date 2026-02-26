@@ -304,6 +304,7 @@ export interface DomainOSAPI {
     run(missionId: string, domainId: string, inputs: Record<string, unknown>, requestId: string): Promise<IPCResult<MissionRunData>>
     runStatus(runId: string): Promise<IPCResult<MissionRunDetailData>>
     runCancel(runId: string): Promise<IPCResult<void>>
+    runCancelByRequestId(requestId: string): Promise<IPCResult<void>>
     gateDecide(runId: string, gateId: string, approved: boolean): Promise<IPCResult<MissionRunData>>
     runHistory(domainId: string, limit?: number): Promise<IPCResult<MissionRunSummaryData[]>>
     activeRun(): Promise<IPCResult<MissionRunDetailData | null>>
@@ -823,7 +824,7 @@ export type MissionRunStatus = 'pending' | 'running' | 'gated' | 'success' | 'fa
 export type MissionGateStatus = 'pending' | 'approved' | 'rejected'
 export type MissionActionStatus = 'pending' | 'success' | 'failed' | 'skipped'
 export type MissionActionType = 'create_deadline' | 'draft_email' | 'notification'
-export type MissionOutputType = 'alert' | 'action' | 'monitor' | 'raw'
+export type MissionOutputType = 'alert' | 'action' | 'monitor' | 'raw' | 'loan_review_memo'
 
 export interface MissionSummary {
   id: string
@@ -832,6 +833,10 @@ export interface MissionSummary {
   description: string
   isEnabled: boolean
   parameters: Record<string, { type: string; default: unknown; description: string }>
+  scope?: 'single-domain' | 'cross-domain'
+  parametersOrder?: string[]
+  methodology?: string
+  outputLabels?: string[]
 }
 
 export interface MissionDetail {
@@ -845,6 +850,10 @@ export interface MissionDetail {
     gates: Array<{ id: string; description: string; triggeredWhen: string }>
     actions: Array<{ id: string; type: string; description: string }>
     parameters: Record<string, { type: string; default: unknown; description: string }>
+    scope?: 'single-domain' | 'cross-domain'
+    parametersOrder?: string[]
+    methodology?: string
+    outputLabels?: string[]
   }
   definitionHash: string
   isEnabled: boolean

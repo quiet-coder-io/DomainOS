@@ -34,11 +34,29 @@ interface MissionDomainAssocRow {
 // ── Helpers ──
 
 /**
- * Compute canonical hash: parse → stable key sort → stringify → SHA-256.
+ * Deep-sort object keys recursively for canonical hashing.
+ * Arrays preserve order; objects get sorted keys.
+ */
+export function deepSortKeys(obj: unknown): unknown {
+  if (Array.isArray(obj)) {
+    return obj.map(deepSortKeys)
+  }
+  if (obj !== null && typeof obj === 'object') {
+    const sorted: Record<string, unknown> = {}
+    for (const key of Object.keys(obj as Record<string, unknown>).sort()) {
+      sorted[key] = deepSortKeys((obj as Record<string, unknown>)[key])
+    }
+    return sorted
+  }
+  return obj
+}
+
+/**
+ * Compute canonical hash: parse → deep stable key sort → stringify → SHA-256.
  */
 export function computeDefinitionHash(definitionJson: string): { canonical: string; hash: string } {
   const parsed = JSON.parse(definitionJson)
-  const canonical = JSON.stringify(parsed, Object.keys(parsed).sort())
+  const canonical = JSON.stringify(deepSortKeys(parsed))
   const hash = createHash('sha256').update(canonical).digest('hex')
   return { canonical, hash }
 }
@@ -66,6 +84,10 @@ function missionToSummary(mission: Mission): MissionSummary {
     description: mission.definition.description,
     isEnabled: mission.isEnabled,
     parameters: mission.definition.parameters,
+    scope: mission.definition.scope,
+    parametersOrder: mission.definition.parametersOrder,
+    methodology: mission.definition.methodology,
+    outputLabels: mission.definition.outputLabels,
   }
 }
 

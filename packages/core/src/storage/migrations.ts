@@ -764,6 +764,106 @@ const migrations: Migration[] = [
       `).run(missionId, 'Portfolio Briefing', 1, canonicalJson, definitionHash, 'system', 'v1.0.0', 1, now, now)
     },
   },
+  {
+    version: 19,
+    description: 'Loan Document Review mission — single-domain CMBS loan doc review with attorney memo output',
+    up(db) {
+      const definition = {
+        type: 'loan-document-review',
+        description: 'CMBS-methodology loan document review producing a structured attorney memo and risk heatmap.',
+        scope: 'single-domain',
+        methodology: 'CMBS Loan Review',
+        outputLabels: ['Attorney Memo', 'Risk Heatmap'],
+        parametersOrder: ['reviewDepth', 'docPaths', 'draftEmailTo'],
+        steps: [
+          'load-kb',
+          'build-prompt',
+          'stream-llm',
+          'parse-outputs',
+          'evaluate-gates',
+          'execute-actions',
+        ],
+        gates: [
+          {
+            id: 'side-effects',
+            description: 'Approve attorney memo email draft',
+            triggeredWhen: 'email-requested',
+          },
+        ],
+        actions: [
+          { id: 'draft-email', type: 'draft_email', description: 'Draft attorney memo email' },
+        ],
+        parameters: {
+          reviewDepth: { type: 'string', default: 'attorney-prep', description: 'triage | attorney-prep | full-review' },
+          docPaths: { type: 'string', default: '', description: 'Comma/newline-separated KB paths (empty = full digest)' },
+          draftEmailTo: { type: 'string', default: '', description: 'Attorney email for memo draft (empty = skip)' },
+        },
+      }
+
+      // Deep-sort canonicalizer for stable hash
+      function deepSort(obj: unknown): unknown {
+        if (Array.isArray(obj)) return obj.map(deepSort)
+        if (obj !== null && typeof obj === 'object') {
+          const sorted: Record<string, unknown> = {}
+          for (const key of Object.keys(obj as Record<string, unknown>).sort()) {
+            sorted[key] = deepSort((obj as Record<string, unknown>)[key])
+          }
+          return sorted
+        }
+        return obj
+      }
+
+      const canonicalJson = JSON.stringify(deepSort(definition))
+      const definitionHash = createHash('sha256').update(canonicalJson).digest('hex')
+      const now = new Date().toISOString()
+      const missionId = 'loan-document-review'
+
+      db.prepare(`
+        INSERT OR IGNORE INTO missions (id, name, version, definition_json, definition_hash, seed_source, seed_version, is_enabled, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(missionId, 'Loan Document Review', 1, canonicalJson, definitionHash, 'system', 'v1.0.0', 1, now, now)
+    },
+  },
+  {
+    version: 20,
+    description: 'Add methodology + outputLabels to mission definitions',
+    up(db) {
+      function deepSort(obj: unknown): unknown {
+        if (Array.isArray(obj)) return obj.map(deepSort)
+        if (obj !== null && typeof obj === 'object') {
+          const sorted: Record<string, unknown> = {}
+          for (const key of Object.keys(obj as Record<string, unknown>).sort()) {
+            sorted[key] = deepSort((obj as Record<string, unknown>)[key])
+          }
+          return sorted
+        }
+        return obj
+      }
+
+      const updates: Array<{ id: string; methodology: string; outputLabels: string[] }> = [
+        { id: 'loan-document-review', methodology: 'CMBS Loan Review', outputLabels: ['Attorney Memo', 'Risk Heatmap'] },
+        { id: 'portfolio-briefing', methodology: 'Portfolio Health Analysis', outputLabels: ['Alerts', 'Actions', 'Monitors'] },
+      ]
+
+      for (const { id, methodology, outputLabels } of updates) {
+        const row = db.prepare('SELECT definition_json FROM missions WHERE id = ?').get(id) as { definition_json: string } | undefined
+        if (!row) continue
+
+        const def = JSON.parse(row.definition_json)
+        if (def.methodology) continue // already patched
+
+        def.methodology = methodology
+        def.outputLabels = outputLabels
+
+        const canonicalJson = JSON.stringify(deepSort(def))
+        const definitionHash = createHash('sha256').update(canonicalJson).digest('hex')
+        const now = new Date().toISOString()
+
+        db.prepare('UPDATE missions SET definition_json = ?, definition_hash = ?, updated_at = ? WHERE id = ?')
+          .run(canonicalJson, definitionHash, now, id)
+      }
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

@@ -60,6 +60,7 @@ import {
   MissionRunner,
   initMissionParsers,
   DomainOSError,
+  buildLoanReviewPrompt,
 } from '@domain-os/core'
 import type {
   CreateDomainInput,
@@ -80,6 +81,7 @@ import type {
   UpdateAutomationInput,
   MissionProgressEvent,
   MissionRunnerDeps,
+  MissionParseResult,
   CreateSkillInput,
   UpdateSkillInput,
   Result,
@@ -114,6 +116,97 @@ export const missionEvents = new EventEmitter()
 // Mission run tracking — module scope so abort controllers survive across IPC calls
 const activeMissionRuns = new Map<string, AbortController>()
 const requestIdByRunId = new Map<string, string>()
+
+// ── KB content loader for loan-document-review missions ──
+
+interface KBFileEntry {
+  relativePath: string
+  chars: number
+  contentHash: string
+  mtime: string
+}
+
+async function loadKBContent(
+  kbPath: string,
+  docPathsRaw: string,
+): Promise<{
+  content: string
+  files: KBFileEntry[]
+  missingPaths: string[]
+}> {
+  const { createHash: hashCreate } = await import('node:crypto')
+  const { readFile: fsReadFile, stat: fsStat } = await import('node:fs/promises')
+
+  // Parse docPaths: split on comma and newline, trim, drop empties
+  const paths = docPathsRaw
+    .split(/[,\n]/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+
+  if (paths.length === 0) {
+    // Full KB digest mode
+    try {
+      const digestPath = join(kbPath, 'kb_digest.md')
+      const raw = await fsReadFile(digestPath, 'utf-8')
+      const content = raw.slice(0, 12000) // Allow more for loan review
+      return {
+        content,
+        files: [{
+          relativePath: 'kb_digest.md',
+          chars: content.length,
+          contentHash: hashCreate('sha256').update(content).digest('hex'),
+          mtime: (await fsStat(digestPath).catch(() => null))?.mtime?.toISOString() ?? 'unknown',
+        }],
+        missingPaths: [],
+      }
+    } catch {
+      return { content: '(kb_digest.md missing)', files: [], missingPaths: [] }
+    }
+  }
+
+  // Specific docPaths mode
+  const files: KBFileEntry[] = []
+  const missingPaths: string[] = []
+  const contentParts: string[] = []
+
+  for (const p of paths) {
+    // Path traversal guard
+    if (p.includes('..') || p.startsWith('/') || p.startsWith('\\')) {
+      missingPaths.push(p)
+      continue
+    }
+
+    const fullPath = join(kbPath, p)
+    // Ensure the resolved path is under kbPath
+    const resolvedFull = resolve(fullPath)
+    const resolvedRoot = resolve(kbPath)
+    if (!resolvedFull.startsWith(resolvedRoot + sep) && resolvedFull !== resolvedRoot) {
+      missingPaths.push(p)
+      continue
+    }
+
+    try {
+      const raw = await fsReadFile(fullPath, 'utf-8')
+      const content = raw.slice(0, 8000)
+      const fileStat = await fsStat(fullPath).catch(() => null)
+      files.push({
+        relativePath: p,
+        chars: content.length,
+        contentHash: hashCreate('sha256').update(content).digest('hex'),
+        mtime: fileStat?.mtime?.toISOString() ?? 'unknown',
+      })
+      contentParts.push(`--- ${p} ---\n${content}`)
+    } catch {
+      missingPaths.push(p)
+    }
+  }
+
+  return {
+    content: contentParts.join('\n\n'),
+    files,
+    missingPaths,
+  }
+}
 
 // ── Gmail URL parser (for drag-and-drop context) ──
 
@@ -2502,7 +2595,21 @@ Rules:
         }
       }
 
-      // Build deps
+      // ── Shared helper: real Gmail draft ──
+      async function createRealGmailDraft(to: string, subject: string, body: string): Promise<string> {
+        const creds = await loadGmailCredentials()
+        if (!creds) {
+          throw new Error('Gmail not connected. Connect Gmail in Settings.')
+        }
+        const client = new GmailClient({
+          clientId: creds.clientId,
+          clientSecret: creds.clientSecret,
+          refreshToken: creds.refreshToken,
+        })
+        return client.createDraft(to, subject, body)
+      }
+
+      // ── Build base deps (shared across all mission types) ──
       const deps: MissionRunnerDeps = {
         db,
         async streamLLM(systemPrompt, userMessage, onChunk, signal) {
@@ -2536,9 +2643,7 @@ Rules:
           })
         },
         async createGmailDraft(to, subject, body) {
-          // Placeholder — use gmail tool if available
-          console.log(`[missions] Draft email requested: to=${to}, subject=${subject}`)
-          return 'draft-placeholder'
+          return createRealGmailDraft(to, subject, body)
         },
         async loadDigests(domains: Array<{ id: string; name: string; kbPath: string }>) {
           // Load all domains if none specified
@@ -2605,6 +2710,71 @@ Rules:
         },
       }
 
+      // ── Mission-type dispatch: add hooks for loan-document-review ──
+      const missionResult = new MissionRepository(db).getById(missionId)
+      if (missionResult.ok && missionResult.value.definition.type === 'loan-document-review') {
+        deps.buildContext = async (domId: string, mInputs: Record<string, unknown>) => {
+          const domain = domainRepo.getById(domId)
+          if (!domain.ok) throw new Error(`Domain not found: ${domId}`)
+          const d = domain.value
+
+          // Parse docPaths
+          const docPathsRaw = (mInputs.docPaths as string || '').trim()
+          const { content, files, missingPaths } = await loadKBContent(d.kbPath, docPathsRaw)
+
+          return {
+            context: {
+              digest: content,
+              domainName: d.name,
+              docsReviewed: files.map((f: { relativePath: string }) => f.relativePath),
+              docsMissing: missingPaths,
+            },
+            snapshot: {
+              domainsRead: [domId],
+              kbDigests: files.map((f: { relativePath: string; chars: number; contentHash: string; mtime: string }) => ({
+                domainId: domId,
+                path: f.relativePath,
+                modified: f.mtime,
+                chars: f.chars,
+                contentHash: f.contentHash,
+              })),
+              missionType: 'loan-document-review',
+            },
+          }
+        }
+
+        deps.buildPrompts = (context, mInputs) => {
+          return buildLoanReviewPrompt(
+            context as unknown as import('@domain-os/core').LoanReviewContext,
+            mInputs,
+          )
+        }
+
+        deps.shouldGate = (mInputs: Record<string, unknown>, _parseResult: MissionParseResult) => {
+          const email = (mInputs.draftEmailTo as string || '').trim()
+          const warnings: Array<{ code: string; message: string }> = []
+          if (!email) return { needsGate: false, actionIds: [], message: '', warnings }
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            warnings.push({ code: 'invalid_email', message: `Invalid email: ${email}` })
+            return { needsGate: false, actionIds: [], message: '', warnings }
+          }
+          return { needsGate: true, actionIds: ['draft-email'], message: `Draft attorney memo to ${email}`, warnings }
+        }
+
+        deps.buildEmailBody = (outputs) => {
+          const memo = outputs.find((o) => o.outputType === 'loan_review_memo')
+          if (memo && memo.contentJson.fullText) {
+            return `Loan Document Review — Attorney Memo\n\n${memo.contentJson.fullText as string}\n\nGenerated by DomainOS Mission System`
+          }
+          return 'Loan Document Review memo attached.\n\nGenerated by DomainOS Mission System'
+        }
+
+        deps.buildEmailSubject = (mInputs, _outputs) => {
+          const depth = (mInputs.reviewDepth as string) || 'attorney-prep'
+          return `Loan Document Review (${depth}) — ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+        }
+      }
+
       const runner = new MissionRunner(deps)
 
       // Store abort controller keyed by requestId only
@@ -2663,6 +2833,17 @@ Rules:
   })
 
   // Renderer passes DB runId. Resolve requestId from DB (MissionRun.requestId is
+  // Cancel by requestId — used during streaming before runId is known to the renderer.
+  ipcMain.handle('mission:run-cancel-by-request-id', (_event, requestId: string) => {
+    const controller = activeMissionRuns.get(requestId)
+    if (controller) {
+      controller.abort()
+      return { ok: true, value: undefined }
+    }
+    return { ok: false, error: 'No active run found for requestId' }
+  })
+
+  // Cancel by runId — used after streaming when runId is known (or for gated runs
   // persisted at run creation, before streaming) to abort in-flight controller.
   ipcMain.handle('mission:run-cancel', (_event, runId: string) => {
     // Resolve requestId: try DB first, fall back to gated reverse map
@@ -2713,6 +2894,20 @@ Rules:
       const resolvedModel = globalConfig.defaultModel ?? DEFAULT_MODELS[resolvedProvider]
       const ollamaBaseUrl = globalConfig.ollamaBaseUrl ?? 'http://localhost:11434'
 
+      // Shared Gmail draft helper for gate-decide
+      async function gateCreateGmailDraft(to: string, subject: string, body: string): Promise<string> {
+        const creds = await loadGmailCredentials()
+        if (!creds) {
+          throw new Error('Gmail not connected. Connect Gmail in Settings.')
+        }
+        const client = new GmailClient({
+          clientId: creds.clientId,
+          clientSecret: creds.clientSecret,
+          refreshToken: creds.refreshToken,
+        })
+        return client.createDraft(to, subject, body)
+      }
+
       const deps: MissionRunnerDeps = {
         db,
         async streamLLM() { return '' },
@@ -2727,8 +2922,7 @@ Rules:
           })
         },
         async createGmailDraft(to, subject, body) {
-          console.log(`[missions] Draft email requested: to=${to}, subject=${subject}`)
-          return 'draft-placeholder'
+          return gateCreateGmailDraft(to, subject, body)
         },
         async loadDigests() { return [] },
         async loadGlobalOverdueGTasks() { return 0 },
@@ -2747,6 +2941,25 @@ Rules:
             source: input.source,
           })
         },
+      }
+
+      // Look up mission type from run record for email hooks
+      const gateRunResult = missionRunRepo.getById(runId)
+      if (gateRunResult.ok) {
+        const gateMissionResult = new MissionRepository(db).getById(gateRunResult.value.missionId)
+        if (gateMissionResult.ok && gateMissionResult.value.definition.type === 'loan-document-review') {
+          deps.buildEmailBody = (outputs) => {
+            const memo = outputs.find((o) => o.outputType === 'loan_review_memo')
+            if (memo && memo.contentJson.fullText) {
+              return `Loan Document Review — Attorney Memo\n\n${memo.contentJson.fullText as string}\n\nGenerated by DomainOS Mission System`
+            }
+            return 'Loan Document Review memo attached.\n\nGenerated by DomainOS Mission System'
+          }
+          deps.buildEmailSubject = (mInputs, _outputs) => {
+            const depth = (mInputs.reviewDepth as string) || 'attorney-prep'
+            return `Loan Document Review (${depth}) — ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+          }
+        }
       }
 
       const runner = new MissionRunner(deps)

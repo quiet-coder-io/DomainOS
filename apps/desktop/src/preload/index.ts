@@ -300,6 +300,7 @@ const api: DomainOSAPI = {
       ipcRenderer.invoke('mission:run', missionId, domainId, inputs, requestId),
     runStatus: (runId: string) => ipcRenderer.invoke('mission:run-status', runId),
     runCancel: (runId: string) => ipcRenderer.invoke('mission:run-cancel', runId),
+    runCancelByRequestId: (requestId: string) => ipcRenderer.invoke('mission:run-cancel-by-request-id', requestId),
     gateDecide: (runId: string, gateId: string, approved: boolean) =>
       ipcRenderer.invoke('mission:gate-decide', runId, gateId, approved),
     runHistory: (domainId: string, limit?: number) =>

@@ -226,7 +226,18 @@ export const useMissionStore = create<MissionState>((set, get) => ({
   },
 
   cancelRun() {
-    const { runningRunId, runningDomainId, activeRunByDomain } = get()
+    const { runningRunId, runningDomainId, activeRunByDomain, activeRequestIdByDomain } = get()
+
+    // Prefer requestId-based cancel (works during streaming, before runId is known)
+    if (runningDomainId) {
+      const requestId = activeRequestIdByDomain[runningDomainId]
+      if (requestId) {
+        window.domainOS.mission.runCancelByRequestId(requestId)
+        return
+      }
+    }
+
+    // Fall back to runId-based cancel
     const runId = runningRunId ?? (runningDomainId ? activeRunByDomain[runningDomainId]?.run.id : null)
     if (runId) {
       window.domainOS.mission.runCancel(runId)
