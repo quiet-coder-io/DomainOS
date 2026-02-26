@@ -62,7 +62,7 @@ This loop validates the core value prop: domain-scoped AI that reads and writes 
 - **Cross-domain features** — directed domain relationships with dependency types (blocks, depends_on, informs, parallel, monitor_only) + sibling relationships
 - **Portfolio health briefing** — computed health scoring, cross-domain alerts, LLM-powered analysis with streaming, snapshot hashing for stale detection
 - **Browser ingestion pipeline** — Chrome extension → localhost intake server → AI classification
-- **Gmail drag-and-drop** — drag emails from Gmail directly into chat as LLM context via Chrome extension content script with drag handles; subject encoded in URL query param (only reliable cross-app drag channel)
+- **Gmail drag-and-drop** — drag emails from Gmail directly into chat as LLM context via Chrome extension content script with drag handles; subject encoded in URL query param (only reliable cross-app drag channel). Automatically extracts text from PDF, Excel, and Word attachments via main-process enrichment (5MB/att, 10K chars/att, 5 per message, 25 per thread). Unsupported/oversized attachments listed in skipped summary for LLM transparency.
 - **KB file watching** — filesystem monitoring with debounced auto-scan on domain switch
 - **Strategic advisory system** — mode-classified responses (brainstorm/challenge/review/scenario/general), persistent advisory artifacts with strict Zod-validated JSON fence blocks, 4 read-only advisory tools, deterministic task extraction, cross-domain contamination guard
 - **Decision quality gates** — confidence, horizon, reversibility class, category, authority source tier on decision records
@@ -80,6 +80,8 @@ Chrome Extension → localhost HTTP listener (Electron main process, token-authe
 
 ### Gmail Email Drag-and-Drop (Completed)
 Drag emails from Gmail inbox directly into the DomainOS chat panel to attach them as LLM context. The Chrome extension injects drag handles (☰) on Gmail email rows that bypass Gmail's native drag blocking (`draggable="false"` + `preventDefault` on mousedown). On `dragstart`, the content script extracts the email subject via a 3-strategy heuristic (`data-thread-id` → `role="link"` → bold-text fallback) and encodes it as a `dominos_subject` query parameter in `text/uri-list` — the only MIME type whose value reliably survives macOS cross-app drag transfer (custom MIME types, `text/html`, and `text/plain` values are stripped or overwritten). The renderer extracts the subject from the URL, searches Gmail API (with `RE:`/`FW:` prefix stripping), and presents an email preview with Attach/Cancel. Falls back to manual subject search prompt when the extension isn't installed.
+
+**Email attachment extraction**: When emails are fetched for context, the main process automatically extracts text from PDF, Excel (.xlsx/.xls), and Word (.docx) attachments before returning to the renderer. Two-phase approach: (1) deterministic pre-walk tags every attachment with eligibility (format support, size limits, per-message/thread caps) before any async work, preventing race conditions; (2) concurrency-limited (2) async extraction fetches raw data and extracts text via shared `text-extractor.ts` module (`unpdf`, `xlsx`, `mammoth`). Format detection: extension first, mimeType fallback. Budget enforcement: 5MB/attachment decoded size (gated on `buf.length`, not advisory `att.size`), 10K chars/attachment, 5 attachments/message, 20K total chars/message, 10MB total bytes/message, 25 eligible attachments/thread. Low-signal PDF guard skips scanned documents (<40 non-whitespace chars). Skipped attachments (unsupported format, too large, extraction failed, limit reached) listed in summary for LLM transparency. Preview modal shows attachment count badges (extracted in green, skipped count). `message/rfc822` (forwarded emails) explicitly skipped (v2 scope).
 
 ### Portfolio Health Briefing (Completed)
 Computed dashboard: per-domain health scoring (KB staleness × tiered importance, open gap flags, dependency status), cross-domain alerts (stale/blocked domain impacting dependents), snapshot hashing. LLM interpretive layer: streams structured analysis (alerts, prioritized actions, monitors) from health snapshot + KB digests.
@@ -146,7 +148,7 @@ Reusable mission definitions with a 10-step lifecycle runner, approval gates, an
 
 | File | Purpose |
 |------|---------|
-| `src/gmail/` | `GmailClient` (search/read), `GmailPoller`, body parser |
+| `src/gmail/` | `GmailClient` (search/read/getAttachmentData), `GmailPoller`, body parser (`extractTextBody`, `extractAttachmentMeta`), `GmailAttachmentMeta` type |
 | `src/gtasks/client.ts` | `GTasksClient` (listTaskLists, search, read, completeTask, updateTask, deleteTask, getOverdue) — on-demand Google Tasks API v1, read-write |
 
 ### Chrome Extension (`extensions/chrome-dominos/`)
@@ -162,7 +164,8 @@ Reusable mission definitions with a 10-step lifecycle runner, approval gates, an
 
 | File | Purpose |
 |------|---------|
-| `src/main/ipc-handlers.ts` | 80+ IPC handlers: domains, KB, chat, briefing, intake, protocols, sessions, relationships, gap flags, decisions, audit, advisory, skills, missions, Gmail, GTasks, settings, file text extraction |
+| `src/main/ipc-handlers.ts` | 80+ IPC handlers: domains, KB, chat, briefing, intake, protocols, sessions, relationships, gap flags, decisions, audit, advisory, skills, missions, Gmail (incl. `enrichWithAttachments` for email attachment text extraction), GTasks, settings, file text extraction |
+| `src/main/text-extractor.ts` | Shared text extraction module: `resolveFormat()` (extension-first + mimeType fallback), `extractTextFromBuffer()` (PDF via `unpdf`, Excel via `xlsx`, Word via `mammoth`), `isFormatSupported()`. Used by both `file:extract-text` IPC and gmail attachment enrichment |
 | `src/main/tool-loop.ts` | **Provider-agnostic** tool-use loop — works with Anthropic, OpenAI, Ollama; prefix-based dispatch (`gmail_*`, `gtasks_*`, `advisory_*`), ROWYS Gmail guard, tool output sanitization, transcript validation, size guards (75KB/result, 400KB total), capability cache management |
 | `src/main/advisory-tools.ts` | `ADVISORY_TOOLS` as `ToolDefinition[]` (advisory_search_decisions, advisory_search_deadlines, advisory_cross_domain_context, advisory_risk_snapshot), executors with output caps (10 items, 300 char truncation), `schemaVersion` wrapper |
 | `src/main/brainstorm-tools.ts` | `BRAINSTORM_TOOLS` as `ToolDefinition[]` (brainstorm_start_session, brainstorm_get_techniques, brainstorm_capture_ideas, brainstorm_session_status, brainstorm_synthesize, brainstorm_session_control), `executeBrainstormTool()` |
