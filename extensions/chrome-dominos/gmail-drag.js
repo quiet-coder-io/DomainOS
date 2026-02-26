@@ -35,31 +35,30 @@ const style = document.createElement('style')
 style.textContent = `
 .${HANDLE_CLASS} {
   position: absolute;
-  left: 4px;
+  left: 3px;
   top: 50%;
   transform: translateY(-50%);
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  font-size: 16px;
-  color: #1a73e8;
+  width: 18px;
+  height: 18px;
+  font-size: 13px;
+  color: #9aa0a6;
   cursor: grab;
-  border-radius: 4px;
+  border-radius: 3px;
   user-select: none;
   z-index: 10;
   opacity: 0;
   transition: opacity 0.15s;
-  background: white;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  background: transparent;
 }
 tr.zA:hover .${HANDLE_CLASS} {
   opacity: 1;
 }
 .${HANDLE_CLASS}:hover {
   background: #e8f0fe;
-  color: #1557b0;
+  color: #1a73e8;
 }
 .${HANDLE_CLASS}:active {
   cursor: grabbing;
