@@ -1585,7 +1585,9 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
 
       // Strategy B: constrained search fallback (requires a real subject hint)
       if (payload.subjectHint) {
-        const query = `subject:"${payload.subjectHint}" newer_than:7d`
+        // Strip RE:/FW: prefixes — Gmail subject: search matches the base subject
+        const cleanSubject = payload.subjectHint.replace(/^(re|fw|fwd):\s*/i, '').replace(/"/g, '')
+        const query = `subject:"${cleanSubject}"`
         const results = await client.search(query, 3)
 
         if (results.length >= 1) {

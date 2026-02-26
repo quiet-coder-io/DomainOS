@@ -440,22 +440,31 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
         try {
           const u = new URL(uriData)
           if (u.hostname.endsWith('mail.google.com')) {
-            // Chrome sets text/plain to the URL when dragging links — try text/html for subject
+            // DomainOS Chrome extension encodes subject as a query param (only reliable
+            // cross-app drag channel — custom MIME types and text/plain are stripped by macOS)
             let subjectHint: string | undefined
-            const htmlData = e.dataTransfer.getData('text/html')
-            if (htmlData) {
-              const match = htmlData.match(/<a[^>]*>([^<]+)<\/a>/i)
-              if (match?.[1]) {
-                const text = match[1].trim()
-                // Only use if it doesn't look like a URL
-                if (text && !/^https?:\/\//i.test(text)) subjectHint = text
+            const dominosSubject = u.searchParams.get('dominos_subject')
+            if (dominosSubject) {
+              subjectHint = dominosSubject
+              u.searchParams.delete('dominos_subject')
+            }
+
+            // Fallback: try text/html for subject (works for within-browser drags)
+            if (!subjectHint) {
+              const htmlData = e.dataTransfer.getData('text/html')
+              if (htmlData) {
+                const match = htmlData.match(/<a[^>]*>([^<]+)<\/a>/i)
+                if (match?.[1]) {
+                  const text = match[1].trim()
+                  if (text && !/^https?:\/\//i.test(text)) subjectHint = text
+                }
               }
             }
             if (!subjectHint) {
               const plainText = e.dataTransfer.getData('text/plain')?.trim()
               if (plainText && !/^https?:\/\//i.test(plainText)) subjectHint = plainText
             }
-            handleGmailDrop(uriData, subjectHint)
+            handleGmailDrop(u.toString(), subjectHint)
             return
           }
         } catch {
