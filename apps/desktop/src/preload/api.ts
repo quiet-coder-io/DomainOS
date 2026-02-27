@@ -33,6 +33,10 @@ export interface DomainOSAPI {
     watchStop(domainId: string): Promise<IPCResult<void>>
     onFilesChanged(callback: (domainId: string) => void): void
     offFilesChanged(): void
+    reindexEmbeddings(domainId?: string): Promise<IPCResult<void>>
+    embeddingStatus(domainId: string): Promise<IPCResult<EmbeddingStatus>>
+    onEmbeddingProgress(callback: (data: EmbeddingProgressEvent) => void): void
+    offEmbeddingProgress(): void
   }
 
   chat: {
@@ -666,6 +670,31 @@ export interface ProviderConfig {
   defaultProvider: string
   defaultModel: string
   ollamaBaseUrl: string
+  embeddingProvider?: 'auto' | 'ollama' | 'openai' | 'off'
+  embeddingModel?: string
+}
+
+export interface EmbeddingStatus {
+  enabled: boolean
+  resolvedProvider: string | null
+  activeModelName: string | null
+  isIndexing: boolean
+  jobStatus: {
+    status: 'idle' | 'running' | 'error'
+    totalChunks: number
+    embeddedChunks: number
+    lastError: string | null
+  } | null
+  hasEmbeddings: boolean
+}
+
+export interface EmbeddingProgressEvent {
+  domainId: string
+  totalFiles: number
+  processedFiles: number
+  totalChunks: number
+  embeddedChunks: number
+  status: 'running' | 'idle' | 'error'
 }
 
 export interface ToolTestResult {

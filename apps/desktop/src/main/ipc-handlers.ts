@@ -66,6 +66,8 @@ import {
   initMissionParsers,
   DomainOSError,
   buildLoanReviewPrompt,
+  KBChunkRepository,
+  buildVectorKBContext,
 } from '@domain-os/core'
 import type {
   CreateDomainInput,
@@ -111,6 +113,10 @@ import { extractTextFromBuffer, isFormatSupported, resolveFormat } from './text-
 import { emitAutomationEvent } from './automation-events'
 import { triggerManualRun } from './automation-engine'
 import { EventEmitter } from 'node:events'
+import { resolveEmbeddingClient } from './embedding-resolver'
+import type { EmbeddingResolverConfig } from './embedding-resolver'
+import { EmbeddingManager } from './embedding-manager'
+import { EmbeddingCache } from './embedding-cache'
 
 // ── Mission event bus (module scope for lifecycle stability) ──
 
@@ -264,6 +270,8 @@ interface ProviderConfigFile {
   defaultModel: string
   ollamaBaseUrl: string
   windowPinned?: boolean
+  embeddingProvider?: 'auto' | 'ollama' | 'openai' | 'off'
+  embeddingModel?: string
 }
 
 const DEFAULT_PROVIDER_CONFIG: ProviderConfigFile = {
@@ -287,6 +295,22 @@ function isAbortError(err: unknown, controller: AbortController): boolean {
   return false
 }
 
+/** Dispatch KB context building based on strategy name. */
+async function dispatchKBStrategy(
+  strategy: string,
+  kbPath: string,
+  kbFiles: Array<{ id: string; domainId: string; relativePath: string; contentHash: string; sizeBytes: number; lastSyncedAt: string; tier: string; tierSource: string }>,
+  kbBudget: number,
+) {
+  if (strategy === 'digest_only') {
+    return buildKBContextDigestOnly(kbPath, kbFiles as any, kbBudget)
+  } else if (strategy === 'digest_plus_structural') {
+    return buildKBContextDigestPlusStructural(kbPath, kbFiles as any, kbBudget)
+  } else {
+    return buildKBContext(kbPath, kbFiles as any, kbBudget)
+  }
+}
+
 // ── In-memory key cache (avoids repeated safeStorage calls) ──
 const keyCache: Map<string, string> = new Map()
 
@@ -306,6 +330,42 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
   const tagRepo = new DomainTagRepository(db)
   const skillRepo = new SkillRepository(db)
   const chatMessageRepo = new ChatMessageRepository(db)
+  const chunkRepo = new KBChunkRepository(db)
+  const embeddingCache = new EmbeddingCache()
+  const embeddingManager = new EmbeddingManager({
+    chunkRepo,
+    cache: embeddingCache,
+    onProgress: (domainId, progress) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('kb:embedding-progress', progress)
+      }
+    },
+  })
+
+  // Resolve embedding client on startup (async, non-blocking)
+  ;(async () => {
+    try {
+      const config = await loadProviderConfig()
+      const client = await resolveEmbeddingClient({
+        embeddingProvider: config.embeddingProvider,
+        embeddingModel: config.embeddingModel,
+        ollamaBaseUrl: config.ollamaBaseUrl,
+        openaiApiKey: await loadProviderKey('openai') ?? undefined,
+      } as EmbeddingResolverConfig)
+      embeddingManager.updateClient(client)
+      if (client) {
+        console.log(`[embedding] resolved: ${client.modelName} (${client.dimensions}d)`)
+      }
+    } catch (err) {
+      console.warn(`[embedding] startup resolve failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  })()
+
+  // Clean up embedding manager on app quit
+  app.on('before-quit', () => {
+    embeddingManager.cancelAll()
+    embeddingCache.clear()
+  })
 
   // Seed default shared protocols (STOP + Gap Detection) — idempotent
   seedDefaultProtocols(sharedProtocolRepo)
@@ -567,14 +627,30 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           ? (isStatusBriefingEarly ? TOKEN_BUDGETS.primaryKB - TOKEN_BUDGETS.statusBriefing : TOKEN_BUDGETS.primaryKB)
           : Math.floor(systemBudget * 0.65)
 
-        // KB context building: dispatch on strategy
+        // KB context building: try vector search first, fall back to strategy dispatch
         let kbContext: Result<{ files: Array<{ path: string; content: string; tier?: string; stalenessLabel?: string }>; totalChars: number; truncated: boolean }, DomainOSError>
-        if (promptProfile.kbStrategy === 'digest_only') {
-          kbContext = await buildKBContextDigestOnly(domain.value.kbPath, kbFiles.value, kbBudget)
-        } else if (promptProfile.kbStrategy === 'digest_plus_structural') {
-          kbContext = await buildKBContextDigestPlusStructural(domain.value.kbPath, kbFiles.value, kbBudget)
+        const embClient = embeddingManager.getClient()
+        const lastUserMsgForVector = payload.messages.filter(m => m.role === 'user').at(-1)
+        if (embClient && lastUserMsgForVector) {
+          const hasEmb = chunkRepo.hasEmbeddings(payload.domainId, embClient.modelName)
+          if (hasEmb.ok && hasEmb.value) {
+            const cached = embeddingCache.get(payload.domainId, embClient.modelName, chunkRepo)
+            kbContext = await buildVectorKBContext({
+              domainId: payload.domainId,
+              kbPath: domain.value.kbPath,
+              queryText: lastUserMsgForVector.content,
+              embeddingClient: embClient,
+              chunkRepo,
+              kbFiles: kbFiles.value,
+              tokenBudget: kbBudget,
+              cachedEmbeddings: cached,
+            })
+          } else {
+            // No embeddings yet — use existing strategy
+            kbContext = await dispatchKBStrategy(promptProfile.kbStrategy, domain.value.kbPath, kbFiles.value, kbBudget)
+          }
         } else {
-          kbContext = await buildKBContext(domain.value.kbPath, kbFiles.value, kbBudget)
+          kbContext = await dispatchKBStrategy(promptProfile.kbStrategy, domain.value.kbPath, kbFiles.value, kbBudget)
         }
         if (!kbContext.ok) return { ok: false, error: kbContext.error.message }
 
@@ -1276,8 +1352,19 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
       const scanned = await scanKBDirectory(domain.value.kbPath)
       if (scanned.ok) {
         kbRepo.sync(id, scanned.value)
+        // Trigger embedding indexing after KB sync
+        const kbFiles = kbRepo.getFiles(id)
+        if (kbFiles.ok) {
+          embeddingManager.indexDomain(id, domain.value.kbPath, kbFiles.value)
+        }
       }
     })
+
+    // Trigger initial embedding indexing
+    const kbFiles = kbRepo.getFiles(domainId)
+    if (kbFiles.ok) {
+      embeddingManager.indexDomain(domainId, domain.value.kbPath, kbFiles.value)
+    }
 
     return { ok: true, value: undefined }
   })
@@ -1285,6 +1372,59 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
   ipcMain.handle('kb:watch-stop', (_event, domainId: string) => {
     stopKBWatcher(domainId)
     return { ok: true, value: undefined }
+  })
+
+  // --- Embedding / Vector Search ---
+
+  ipcMain.handle('kb:reindex-embeddings', async (_event, domainId?: string) => {
+    const client = embeddingManager.getClient()
+    if (!client) return { ok: false, error: 'No embedding provider available' }
+
+    try {
+      if (domainId) {
+        // Re-index single domain
+        chunkRepo.deleteEmbeddingsByModel(domainId, client.modelName)
+        embeddingCache.invalidate(domainId, client.modelName)
+        const domain = domainRepo.getById(domainId)
+        if (!domain.ok) return domain
+        const kbFiles = kbRepo.getFiles(domainId)
+        if (!kbFiles.ok) return kbFiles
+        await embeddingManager.indexDomain(domainId, domain.value.kbPath, kbFiles.value)
+      } else {
+        // Re-index all domains
+        const domains = domainRepo.list()
+        if (!domains.ok) return domains
+        for (const d of domains.value) {
+          chunkRepo.deleteEmbeddingsByModel(d.id, client.modelName)
+          embeddingCache.invalidate(d.id, client.modelName)
+          const kbFiles = kbRepo.getFiles(d.id)
+          if (kbFiles.ok) {
+            embeddingManager.indexDomain(d.id, d.kbPath, kbFiles.value)
+          }
+        }
+      }
+      return { ok: true, value: undefined }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('kb:embedding-status', (_event, domainId: string) => {
+    const client = embeddingManager.getClient()
+    const jobStatus = client ? chunkRepo.getJobStatus(domainId, client.modelName) : null
+    const hasEmb = client ? chunkRepo.hasEmbeddings(domainId, client.modelName) : { ok: true, value: false }
+
+    return {
+      ok: true,
+      value: {
+        enabled: client !== null,
+        resolvedProvider: client ? client.providerFingerprint.split(':')[0] : null,
+        activeModelName: client?.modelName ?? null,
+        isIndexing: embeddingManager.isIndexing(domainId),
+        jobStatus: jobStatus?.ok ? jobStatus.value : null,
+        hasEmbeddings: hasEmb.ok ? (hasEmb as { ok: true; value: boolean }).value : false,
+      },
+    }
   })
 
   // --- Protocols ---

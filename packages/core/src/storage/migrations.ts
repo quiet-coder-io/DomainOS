@@ -875,6 +875,64 @@ const migrations: Migration[] = [
       rows.forEach((row, i) => stmt.run(i, row.id))
     },
   },
+  {
+    version: 22,
+    description: 'Vector search — kb_chunks, kb_chunk_embeddings, kb_embedding_jobs tables',
+    up(db) {
+      runSQL(db, `
+        CREATE TABLE IF NOT EXISTS kb_chunks (
+          id TEXT PRIMARY KEY,
+          kb_file_id TEXT NOT NULL REFERENCES kb_files(id) ON DELETE CASCADE,
+          domain_id TEXT NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
+          chunk_index INTEGER NOT NULL,
+          chunk_key TEXT NOT NULL,
+          heading_path TEXT NOT NULL DEFAULT '',
+          content TEXT NOT NULL,
+          content_hash TEXT NOT NULL,
+          file_content_hash TEXT NOT NULL,
+          char_count INTEGER NOT NULL,
+          token_estimate INTEGER NOT NULL,
+          start_line INTEGER,
+          end_line INTEGER,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_kb_chunks_file ON kb_chunks(kb_file_id);
+        CREATE INDEX IF NOT EXISTS idx_kb_chunks_domain ON kb_chunks(domain_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_chunks_file_key ON kb_chunks(kb_file_id, chunk_key);
+
+        CREATE TABLE IF NOT EXISTS kb_chunk_embeddings (
+          id TEXT PRIMARY KEY,
+          chunk_id TEXT NOT NULL REFERENCES kb_chunks(id) ON DELETE CASCADE,
+          model_name TEXT NOT NULL,
+          dimensions INTEGER NOT NULL,
+          embedding BLOB NOT NULL,
+          content_hash TEXT NOT NULL,
+          provider_fingerprint TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          UNIQUE(chunk_id, model_name)
+        );
+        CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_chunk ON kb_chunk_embeddings(chunk_id);
+        CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_model ON kb_chunk_embeddings(model_name);
+
+        CREATE TABLE IF NOT EXISTS kb_embedding_jobs (
+          domain_id TEXT NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
+          model_name TEXT NOT NULL,
+          run_id TEXT,
+          provider_fingerprint TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL CHECK(status IN ('idle', 'running', 'error')),
+          total_files INTEGER NOT NULL DEFAULT 0,
+          processed_files INTEGER NOT NULL DEFAULT 0,
+          total_chunks INTEGER NOT NULL DEFAULT 0,
+          embedded_chunks INTEGER NOT NULL DEFAULT 0,
+          last_error TEXT,
+          started_at TEXT,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY(domain_id, model_name)
+        );
+      `)
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

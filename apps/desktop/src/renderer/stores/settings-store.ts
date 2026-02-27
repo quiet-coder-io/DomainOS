@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ProviderKeysStatus, ProviderConfig, ToolTestResult } from '../../preload/api'
+import type { ProviderKeysStatus, ProviderConfig, ToolTestResult, EmbeddingStatus } from '../../preload/api'
 
 interface SettingsState {
   // Legacy (backward compat — maps to anthropic key)
@@ -35,6 +35,11 @@ interface SettingsState {
   loadGCPOAuthStatus(): Promise<void>
   setGCPOAuth(clientId: string, clientSecret: string): Promise<void>
   clearGCPOAuth(): Promise<void>
+
+  // Embedding / KB search
+  embeddingStatus: EmbeddingStatus | null
+  loadEmbeddingStatus(domainId: string): Promise<void>
+  reindexEmbeddings(domainId?: string): Promise<void>
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -47,6 +52,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   gcpOAuthConfigured: null,
   gcpOAuthHasBuiltIn: false,
   gcpOAuthHasOverride: false,
+  embeddingStatus: null,
 
   async loadApiKey() {
     const result = await window.domainOS.settings.getApiKey()
@@ -143,5 +149,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     } else {
       set({ gcpOAuthConfigured: false, gcpOAuthHasOverride: false })
     }
+  },
+
+  async loadEmbeddingStatus(domainId: string) {
+    const result = await window.domainOS.kb.embeddingStatus(domainId)
+    if (result.ok && result.value) {
+      set({ embeddingStatus: result.value })
+    } else {
+      set({ embeddingStatus: null })
+    }
+  },
+
+  async reindexEmbeddings(domainId?: string) {
+    await window.domainOS.kb.reindexEmbeddings(domainId)
   },
 }))

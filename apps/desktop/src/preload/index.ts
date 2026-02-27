@@ -26,6 +26,14 @@ const api: DomainOSAPI = {
     offFilesChanged() {
       ipcRenderer.removeAllListeners('kb:files-changed')
     },
+    reindexEmbeddings: (domainId?: string) => ipcRenderer.invoke('kb:reindex-embeddings', domainId),
+    embeddingStatus: (domainId: string) => ipcRenderer.invoke('kb:embedding-status', domainId),
+    onEmbeddingProgress(callback: (data: any) => void) {
+      ipcRenderer.on('kb:embedding-progress', (_event, data) => callback(data))
+    },
+    offEmbeddingProgress() {
+      ipcRenderer.removeAllListeners('kb:embedding-progress')
+    },
   },
 
   chat: {

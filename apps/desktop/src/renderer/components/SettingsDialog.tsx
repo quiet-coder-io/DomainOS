@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useSettingsStore } from '../stores'
-import type { ProviderConfig, ToolTestResult } from '../../preload/api'
+import type { ProviderConfig, ToolTestResult, EmbeddingStatus } from '../../preload/api'
 import { inputClass, primaryButtonClass, secondaryButtonClass } from './ui'
+
+type EmbeddingProviderOption = 'auto' | 'ollama' | 'openai' | 'off'
 
 interface Props {
   onClose(): void
@@ -53,6 +55,7 @@ export function SettingsDialog({ onClose }: Props): React.JSX.Element {
     testOllama,
     listOllamaModels,
     testTools,
+    reindexEmbeddings,
   } = useSettingsStore()
 
   const [tab, setTab] = useState<Tab>('keys')
@@ -82,6 +85,11 @@ export function SettingsDialog({ onClose }: Props): React.JSX.Element {
   const [toolTestResult, setToolTestResult] = useState<ToolTestResult | null>(null)
   const [toolTesting, setToolTesting] = useState(false)
 
+  // KB search / embedding state
+  const [embeddingProvider, setEmbeddingProvider] = useState<EmbeddingProviderOption>('auto')
+  const [embeddingModel, setEmbeddingModel] = useState('')
+  const [reindexing, setReindexing] = useState(false)
+
   // Load state on mount
   useEffect(() => {
     loadProviderKeysStatus()
@@ -106,6 +114,10 @@ export function SettingsDialog({ onClose }: Props): React.JSX.Element {
       setUseCustomModel(true)
       setCustomModel(providerConfig.defaultModel)
     }
+
+    // Embedding config
+    setEmbeddingProvider(providerConfig.embeddingProvider ?? 'auto')
+    setEmbeddingModel(providerConfig.embeddingModel ?? '')
   }, [providerConfig])
 
   // --- Key handlers ---
@@ -165,10 +177,12 @@ export function SettingsDialog({ onClose }: Props): React.JSX.Element {
       defaultProvider,
       defaultModel: model,
       ollamaBaseUrl: ollamaUrl.trim() || 'http://localhost:11434',
+      embeddingProvider,
+      embeddingModel: embeddingModel.trim() || undefined,
     }
     await setProviderConfig(config)
     onClose()
-  }, [defaultProvider, defaultModel, customModel, useCustomModel, ollamaUrl, setProviderConfig, onClose])
+  }, [defaultProvider, defaultModel, customModel, useCustomModel, ollamaUrl, embeddingProvider, embeddingModel, setProviderConfig, onClose])
 
   const handleProviderChange = useCallback((p: ProviderName) => {
     setDefaultProvider(p)
@@ -190,6 +204,14 @@ export function SettingsDialog({ onClose }: Props): React.JSX.Element {
     }
     setToolTestResult(null)
   }, [])
+
+  // --- Re-index embeddings ---
+
+  const handleReindex = useCallback(async () => {
+    setReindexing(true)
+    await reindexEmbeddings()
+    setReindexing(false)
+  }, [reindexEmbeddings])
 
   // --- Tool test ---
 
@@ -532,6 +554,63 @@ export function SettingsDialog({ onClose }: Props): React.JSX.Element {
                      toolTestResult.status === 'not_observed' ? 'Tool calls not observed' :
                      'Tool calls not supported'}
                   </span>
+                )}
+              </div>
+
+              {/* KB Search / Embeddings */}
+              <div className="mb-4 rounded border border-border-subtle bg-surface-0 p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-text-primary">Knowledge Base Search</span>
+                  <span className="text-xs text-text-tertiary">Semantic search over KB files</span>
+                </div>
+                <p className="text-xs text-text-tertiary mb-3">
+                  Enables vector-based retrieval so the AI sees the most relevant KB content for each question.
+                </p>
+
+                {/* Embedding provider */}
+                <label className="mb-3 block">
+                  <span className="mb-1 block text-xs text-text-secondary">Search Engine</span>
+                  <select
+                    value={embeddingProvider}
+                    onChange={(e) => setEmbeddingProvider(e.target.value as EmbeddingProviderOption)}
+                    className={inputClass}
+                  >
+                    <option value="auto">Auto (Ollama if available)</option>
+                    <option value="ollama">Ollama</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="off">Off</option>
+                  </select>
+                </label>
+
+                {embeddingProvider === 'openai' && (
+                  <p className="text-xs text-warning mb-2">
+                    KB content will be sent to OpenAI servers for embedding.
+                  </p>
+                )}
+
+                {/* Embedding model (only when not auto/off) */}
+                {(embeddingProvider === 'ollama' || embeddingProvider === 'openai') && (
+                  <label className="mb-3 block">
+                    <span className="mb-1 block text-xs text-text-secondary">Embedding Model</span>
+                    <input
+                      type="text"
+                      value={embeddingModel}
+                      onChange={(e) => setEmbeddingModel(e.target.value)}
+                      className={inputClass}
+                      placeholder={embeddingProvider === 'ollama' ? 'nomic-embed-text' : 'text-embedding-3-small'}
+                    />
+                  </label>
+                )}
+
+                {/* Re-index button */}
+                {embeddingProvider !== 'off' && (
+                  <button
+                    onClick={handleReindex}
+                    disabled={reindexing}
+                    className="rounded border border-border px-3 py-2 text-xs text-text-secondary hover:bg-surface-2 disabled:opacity-50"
+                  >
+                    {reindexing ? 'Re-indexing...' : 'Re-index All Domains'}
+                  </button>
                 )}
               </div>
 
