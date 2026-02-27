@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useChatStore, useSkillStore } from '../stores'
+import type { ChatMessage } from '../stores'
 import { MessageBubble } from './MessageBubble'
 import { SkillSelector } from './SkillSelector'
 import { StopAlert } from './StopAlert'
@@ -31,6 +32,9 @@ import {
   MAX_FILE_COUNT,
   BASE_BLOCK_OVERHEAD_CHARS,
 } from '../common/file-attach-utils'
+
+// Module-level stable reference for selector fallback (prevents new array every render)
+const EMPTY_MESSAGES: ChatMessage[] = []
 
 interface Props {
   domainId: string
@@ -86,49 +90,12 @@ function chipClass(featured?: boolean): string {
     : `${base} border border-border text-text-secondary hover:border-accent/50 hover:bg-accent/5 hover:text-text-primary`
 }
 
-export function ChatPanel({ domainId }: Props): React.JSX.Element {
-  const {
-    messagesByDomain,
-    isStreamingByDomain,
-    isSendingByDomain,
-    streamingContentByDomain,
-    activeToolCallByDomain,
-    isExtracting,
-    extractionError,
-    extractionResult,
-    sendMessage,
-    cancelChat,
-    clearMessages,
-    extractKbUpdates,
-    clearExtractionError,
-    clearExtractionResult,
-  } = useChatStore()
-
-  // Derive active domain slice
-  const messages = messagesByDomain[domainId] ?? []
-  const isStreaming = isStreamingByDomain[domainId] ?? false
-  const isSending = isSendingByDomain[domainId] ?? false
-  const streamingContent = streamingContentByDomain[domainId] ?? ''
-  const activeToolCall = activeToolCallByDomain[domainId] ?? null
-  const [input, setInput] = useState('')
-  const bottomRef = useRef<HTMLDivElement>(null)
-
-  // --- File attachment state ---
-  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([])
-  const [isDragOver, setIsDragOver] = useState(false)
-  const [fileError, setFileError] = useState<string | null>(null)
-
-  // --- Gmail email drop state ---
-  const [isFetchingEmail, setIsFetchingEmail] = useState(false)
-  const [emailPreview, setEmailPreview] = useState<{
-    messages: GmailContextMessage[]
-    url: string
-  } | null>(null)
-  const [emailSearchPrompt, setEmailSearchPrompt] = useState<{ url: string } | null>(null)
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, streamingContent])
+/** Isolates global extraction state from message list re-renders */
+function ExtractionStatus(): React.JSX.Element | null {
+  const extractionError = useChatStore((s) => s.extractionError)
+  const extractionResult = useChatStore((s) => s.extractionResult)
+  const clearExtractionError = useChatStore((s) => s.clearExtractionError)
+  const clearExtractionResult = useChatStore((s) => s.clearExtractionResult)
 
   // Auto-dismiss extraction error toast (5s)
   useEffect(() => {
@@ -145,6 +112,113 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
       return () => clearTimeout(t)
     }
   }, [extractionResult, clearExtractionResult])
+
+  return (
+    <>
+      {extractionError && (
+        <div className="mx-4 mt-2 rounded border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger animate-fade-in">
+          KB extraction failed — {extractionError}
+          <button onClick={clearExtractionError} className="ml-2 text-danger/60 hover:text-danger">×</button>
+        </div>
+      )}
+      {extractionResult && (
+        <div className="mx-4 mt-2 rounded border border-success/30 bg-success/5 px-3 py-2 text-xs text-success animate-fade-in">
+          Added {extractionResult.proposalCount} KB proposals from {extractionResult.messageLabel}
+          <button onClick={clearExtractionResult} className="ml-2 text-success/60 hover:text-success">×</button>
+        </div>
+      )}
+    </>
+  )
+}
+
+/** Isolates streaming content + loading dots from message list — only this component re-renders on chunk updates */
+function StreamingIndicator({ domainId }: { domainId: string }): React.JSX.Element | null {
+  const content = useChatStore((s) => s.streamingContentByDomain[domainId] ?? '')
+  const isStreaming = useChatStore((s) => s.isStreamingByDomain[domainId] ?? false)
+  const activeToolCall = useChatStore((s) => s.activeToolCallByDomain[domainId] ?? null)
+
+  if (!isStreaming) return null
+
+  // Streaming content visible — show the bubble
+  if (content) return <MessageBubble role="assistant" content={content} />
+
+  // Tool call running — handled separately in parent (tool call indicator)
+  if (activeToolCall) return null
+
+  // No content yet and no tool call — show loading dots
+  return (
+    <div className="mb-3 flex justify-start animate-fade-in">
+      <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm bg-surface-2 border border-border-subtle px-4 py-3">
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className="inline-block h-1.5 w-1.5 rounded-full bg-accent animate-pulse-dot"
+            style={{ animationDelay: `${i * 0.2}s` }}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export function ChatPanel({ domainId }: Props): React.JSX.Element {
+  // --- Granular Zustand selectors (each triggers re-render only when its slice changes) ---
+  const messages = useChatStore((s) => s.messagesByDomain[domainId] ?? EMPTY_MESSAGES)
+  const isStreaming = useChatStore((s) => s.isStreamingByDomain[domainId] ?? false)
+  const isSending = useChatStore((s) => s.isSendingByDomain[domainId] ?? false)
+  const activeToolCall = useChatStore((s) => s.activeToolCallByDomain[domainId] ?? null)
+  const isExtracting = useChatStore((s) => s.isExtracting)
+
+  // --- Action selectors (each selected independently — stable ref, no global subscription) ---
+  const sendMessage = useChatStore((s) => s.sendMessage)
+  const cancelChat = useChatStore((s) => s.cancelChat)
+  const clearMessages = useChatStore((s) => s.clearMessages)
+  const extractKbUpdates = useChatStore((s) => s.extractKbUpdates)
+  const extractKbUpdatesFromIndex = useChatStore((s) => s.extractKbUpdatesFromIndex)
+  const [input, setInput] = useState('')
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  // --- Scroll debounce + auto-scroll lock ---
+  const isNearBottomRef = useRef(true)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+  }, [])
+
+  // --- File attachment state ---
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([])
+  const [isDragOver, setIsDragOver] = useState(false)
+  const [fileError, setFileError] = useState<string | null>(null)
+
+  // --- Gmail email drop state ---
+  const [isFetchingEmail, setIsFetchingEmail] = useState(false)
+  const [emailPreview, setEmailPreview] = useState<{
+    messages: GmailContextMessage[]
+    url: string
+  } | null>(null)
+  const [emailSearchPrompt, setEmailSearchPrompt] = useState<{ url: string } | null>(null)
+
+  // Scroll to bottom when messages change (non-streaming)
+  useEffect(() => {
+    if (!isNearBottomRef.current || isStreaming) return
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, isStreaming])
+
+  // Interval-based scroll during streaming (no dependency on streamingContent)
+  useEffect(() => {
+    if (!isStreaming) return
+    const id = setInterval(() => {
+      if (!isNearBottomRef.current) return
+      requestAnimationFrame(() => {
+        const el = scrollContainerRef.current
+        if (el) el.scrollTop = el.scrollHeight
+      })
+    }, 250)
+    return () => clearInterval(id)
+  }, [isStreaming])
 
   // Escape key to cancel processing (only when NOT in confirm mode)
   useEffect(() => {
@@ -622,11 +696,9 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
     }
   }
 
-  function handleExtractSingle(messageIndex: number): void {
-    const msg = messages[messageIndex]
-    if (!msg || msg.role !== 'assistant' || isExtracting || isStreaming) return
-    extractKbUpdates(domainId, msg.content, messageIndex)
-  }
+  const handleExtractSingle = useCallback((index: number) => {
+    extractKbUpdatesFromIndex(domainId, index)
+  }, [domainId, extractKbUpdatesFromIndex])
 
   function handleExtractAll(): void {
     if (isExtracting || isStreaming) return
@@ -660,7 +732,14 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
     extractKbUpdates(domainId, combined)
   }
 
-  const hasAssistantMessages = messages.some((m) => m.role === 'assistant')
+  const hasAssistantMessages = useMemo(
+    () => messages.some((m) => m.role === 'assistant'),
+    [messages],
+  )
+  const hasNonSystemMessages = useMemo(
+    () => messages.some((m) => m.role !== 'system'),
+    [messages],
+  )
 
   // Attachment summary for display
   const totalAttachSize = attachedFiles.reduce((s, f) => s + f.size, 0)
@@ -683,25 +762,11 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
         </div>
       )}
 
-      {/* Toast: extraction error */}
-      {extractionError && (
-        <div className="mx-4 mt-2 rounded border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger animate-fade-in">
-          KB extraction failed — {extractionError}
-          <button onClick={clearExtractionError} className="ml-2 text-danger/60 hover:text-danger">×</button>
-        </div>
-      )}
-
-      {/* Banner: extraction success */}
-      {extractionResult && (
-        <div className="mx-4 mt-2 rounded border border-success/30 bg-success/5 px-3 py-2 text-xs text-success animate-fade-in">
-          Added {extractionResult.proposalCount} KB proposals from {extractionResult.messageLabel}
-          <button onClick={clearExtractionResult} className="ml-2 text-success/60 hover:text-success">×</button>
-        </div>
-      )}
+      <ExtractionStatus />
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4">
-        {!messages.some((m) => m.role !== 'system') && !isStreaming && (
+      <div ref={scrollContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-4">
+        {!hasNonSystemMessages && !isStreaming && (
           <div className="flex h-full flex-col items-center justify-center gap-4">
             <p className="text-sm text-text-tertiary">
               Send a message to start chatting with this domain's AI assistant.
@@ -723,29 +788,27 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
         )}
         {messages.map((msg, i) =>
           msg.role === 'system' ? (
-            <div key={i} className="my-4 flex items-center gap-3">
+            <div key={msg.id ?? `system-${i}`} className="my-4 flex items-center gap-3">
               <div className="flex-1 border-t border-red-500/40" />
               <span className="text-xs font-medium text-red-400">Switched to {msg.content}</span>
               <div className="flex-1 border-t border-red-500/40" />
             </div>
           ) : (
-            <div key={i}>
+            <div key={msg.id ?? `${msg.role}-${i}`}>
               <MessageBubble
                 role={msg.role}
                 content={msg.content}
                 status={msg.status}
-                metadata={msg.metadata}
+                errorMessage={typeof msg.metadata?.errorMessage === 'string' ? msg.metadata.errorMessage : undefined}
                 attachments={msg.attachments}
-                onExtractKb={msg.role === 'assistant' ? () => handleExtractSingle(i) : undefined}
+                messageIndex={i}
+                onExtractKb={msg.role === 'assistant' ? handleExtractSingle : undefined}
               />
               {msg.role === 'assistant' && msg.stopBlocks?.length ? <StopAlert stopBlocks={msg.stopBlocks} /> : null}
               {msg.role === 'assistant' && msg.gapFlags?.length ? <GapFlagAlert gapFlags={msg.gapFlags} /> : null}
               {msg.role === 'assistant' && msg.decisions?.length ? <DecisionCard decisions={msg.decisions} /> : null}
             </div>
           )
-        )}
-        {isStreaming && streamingContent && (
-          <MessageBubble role="assistant" content={streamingContent} />
         )}
         {activeToolCall?.status === 'running' && (
           <div className="mb-3 flex justify-start animate-fade-in">
@@ -757,19 +820,7 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
             </div>
           </div>
         )}
-        {isStreaming && !streamingContent && !activeToolCall && (
-          <div className="mb-3 flex justify-start animate-fade-in">
-            <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm bg-surface-2 border border-border-subtle px-4 py-3">
-              {[0, 1, 2].map((i) => (
-                <span
-                  key={i}
-                  className="inline-block h-1.5 w-1.5 rounded-full bg-accent animate-pulse-dot"
-                  style={{ animationDelay: `${i * 0.2}s` }}
-                />
-              ))}
-            </div>
-          </div>
-        )}
+        <StreamingIndicator domainId={domainId} />
         <div ref={bottomRef} />
       </div>
 
@@ -778,7 +829,7 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
         <div className="mb-1.5 flex gap-2">
           <button
             onClick={clearMessages}
-            disabled={isStreaming || messages.filter((m) => m.role !== 'system').length === 0}
+            disabled={isStreaming || !hasNonSystemMessages}
             className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-surface-2 hover:text-text-primary disabled:opacity-40"
             title="Clear chat history"
           >

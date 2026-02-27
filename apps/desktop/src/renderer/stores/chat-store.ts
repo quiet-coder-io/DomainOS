@@ -17,7 +17,7 @@ interface StoredRejectedProposal extends RejectedProposal {
   sourceMessageIndex?: number
 }
 
-interface ChatMessage {
+export interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
   id?: string
@@ -84,6 +84,7 @@ interface ChatState {
   dismissRejectedProposal(id: string): void
   clearMessages(): Promise<void>
   extractKbUpdates(domainId: string, content: string, messageIndex?: number): Promise<void>
+  extractKbUpdatesFromIndex(domainId: string, messageIndex: number): Promise<void>
   clearExtractionError(): void
   clearExtractionResult(): void
 }
@@ -134,9 +135,48 @@ function bumpClearToken(domainId: string): void {
 // Per-domain message cache: tracks whether we've loaded from DB this session
 const loadedDomains = new Set<string>()
 
+// --- RAF-batched streaming chunk buffer ---
+// Accumulates chunks between animation frames so the store updates at most once per frame.
+let chunkBuffer: Record<string, { requestId: string; text: string }> = {}
+let chunkRafId: number | null = null
+// Forward declarations — assigned once inside store creation where get/set are available
+let storeGet: () => ChatState
+let storeSet: (partial: Partial<ChatState> | ((state: ChatState) => Partial<ChatState>)) => void
+
+function flushChunks(): void {
+  const buffered = chunkBuffer
+  chunkBuffer = {}
+  chunkRafId = null
+
+  const state = storeGet()
+  const updates: Record<string, string> = {}
+  for (const [domainId, { requestId, text }] of Object.entries(buffered)) {
+    if (state.activeRequestIdByDomain[domainId] === requestId) {
+      updates[domainId] = text
+    }
+  }
+
+  if (Object.keys(updates).length === 0) return
+  storeSet((s) => {
+    const next = { ...s.streamingContentByDomain }
+    for (const [domainId, chunk] of Object.entries(updates)) {
+      next[domainId] = (next[domainId] ?? '') + chunk
+    }
+    return { streamingContentByDomain: next }
+  })
+}
+
+function synchronousFlush(): void {
+  if (chunkRafId) { cancelAnimationFrame(chunkRafId); chunkRafId = null }
+  flushChunks()
+}
+
 let listenersRegistered = false
 
 export const useChatStore = create<ChatState>((set, get) => {
+  // Wire up module-level refs to this store's get/set
+  storeGet = get
+  storeSet = set as typeof storeSet
   // ── One-time IPC listener registration ──
   // Registered once at store creation. Route events by requestId → domainId.
 
@@ -147,14 +187,16 @@ export const useChatStore = create<ChatState>((set, get) => {
       const state = get()
       const domainId = state.requestToDomain[data.requestId]
       if (!domainId) return
-      // Verify this is still the active request for this domain
       if (state.activeRequestIdByDomain[domainId] !== data.requestId) return
-      set((s) => ({
-        streamingContentByDomain: {
-          ...s.streamingContentByDomain,
-          [domainId]: (s.streamingContentByDomain[domainId] ?? '') + data.chunk,
-        },
-      }))
+
+      // Buffer chunks — flush on next animation frame
+      const existing = chunkBuffer[domainId]
+      const sameRequest = existing && existing.requestId === data.requestId
+      chunkBuffer[domainId] = {
+        requestId: data.requestId,
+        text: (sameRequest ? existing.text : '') + data.chunk,
+      }
+      if (!chunkRafId) chunkRafId = requestAnimationFrame(flushChunks)
     })
 
     window.domainOS.chat.onToolUse((event) => {
@@ -175,6 +217,9 @@ export const useChatStore = create<ChatState>((set, get) => {
 
     // stream-done: AUTHORITATIVE lifecycle marker
     window.domainOS.chat.onStreamDone(({ requestId, cancelled: _cancelled }) => {
+      // Flush any buffered chunks before clearing streaming state
+      synchronousFlush()
+
       const state = get()
       const domainId = state.requestToDomain[requestId]
       if (!domainId) return
@@ -274,11 +319,15 @@ export const useChatStore = create<ChatState>((set, get) => {
     },
 
     cancelChat() {
+      synchronousFlush()
       window.domainOS.chat.sendCancel()
       // Transport cancel is sender-scoped. onStreamDone handles flag cleanup.
     },
 
     async sendMessage(displayContent, llmContent, domainId, attachments, activeSkillId) {
+      // Flush any buffered chunks from a previous stream before starting a new one
+      synchronousFlush()
+
       const state = get()
 
       // Send guard: block any send while any request is in-flight
@@ -570,6 +619,13 @@ export const useChatStore = create<ChatState>((set, get) => {
           extractionError: err instanceof Error ? err.message : 'KB extraction failed',
         })
       }
+    },
+
+    async extractKbUpdatesFromIndex(domainId, messageIndex) {
+      const messages = get().messagesByDomain[domainId] ?? []
+      const msg = messages[messageIndex]
+      if (!msg || msg.role !== 'assistant') return
+      return get().extractKbUpdates(domainId, msg.content, messageIndex)
     },
 
     clearExtractionError() {
