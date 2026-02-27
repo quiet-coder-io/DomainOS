@@ -21,6 +21,7 @@ export type { ProviderName, ProviderConfig } from './provider-factory.js'
 
 // Prompt builder
 export { buildSystemPrompt } from './prompt-builder.js'
+export { renderStatusCapsule } from './prompt-builder.js'
 export type {
   PromptDomain,
   PromptKBContext,
@@ -35,6 +36,7 @@ export type {
   PromptManifestSection,
   PromptManifestFile,
   PromptManifestExcludedFile,
+  PromptManifestExcludedSection,
 } from './prompt-builder.js'
 
 // Parsers
@@ -52,5 +54,6 @@ export { STOP_PROTOCOL_NAME, STOP_PROTOCOL_CONTENT } from './stop-protocol.js'
 export { GAP_DETECTION_PROTOCOL_NAME, GAP_DETECTION_PROTOCOL_CONTENT } from './gap-detection-protocol.js'
 export { seedDefaultProtocols } from './seed-defaults.js'
 export { BRAINSTORM_PROTOCOL_NAME, BRAINSTORM_PROTOCOL_CONTENT } from './brainstorm-protocol.js'
-export { estimateTokens, TOKEN_BUDGETS } from './token-budgets.js'
+export { estimateTokens, TOKEN_BUDGETS, clamp, estimateChatTokens, getPromptProfile, PROMPT_PROFILES } from './token-budgets.js'
+export type { PromptProfile, PromptProfileName, PromptProfileSections, KBStrategy, StatusCapsuleLimits } from './token-budgets.js'
 export { detectStatusIntent } from './status-intent.js'

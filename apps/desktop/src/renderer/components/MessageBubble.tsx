@@ -43,6 +43,8 @@ type MarkdownBlock =
   | { type: 'table'; headers: string[]; bodyRows: string[][]; colCount: number }
   | { type: 'list'; items: string[] }
   | { type: 'paragraph'; text: string }
+  | { type: 'heading'; level: number; text: string }
+  | { type: 'hr' }
 
 const LRU_MAX = 50
 const lruCache = new Map<string, MarkdownBlock[]>()
@@ -70,8 +72,32 @@ function makeCacheKey(content: string): string {
   return `${fnv1aHash(content)}:${content.length}`
 }
 
-/** Parse markdown text into intermediate blocks (pure data, no JSX) */
+// --- Line classification for block-level parsing ---
+
+type LineType = 'heading' | 'hr' | 'table-row' | 'bullet' | 'numbered' | 'empty' | 'text'
+
+function classifyLine(line: string): LineType {
+  const t = line.trim()
+  if (!t) return 'empty'
+  if (/^#{1,6}\s/.test(t)) return 'heading'
+  if (/^-{3,}$/.test(t) || /^\*{3,}$/.test(t) || /^_{3,}$/.test(t)) return 'hr'
+  if (isRowLike(t)) return 'table-row'
+  if (/^[-*]\s/.test(t)) return 'bullet'
+  if (/^\d+[.)]\s/.test(t)) return 'numbered'
+  return 'text'
+}
+
+/** Flush accumulated text lines into a paragraph block */
+function flushText(textBuf: string[], blocks: MarkdownBlock[]): void {
+  if (textBuf.length === 0) return
+  blocks.push({ type: 'paragraph', text: textBuf.join('\n') })
+  textBuf.length = 0
+}
+
+/** Parse markdown text into intermediate blocks (pure data, no JSX).
+ *  Scans line-by-line so single-newline-separated blocks are detected correctly. */
 function parseMarkdownBlocks(text: string): MarkdownBlock[] {
+  // Stage 1: isolate fenced code blocks
   const parts = text.split(/(```[\s\S]*?```)/g)
   const blocks: MarkdownBlock[] = []
 
@@ -79,41 +105,89 @@ function parseMarkdownBlocks(text: string): MarkdownBlock[] {
     if (part.startsWith('```') && part.endsWith('```')) {
       const content = part.slice(3, -3).replace(/^\w*\n/, '')
       blocks.push({ type: 'code-block', content })
-    } else {
-      const paragraphs = part.split(/\n{2,}/)
-      for (const para of paragraphs) {
-        if (!para.trim()) continue
+      continue
+    }
 
-        const lines = para.split('\n')
-        const nonEmpty = lines.filter((l) => l.trim().length > 0)
-        const isTable =
-          nonEmpty.length >= 2 &&
-          isRowLike(nonEmpty[0]) &&
-          isRowLike(nonEmpty[1]) &&
-          (() => {
-            const headers = parseTableRow(nonEmpty[0])
-            const headerCols = headers.length
-            const hasAnyHeaderText = headers.some((h) => h.length > 0)
-            return headerCols >= 2 && hasAnyHeaderText &&
-              isSeparatorRow(nonEmpty[1], headerCols) &&
-              nonEmpty.slice(2).every(isRowLike)
-          })()
+    // Stage 2: line-by-line scan for block-level elements
+    const lines = part.split('\n')
+    const textBuf: string[] = []
 
-        if (isTable) {
-          const headers = parseTableRow(nonEmpty[0])
-          const bodyRows = nonEmpty.slice(2).map(parseTableRow)
-          blocks.push({ type: 'table', headers, bodyRows, colCount: headers.length })
-        } else {
-          const isList = lines.every((l) => /^[\s]*[-*]\s/.test(l) || !l.trim())
-          if (isList) {
-            const items = lines.filter((l) => /^[\s]*[-*]\s/.test(l)).map((l) => l.replace(/^[\s]*[-*]\s/, ''))
-            blocks.push({ type: 'list', items })
-          } else {
-            blocks.push({ type: 'paragraph', text: para })
+    let i = 0
+    while (i < lines.length) {
+      const line = lines[i]
+      const kind = classifyLine(line)
+
+      if (kind === 'empty') {
+        flushText(textBuf, blocks)
+        i++
+        continue
+      }
+
+      if (kind === 'heading') {
+        flushText(textBuf, blocks)
+        const match = line.trim().match(/^(#{1,6})\s+(.*)$/)!
+        blocks.push({ type: 'heading', level: match[1].length, text: match[2] })
+        i++
+        continue
+      }
+
+      if (kind === 'hr') {
+        flushText(textBuf, blocks)
+        blocks.push({ type: 'hr' })
+        i++
+        continue
+      }
+
+      // Collect consecutive table rows
+      if (kind === 'table-row') {
+        flushText(textBuf, blocks)
+        const tableLines: string[] = []
+        while (i < lines.length && classifyLine(lines[i]) === 'table-row') {
+          tableLines.push(lines[i])
+          i++
+        }
+        // Validate table structure: header + separator + body
+        if (tableLines.length >= 2) {
+          const headers = parseTableRow(tableLines[0])
+          const headerCols = headers.length
+          const hasAnyHeaderText = headers.some((h) => h.length > 0)
+          if (headerCols >= 2 && hasAnyHeaderText && isSeparatorRow(tableLines[1], headerCols)) {
+            const bodyRows = tableLines.slice(2).map(parseTableRow)
+            blocks.push({ type: 'table', headers, bodyRows, colCount: headerCols })
+            continue
           }
         }
+        // Not a valid table — treat as paragraph
+        blocks.push({ type: 'paragraph', text: tableLines.join('\n') })
+        continue
       }
+
+      // Collect consecutive list items (bullets or numbered)
+      if (kind === 'bullet' || kind === 'numbered') {
+        flushText(textBuf, blocks)
+        const items: string[] = []
+        while (i < lines.length) {
+          const lk = classifyLine(lines[i])
+          if (lk === 'bullet') {
+            items.push(lines[i].trim().replace(/^[-*]\s/, ''))
+            i++
+          } else if (lk === 'numbered') {
+            items.push(lines[i].trim().replace(/^\d+[.)]\s/, ''))
+            i++
+          } else {
+            break
+          }
+        }
+        blocks.push({ type: 'list', items })
+        continue
+      }
+
+      // Plain text — accumulate
+      textBuf.push(line)
+      i++
     }
+
+    flushText(textBuf, blocks)
   }
 
   return blocks
@@ -193,6 +267,15 @@ function renderBlocks(blocks: MarkdownBlock[]): React.JSX.Element {
             ))}
           </ul>
         )
+        break
+      case 'heading': {
+        const Tag = `h${Math.min(block.level, 6)}` as 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'
+        const sizes: Record<number, string> = { 1: 'text-lg font-bold', 2: 'text-base font-bold', 3: 'text-sm font-semibold', 4: 'text-sm font-semibold', 5: 'text-xs font-semibold', 6: 'text-xs font-semibold' }
+        elements.push(<Tag key={key++} className={`${sizes[block.level] ?? sizes[3]} my-1.5`}>{renderInline(block.text)}</Tag>)
+        break
+      }
+      case 'hr':
+        elements.push(<hr key={key++} className="my-2 border-border-subtle" />)
         break
       case 'paragraph':
         elements.push(<p key={key++} className="my-1">{renderInline(block.text)}</p>)

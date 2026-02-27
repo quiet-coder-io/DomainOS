@@ -16,7 +16,7 @@ export type { KBFile, KBScannedFile, KBContext, KBContextFile, KBSyncResult } fr
 
 export { scanKBDirectory } from './scanner.js'
 export { KBRepository } from './repository.js'
-export { buildKBContext, buildSiblingContext } from './context-builder.js'
+export { buildKBContext, buildSiblingContext, buildKBContextDigestOnly, buildKBContextDigestPlusStructural } from './context-builder.js'
 export { classifyTier, TIER_PRIORITY } from './tiers.js'
 export type { KBTier, KBTierSource } from './tiers.js'
 export { calculateStaleness, STALENESS_THRESHOLDS } from './staleness.js'

@@ -172,3 +172,227 @@ export async function buildSiblingContext(
 
   return results
 }
+
+// --- Anchor-aware truncation for KB digest ---
+
+/** Keep sections matching high-value headings; truncate middle. */
+function anchorAwareTruncate(content: string, charBudget: number): string {
+  if (content.length <= charBudget) return content
+
+  const anchorPatterns = /^#+\s*(STATUS|OPEN\s*GAPS?|DEADLINE|PRIORITIES|NEXT\s*ACTIONS?|OVERDUE|CRITICAL)/im
+  const lines = content.split('\n')
+  const kept: string[] = []
+  let keptChars = 0
+  let inAnchorSection = false
+
+  for (const line of lines) {
+    const isHeading = /^#+\s/.test(line)
+    if (isHeading) {
+      inAnchorSection = anchorPatterns.test(line)
+    }
+
+    if (inAnchorSection || kept.length < 5) {
+      // Always keep first 5 lines (title/metadata) + anchor sections
+      if (keptChars + line.length + 1 > charBudget - 20) {
+        kept.push('...[TRUNCATED]')
+        break
+      }
+      kept.push(line)
+      keptChars += line.length + 1
+    }
+  }
+
+  // If anchor strategy kept nothing useful, fallback to first X + last Y
+  if (kept.length <= 6) {
+    const firstChunk = Math.floor(charBudget * 0.7)
+    const lastChunk = charBudget - firstChunk - 20
+    if (lastChunk > 0) {
+      return content.slice(0, firstChunk) + '\n...[TRUNCATED]...\n' + content.slice(content.length - lastChunk)
+    }
+    return content.slice(0, charBudget - 15) + '\n...[TRUNCATED]'
+  }
+
+  return kept.join('\n')
+}
+
+/**
+ * Build KB context with ONLY the kb_digest.md file.
+ * For ollama_fast profile: maximum domain knowledge in minimal tokens.
+ */
+export async function buildKBContextDigestOnly(
+  kbPath: string,
+  files: KBFile[],
+  tokenBudget: number,
+): Promise<Result<KBContext, DomainOSError>> {
+  try {
+    const charBudget = tokenBudget * 4
+    const digestFile = files.find(f =>
+      f.relativePath.toLowerCase() === 'kb_digest.md',
+    )
+
+    if (!digestFile) {
+      return Ok({ files: [], totalChars: 0, truncated: false })
+    }
+
+    const absPath = join(kbPath, digestFile.relativePath)
+    let content: string
+    try {
+      content = await readFile(absPath, 'utf-8')
+    } catch {
+      return Ok({ files: [], totalChars: 0, truncated: false })
+    }
+
+    let fileStat
+    try {
+      fileStat = await stat(absPath)
+    } catch {
+      return Ok({ files: [], totalChars: 0, truncated: false })
+    }
+
+    const tier = digestFile.tierSource === 'manual' && digestFile.tier
+      ? (digestFile.tier as KBTier)
+      : classifyTier(digestFile.relativePath)
+    const staleness = calculateStaleness(fileStat.mtimeMs, undefined, tier)
+    const stalenessLabel = formatStalenessLabel(staleness)
+
+    let truncated = false
+    if (content.length > charBudget) {
+      content = anchorAwareTruncate(content, charBudget)
+      truncated = true
+    }
+
+    const resultFiles: KBContextFile[] = [{
+      path: digestFile.relativePath,
+      content,
+      tier,
+      stalenessLabel,
+    }]
+
+    return Ok({ files: resultFiles, totalChars: content.length, truncated })
+  } catch (err) {
+    return Err(
+      DomainOSError.io(
+        `Failed to build digest-only KB context: ${err instanceof Error ? err.message : String(err)}`,
+      ),
+    )
+  }
+}
+
+/**
+ * Build KB context with kb_digest.md + structural content from claude.md.
+ * For ollama_balanced profile: digest + domain identity/purpose.
+ */
+export async function buildKBContextDigestPlusStructural(
+  kbPath: string,
+  files: KBFile[],
+  tokenBudget: number,
+): Promise<Result<KBContext, DomainOSError>> {
+  try {
+    const charBudget = tokenBudget * 4
+    const resultFiles: KBContextFile[] = []
+    let totalChars = 0
+    let truncated = false
+
+    // 1. Include kb_digest.md first (priority)
+    const digestFile = files.find(f =>
+      f.relativePath.toLowerCase() === 'kb_digest.md',
+    )
+
+    if (digestFile) {
+      const absPath = join(kbPath, digestFile.relativePath)
+      try {
+        let content = await readFile(absPath, 'utf-8')
+        const fileStat = await stat(absPath)
+        const tier = digestFile.tierSource === 'manual' && digestFile.tier
+          ? (digestFile.tier as KBTier)
+          : classifyTier(digestFile.relativePath)
+        const staleness = calculateStaleness(fileStat.mtimeMs, undefined, tier)
+        const stalenessLabel = formatStalenessLabel(staleness)
+
+        // Reserve 35% of budget for claude.md structural content
+        const digestBudget = Math.floor(charBudget * 0.65)
+        if (content.length > digestBudget) {
+          content = anchorAwareTruncate(content, digestBudget)
+          truncated = true
+        }
+
+        resultFiles.push({ path: digestFile.relativePath, content, tier, stalenessLabel })
+        totalChars += content.length
+      } catch {
+        // digest not readable — continue to claude.md
+      }
+    }
+
+    // 2. Include claude.md structural content
+    const claudeFile = files.find(f => {
+      const lower = f.relativePath.toLowerCase()
+      return lower === 'claude.md' || lower === 'claude.md'
+    })
+
+    if (claudeFile) {
+      const absPath = join(kbPath, claudeFile.relativePath)
+      try {
+        const rawContent = await readFile(absPath, 'utf-8')
+        const fileStat = await stat(absPath)
+        const tier = claudeFile.tierSource === 'manual' && claudeFile.tier
+          ? (claudeFile.tier as KBTier)
+          : classifyTier(claudeFile.relativePath)
+        const staleness = calculateStaleness(fileStat.mtimeMs, undefined, tier)
+        const stalenessLabel = formatStalenessLabel(staleness)
+
+        const remaining = charBudget - totalChars
+        if (remaining > 200) {
+          // Structural parse: keep content up to first non-identity heading
+          let content = extractStructuralContent(rawContent, remaining)
+          if (content.length > remaining) {
+            content = content.slice(0, remaining - 15) + '\n...[TRUNCATED]'
+            truncated = true
+          }
+          resultFiles.push({ path: claudeFile.relativePath, content, tier, stalenessLabel })
+          totalChars += content.length
+        }
+      } catch {
+        // claude.md not readable
+      }
+    }
+
+    return Ok({ files: resultFiles, totalChars, truncated })
+  } catch (err) {
+    return Err(
+      DomainOSError.io(
+        `Failed to build digest+structural KB context: ${err instanceof Error ? err.message : String(err)}`,
+      ),
+    )
+  }
+}
+
+/** Extract structural/identity content from claude.md up to first non-identity heading. */
+function extractStructuralContent(content: string, maxChars: number): string {
+  const lines = content.split('\n')
+  const result: string[] = []
+  let totalChars = 0
+  let pastFirstHeading = false
+  const nonIdentityPattern = /^##\s+(protocol|workflow|procedure|checklist|task|format|rule)/i
+
+  for (const line of lines) {
+    if (/^##\s/.test(line)) {
+      if (pastFirstHeading && nonIdentityPattern.test(line)) {
+        break // Stop at first procedural heading
+      }
+      pastFirstHeading = true
+    }
+
+    if (totalChars + line.length + 1 > maxChars) {
+      break
+    }
+    result.push(line)
+    totalChars += line.length + 1
+  }
+
+  // Fallback: if we got very little, just take first maxChars
+  if (result.length < 3 && content.length > 0) {
+    return content.slice(0, Math.min(maxChars, 1500))
+  }
+
+  return result.join('\n')
+}

@@ -1,9 +1,13 @@
 /**
  * Builds system prompts for domain-scoped LLM agents.
  * Uses PromptContext input → PromptResult output with manifest for observability.
+ *
+ * Profile-aware: accepts a PromptProfile to gate sections and enforce token budgets.
+ * Default profile is cloud_full (all sections, no budget enforcement) for backward compat.
  */
 
-import { estimateTokens, TOKEN_BUDGETS } from './token-budgets.js'
+import { estimateTokens, TOKEN_BUDGETS, PROMPT_PROFILES } from './token-budgets.js'
+import type { PromptProfile, StatusCapsuleLimits } from './token-budgets.js'
 import type { DomainStatusSnapshot } from '../briefing/domain-status.js'
 import { STATUS_CHAR_LIMITS, STATUS_SOFT_CAP_CHARS, STATUS_MAX_SECTION_CHARS } from '../briefing/domain-status-constants.js'
 
@@ -97,11 +101,20 @@ export interface PromptManifestExcludedFile {
   reason: string
 }
 
+export interface PromptManifestExcludedSection {
+  name: string
+  reason: 'profile-excluded' | 'budget-exceeded'
+}
+
 export interface PromptManifest {
+  profileName: string
+  systemBudget: number
   sections: PromptManifestSection[]
+  excludedSections: PromptManifestExcludedSection[]
   filesIncluded: PromptManifestFile[]
   filesExcluded: PromptManifestExcludedFile[]
   totalTokenEstimate: number
+  totalTokenEstimateWithSafety: number
 }
 
 export interface PromptResult {
@@ -109,48 +122,92 @@ export interface PromptResult {
   manifest: PromptManifest
 }
 
+// --- Required-core sections: truncate within, never drop ---
+const REQUIRED_CORE = new Set(['Agent Identity', 'Domain', 'Knowledge Base', 'Escalation Triggers'])
+
 // --- Builder ---
 
-export function buildSystemPrompt(context: PromptContext): PromptResult {
+export function buildSystemPrompt(
+  context: PromptContext,
+  profile?: PromptProfile,
+  systemBudget?: number,
+): PromptResult {
+  const p = profile ?? PROMPT_PROFILES.cloud_full
+  const budget = systemBudget ?? TOKEN_BUDGETS.total
+
   const sections: string[] = []
   const manifestSections: PromptManifestSection[] = []
+  const excludedSections: PromptManifestExcludedSection[] = []
   const filesIncluded: PromptManifestFile[] = []
   const filesExcluded: PromptManifestExcludedFile[] = []
+  let runningTokens = 0
 
-  function addSection(name: string, content: string): void {
-    sections.push(content)
-    manifestSections.push({ name, tokenEstimate: estimateTokens(content.length) })
+  function addSection(name: string, content: string, isRequiredCore: boolean): void {
+    const estimate = Math.ceil(estimateTokens(content.length) * p.safetyFactor)
+
+    if (isRequiredCore) {
+      // Required core: always add, but truncate content to fit if needed
+      if (runningTokens + estimate > budget) {
+        const availableTokens = Math.max(0, budget - runningTokens)
+        const availableChars = Math.max(0, Math.floor(availableTokens * 4 / p.safetyFactor))
+        if (availableChars > 100) {
+          // Keep first half and last quarter of available chars (end often has constraints)
+          const firstHalf = Math.floor(availableChars * 0.65)
+          const lastPart = availableChars - firstHalf - 30 // 30 chars for truncation marker
+          if (content.length > availableChars && lastPart > 0) {
+            content = content.slice(0, firstHalf) + '\n...[TRUNCATED]...\n' + content.slice(content.length - lastPart)
+          } else if (content.length > availableChars) {
+            content = content.slice(0, availableChars - 15) + '\n...[TRUNCATED]'
+          }
+        } else {
+          content = content.slice(0, 200) + '\n...[TRUNCATED]'
+        }
+      }
+      const finalEstimate = Math.ceil(estimateTokens(content.length) * p.safetyFactor)
+      sections.push(content)
+      manifestSections.push({ name, tokenEstimate: estimateTokens(content.length) })
+      runningTokens += finalEstimate
+    } else {
+      // Non-required: skip entirely if would exceed budget
+      if (runningTokens + estimate > budget) {
+        excludedSections.push({ name, reason: 'budget-exceeded' })
+        return
+      }
+      sections.push(content)
+      manifestSections.push({ name, tokenEstimate: estimateTokens(content.length) })
+      runningTokens += estimate
+    }
   }
 
   // === CURRENT DATE ===
   if (context.currentDate) {
-    addSection('Current Date', `=== CURRENT DATE ===\n${context.currentDate}`)
+    addSection('Current Date', `=== CURRENT DATE ===\n${context.currentDate}`, false)
   }
 
-  // === AGENT IDENTITY ===
-  if (context.domain.identity) {
+  // === AGENT IDENTITY === (required core)
+  if (context.domain.identity && p.sections.identity) {
     const identitySection = `=== AGENT IDENTITY ===\n${context.domain.identity}`
-    addSection('Agent Identity', identitySection)
+    addSection('Agent Identity', identitySection, true)
   }
 
-  // === DOMAIN ===
-  const domainSection = `=== DOMAIN: ${context.domain.name} ===\n${context.domain.description}`
-  addSection('Domain', domainSection)
+  // === DOMAIN === (required core)
+  if (p.sections.domain) {
+    const domainSection = `=== DOMAIN: ${context.domain.name} ===\n${context.domain.description}`
+    addSection('Domain', domainSection, true)
+  }
 
   // === DOMAIN ASSOCIATIONS (tags) ===
-  if (context.domain.tags && context.domain.tags.length > 0) {
-    // Group by key, stable ordering: property → contact → type → custom alpha
+  if (p.sections.tags && context.domain.tags && context.domain.tags.length > 0) {
+    const tagsCap = p.tagsCap ?? 10
     const predefinedOrder = ['property', 'contact', 'type']
     const grouped: Record<string, string[]> = {}
     for (const tag of context.domain.tags) {
       if (!grouped[tag.key]) grouped[tag.key] = []
       grouped[tag.key].push(tag.value)
     }
-    // Sort values alphabetically within each key
     for (const key of Object.keys(grouped)) {
       grouped[key].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
     }
-    // Sort keys: predefined first in order, then custom alphabetically
     const allKeys = Object.keys(grouped).sort((a, b) => {
       const ai = predefinedOrder.indexOf(a)
       const bi = predefinedOrder.indexOf(b)
@@ -163,37 +220,44 @@ export function buildSystemPrompt(context: PromptContext): PromptResult {
     const lines: string[] = ['=== DOMAIN ASSOCIATIONS ===']
     let lineCount = 0
     for (const key of allKeys) {
-      if (lineCount >= 10) {
+      if (lineCount >= tagsCap) {
         lines.push(`(+${allKeys.length - lineCount} more tags omitted)`)
         break
       }
       lines.push(`${key.charAt(0).toUpperCase() + key.slice(1)}: ${grouped[key].join(', ')}`)
       lineCount++
     }
-    addSection('Domain Associations', lines.join('\n'))
+    addSection('Domain Associations', lines.join('\n'), false)
+  } else if (p.sections.tags === false) {
+    // Only record exclusion if context actually had tags to show
+    if (context.domain.tags && context.domain.tags.length > 0) {
+      excludedSections.push({ name: 'Domain Associations', reason: 'profile-excluded' })
+    }
   }
 
-  // === KNOWLEDGE BASE ===
-  const kbLines: string[] = ['=== KNOWLEDGE BASE ===']
-  for (const file of context.kbContext.files) {
-    const tierLabel = file.tier ? `[${file.tier.toUpperCase()}] ` : ''
-    const stalenessLabel = file.stalenessLabel ? `${file.stalenessLabel} ` : ''
-    const header = `--- ${tierLabel}${stalenessLabel}${file.path} ---`
-    kbLines.push(header)
-    kbLines.push(file.content)
+  // === KNOWLEDGE BASE === (required core)
+  if (p.sections.kb) {
+    const kbLines: string[] = ['=== KNOWLEDGE BASE ===']
+    for (const file of context.kbContext.files) {
+      const tierLabel = file.tier ? `[${file.tier.toUpperCase()}] ` : ''
+      const stalenessLabel = file.stalenessLabel ? `${file.stalenessLabel} ` : ''
+      const header = `--- ${tierLabel}${stalenessLabel}${file.path} ---`
+      kbLines.push(header)
+      kbLines.push(file.content)
 
-    filesIncluded.push({
-      path: file.path,
-      tier: file.tier ?? 'general',
-      chars: file.content.length,
-      tokenEstimate: estimateTokens(file.content.length),
-      inclusionReason: 'within-budget',
-    })
+      filesIncluded.push({
+        path: file.path,
+        tier: file.tier ?? 'general',
+        chars: file.content.length,
+        tokenEstimate: estimateTokens(file.content.length),
+        inclusionReason: 'within-budget',
+      })
+    }
+    addSection('Knowledge Base', kbLines.join('\n'), true)
   }
-  addSection('Knowledge Base', kbLines.join('\n'))
 
-  // === SIBLING DOMAINS === (Phase 2)
-  if (context.siblingContext && context.siblingContext.siblings.length > 0) {
+  // === SIBLING DOMAINS ===
+  if (p.sections.siblings && context.siblingContext && context.siblingContext.siblings.length > 0) {
     const siblingLines: string[] = [
       '=== SIBLING DOMAINS ===',
       'CROSS-DOMAIN CONTAMINATION GUARD: Dates, deadlines, and dollar amounts from sibling domains require explicit source verification before use.',
@@ -203,22 +267,26 @@ export function buildSystemPrompt(context: PromptContext): PromptResult {
       siblingLines.push(`--- ${sibling.domainName} ---`)
       siblingLines.push(sibling.digestContent)
     }
-    addSection('Sibling Domains', siblingLines.join('\n'))
+    addSection('Sibling Domains', siblingLines.join('\n'), false)
+  } else if (!p.sections.siblings && context.siblingContext && context.siblingContext.siblings.length > 0) {
+    excludedSections.push({ name: 'Sibling Domains', reason: 'profile-excluded' })
   }
 
   // === SHARED PROTOCOLS ===
-  if (context.sharedProtocols && context.sharedProtocols.length > 0) {
+  if (p.sections.sharedProtocols && context.sharedProtocols && context.sharedProtocols.length > 0) {
     const protoLines: string[] = ['=== SHARED PROTOCOLS ===']
     for (const proto of context.sharedProtocols) {
       protoLines.push(`--- ${proto.name} ---`)
       protoLines.push(proto.content)
     }
-    addSection('Shared Protocols', protoLines.join('\n'))
+    addSection('Shared Protocols', protoLines.join('\n'), false)
+  } else if (!p.sections.sharedProtocols && context.sharedProtocols && context.sharedProtocols.length > 0) {
+    excludedSections.push({ name: 'Shared Protocols', reason: 'profile-excluded' })
   }
 
-  // === ACTIVE SKILL === (between Shared Protocols and Domain Protocols)
-  if (context.activeSkill) {
-    const maxChars = TOKEN_BUDGETS.skill // 12_000 character cap
+  // === ACTIVE SKILL ===
+  if (p.sections.skill && context.activeSkill) {
+    const maxChars = TOKEN_BUDGETS.skill
     const skillContent = context.activeSkill.content.length > maxChars
       ? context.activeSkill.content.slice(0, maxChars) + '\n\n[Skill procedure truncated — exceeds size limit]'
       : context.activeSkill.content
@@ -241,42 +309,61 @@ export function buildSystemPrompt(context: PromptContext): PromptResult {
     if (context.activeSkill.toolHints.length > 0) {
       skillLines.push('', '## Recommended Tools', `Prefer using these tools when helpful: ${context.activeSkill.toolHints.join(', ')}`, 'If a listed tool is unavailable in this environment, proceed without it.')
     }
-    addSection('Active Skill', skillLines.join('\n'))
+    addSection('Active Skill', skillLines.join('\n'), false)
+  } else if (!p.sections.skill && context.activeSkill) {
+    excludedSections.push({ name: 'Active Skill', reason: 'profile-excluded' })
   }
 
   // === DOMAIN PROTOCOLS ===
-  const domainProtoLines: string[] = ['=== DOMAIN PROTOCOLS ===']
-  for (const protocol of context.protocols) {
-    domainProtoLines.push(`--- ${protocol.name} ---`)
-    domainProtoLines.push(protocol.content)
+  if (p.sections.domainProtocols === true) {
+    const domainProtoLines: string[] = ['=== DOMAIN PROTOCOLS ===']
+    for (const protocol of context.protocols) {
+      domainProtoLines.push(`--- ${protocol.name} ---`)
+      domainProtoLines.push(protocol.content)
+    }
+    addSection('Domain Protocols', domainProtoLines.join('\n'), false)
+  } else if (p.sections.domainProtocols === 'micro' && context.protocols.length > 0) {
+    const microContent = buildDomainProtocolsMicro(context.protocols)
+    addSection('Domain Protocols', microContent, false)
+  } else if (p.sections.domainProtocols === false && context.protocols.length > 0) {
+    excludedSections.push({ name: 'Domain Protocols', reason: 'profile-excluded' })
   }
-  addSection('Domain Protocols', domainProtoLines.join('\n'))
 
-  // === ESCALATION TRIGGERS ===
-  if (context.domain.escalationTriggers) {
+  // === ESCALATION TRIGGERS === (required core)
+  if (p.sections.escalation && context.domain.escalationTriggers) {
     const escSection = `=== ESCALATION TRIGGERS ===\n${context.domain.escalationTriggers}`
-    addSection('Escalation Triggers', escSection)
+    addSection('Escalation Triggers', escSection, true)
   }
 
-  // === DOMAIN STATUS BRIEFING === (when status intent detected)
+  // === DOMAIN STATUS BRIEFING ===
   if (context.statusBriefing) {
-    const briefingSection = renderStatusBriefing(context.statusBriefing, context.debug)
-    addSection('Domain Status Briefing', briefingSection)
+    if (p.sections.statusBriefing === true) {
+      const briefingSection = renderStatusBriefing(context.statusBriefing, context.debug)
+      addSection('Domain Status Briefing', briefingSection, false)
+    } else if (p.sections.statusBriefing === 'capsule') {
+      const capsuleLimits = p.statusCapsuleLimits ?? { overdueMax: 5, gapsMax: 5, actionsMax: 3 }
+      const capsuleSection = renderStatusCapsule(context.statusBriefing, capsuleLimits)
+      addSection('Domain Status Briefing', capsuleSection, false)
+    }
+    // statusBriefing === false: implicitly excluded
   }
 
-  // === SESSION === (Phase 3)
-  if (context.sessionContext) {
+  // === SESSION ===
+  if (p.sections.session && context.sessionContext) {
     const sessionLines = [
       '=== SESSION ===',
       `Scope: ${context.sessionContext.scope}`,
       '',
       context.sessionContext.startupReport,
     ]
-    addSection('Session', sessionLines.join('\n'))
+    addSection('Session', sessionLines.join('\n'), false)
+  } else if (!p.sections.session && context.sessionContext) {
+    excludedSections.push({ name: 'Session', reason: 'profile-excluded' })
   }
 
   // === KB UPDATE INSTRUCTIONS ===
-  const kbInstructions = `=== KB UPDATE INSTRUCTIONS ===
+  if (p.sections.kbInstructions) {
+    const kbInstructions = `=== KB UPDATE INSTRUCTIONS ===
 When you need to suggest updates to the knowledge base, use this format:
 
 \`\`\`kb-update
@@ -336,10 +423,13 @@ Brainstorm payload: topic, options (array of {title, description, pros?, cons?, 
 Risk assessment payload: summary, risks (array of {category, description, severity?, likelihood?, mitigation?, impact?}), trend? (improving|stable|worsening), trendConfidence? (low|medium|high)
 Scenario payload: variables (string array), scenarios (array of {name, description, probability?, outcome?, timeline?}), triggers? (string array), leading_indicators? (string array)
 Strategic review payload: posture, highest_leverage_action, trajectory?, tensions? (string array), assumptions_to_check? (string array)`
-  addSection('KB Update Instructions', kbInstructions)
+    addSection('KB Update Instructions', kbInstructions, false)
+  } else {
+    excludedSections.push({ name: 'KB Update Instructions', reason: 'profile-excluded' })
+  }
 
   // === ACTIVE BRAINSTORM SESSION ===
-  if (context.brainstormContext) {
+  if (p.sections.brainstorm && context.brainstormContext) {
     const bc = context.brainstormContext
     const lines = [
       `=== ACTIVE BRAINSTORM SESSION ===`,
@@ -348,11 +438,14 @@ Strategic review payload: posture, highest_leverage_action, trajectory?, tension
     if (bc.isPaused) {
       lines.push('Session is paused. Ask user: resume or close?')
     }
-    addSection('Active Brainstorm Session', lines.join('\n'))
+    addSection('Active Brainstorm Session', lines.join('\n'), false)
+  } else if (!p.sections.brainstorm && context.brainstormContext) {
+    excludedSections.push({ name: 'Active Brainstorm Session', reason: 'profile-excluded' })
   }
 
-  // === ADVISORY MINI-PROTOCOL (always-on) ===
-  const advisoryMiniProtocol = `=== ADVISORY PROTOCOL ===
+  // === ADVISORY PROTOCOL ===
+  if (p.sections.advisory === true) {
+    const advisoryMiniProtocol = `=== ADVISORY PROTOCOL ===
 Mode classification: Before each response, classify user intent as one of: brainstorm | challenge | review | scenario | general.
 Classification considers conversational context, not just trigger words. Ambiguous defaults to general.
 Emit <!-- advisory_mode: <mode> --> as a hidden comment at the start of your response.
@@ -369,23 +462,132 @@ Proactive insights: Max 1 per user statement, only at decision points. Format as
 Insight guards:
 - When user intent is "draft" (email/doc/memo): no proactive insight unless explicitly requested.
 - Insight must not introduce new facts — only interpret/reframe existing facts from KB, tool output, or user statements. If referencing numbers, dates, or proper nouns not in current context, include (assumption) label.`
-  addSection('Advisory Mini-Protocol', advisoryMiniProtocol)
+    addSection('Advisory Mini-Protocol', advisoryMiniProtocol, false)
+  } else if (p.sections.advisory === 'micro') {
+    addSection('Advisory Mini-Protocol', buildAdvisoryMicro(), false)
+  } else {
+    excludedSections.push({ name: 'Advisory Mini-Protocol', reason: 'profile-excluded' })
+  }
 
   const prompt = sections.join('\n\n')
   const totalTokenEstimate = estimateTokens(prompt.length)
+  const totalTokenEstimateWithSafety = Math.ceil(totalTokenEstimate * p.safetyFactor)
+
+  // Dev-only budget guard
+  if (totalTokenEstimateWithSafety > budget && context.debug) {
+    console.warn(`[prompt-builder] WARNING: totalTokenEstimate=${totalTokenEstimate} (with safety=${totalTokenEstimateWithSafety}) exceeds budget=${budget}`)
+  }
 
   return {
     prompt,
     manifest: {
+      profileName: p.name,
+      systemBudget: budget,
       sections: manifestSections,
+      excludedSections,
       filesIncluded,
       filesExcluded,
       totalTokenEstimate,
+      totalTokenEstimateWithSafety,
     },
   }
 }
 
-// ── Status Briefing Rendering ──
+// --- Micro-versions for Ollama profiles ---
+
+function buildAdvisoryMicro(): string {
+  return `=== ADVISORY GUARDRAILS ===
+- Classify intent: brainstorm|challenge|review|scenario|general. Emit <!-- advisory_mode: <mode> --> at response start.
+- Cross-domain facts: always attribute "(per [Domain] KB — cross-domain)".
+- Proactive insights: max 1 per user statement, only at decision points. Format: "**Insight:** [content]".
+- No insights during draft/compose requests.
+- Never introduce new facts — only interpret existing KB/tool/user data.
+- If KB context seems insufficient, ask one clarifying question or suggest switching to a richer context mode.
+- When uncertain, label uncertainty and point to what is missing (e.g., "KB digest doesn't mention X").`
+}
+
+function buildDomainProtocolsMicro(protocols: PromptProtocol[]): string {
+  const highSignalPattern = /\b(MUST|NEVER|REQUIRED|Gate|Approval|Escalat)/i
+  const matchedLines: string[] = []
+
+  for (const proto of protocols) {
+    for (const line of proto.content.split('\n')) {
+      const trimmed = line.trim()
+      if (trimmed && highSignalPattern.test(trimmed)) {
+        matchedLines.push(trimmed)
+        if (matchedLines.length >= 8) break
+      }
+    }
+    if (matchedLines.length >= 8) break
+  }
+
+  // Fallback: first 8 non-empty lines of first protocol
+  if (matchedLines.length === 0 && protocols.length > 0) {
+    for (const line of protocols[0].content.split('\n')) {
+      const trimmed = line.trim()
+      if (trimmed) {
+        matchedLines.push(trimmed)
+        if (matchedLines.length >= 8) break
+      }
+    }
+  }
+
+  const omittedCount = protocols.reduce((sum, p) => sum + p.content.split('\n').filter(l => l.trim()).length, 0) - matchedLines.length
+  const lines = ['=== DOMAIN PROTOCOLS (key rules) ===', ...matchedLines]
+  if (omittedCount > 0) {
+    lines.push(`(+${omittedCount} protocol rules omitted for local model budget)`)
+  }
+  return lines.join('\n')
+}
+
+// --- Status Capsule (compact format for Ollama profiles) ---
+
+export function renderStatusCapsule(snapshot: DomainStatusSnapshot, limits: StatusCapsuleLimits): string {
+  const lines: string[] = [
+    '=== STATUS CAPSULE ===',
+    `Health: Severity ${snapshot.severityScore} | ${snapshot.status}`,
+  ]
+
+  // Overdue deadlines
+  if (snapshot.overdueDeadlines.length > 0) {
+    lines.push('OVERDUE:')
+    const shown = snapshot.overdueDeadlines.slice(0, limits.overdueMax)
+    for (const d of shown) {
+      lines.push(truncate(`• ${d.text} — due ${d.dueDate}`, 120))
+    }
+    if (snapshot.overdueDeadlines.length > limits.overdueMax) {
+      lines.push(`(+${snapshot.overdueDeadlines.length - limits.overdueMax} more — ask "show overdue" to expand)`)
+    }
+  }
+
+  // Open gap flags
+  if (snapshot.openGapFlags.length > 0) {
+    lines.push('GAPS:')
+    const shown = snapshot.openGapFlags.slice(0, limits.gapsMax)
+    for (const g of shown) {
+      lines.push(truncate(`• ${g.category}: ${g.description}`, 120))
+    }
+    if (snapshot.openGapFlags.length > limits.gapsMax) {
+      lines.push(`(+${snapshot.openGapFlags.length - limits.gapsMax} more)`)
+    }
+  }
+
+  // Priority actions
+  if (snapshot.topActions.length > 0) {
+    lines.push('PRIORITY ACTIONS:')
+    const shown = snapshot.topActions.slice(0, limits.actionsMax)
+    for (const a of shown) {
+      lines.push(truncate(`• ${a.text}`, 120))
+    }
+    if (snapshot.topActions.length > limits.actionsMax) {
+      lines.push(`(+${snapshot.topActions.length - limits.actionsMax} more)`)
+    }
+  }
+
+  return lines.join('\n')
+}
+
+// ── Status Briefing Rendering (full, for cloud profiles) ──
 
 function truncate(text: string, maxLen: number): string {
   if (text.length <= maxLen) return text

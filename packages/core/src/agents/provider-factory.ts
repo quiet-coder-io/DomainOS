@@ -34,11 +34,11 @@ export const KNOWN_MODELS: Record<ProviderName, string[]> = {
     'o3-mini',
   ],
   ollama: [
-    'llama3.2',
+    'qwen3:30b-a3b-32k',
+    'qwen3:30b-a3b',
+    'qwen3:32b',
     'llama3.1',
     'mistral',
-    'codellama',
-    'mixtral',
   ],
 }
 
@@ -46,7 +46,7 @@ export const KNOWN_MODELS: Record<ProviderName, string[]> = {
 export const DEFAULT_MODELS: Record<ProviderName, string> = {
   anthropic: 'claude-sonnet-4-20250514',
   openai: 'gpt-4o',
-  ollama: 'llama3.2',
+  ollama: 'qwen3:30b-a3b-32k',
 }
 
 /**

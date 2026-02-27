@@ -8,6 +8,7 @@
  */
 
 import { OpenAIProvider } from './openai-provider.js'
+import type { ChatMessage, ChatOptions } from './provider.js'
 
 export interface OllamaProviderOptions {
   model: string
@@ -44,6 +45,45 @@ export class OllamaProvider extends OpenAIProvider {
       maxTokens: options.maxTokens,
     })
     this.ollamaBaseUrl = base
+  }
+
+  /**
+   * Streaming chat with Qwen3 thinking-mode support.
+   *
+   * Qwen3 models emit a reasoning phase (delta.reasoning) before content (delta.content).
+   * Without handling this, the UI appears frozen during the 1-2s thinking phase.
+   * We yield a thinking indicator on first reasoning token so the UI shows activity.
+   */
+  override async *chat(
+    messages: ChatMessage[],
+    systemPrompt: string,
+    options?: ChatOptions,
+  ): AsyncIterable<string> {
+    const stream = await this.client.chat.completions.create(
+      {
+        model: this.model,
+        max_tokens: this.maxTokens,
+        stream: true,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...messages.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+        ],
+      },
+      { signal: options?.signal as AbortSignal | undefined },
+    )
+
+    for await (const chunk of stream) {
+      const delta = chunk.choices?.[0]?.delta as Record<string, unknown> | undefined
+      if (!delta) continue
+
+      // Qwen3 thinking phase: delta.reasoning has tokens, delta.content is empty.
+      // Skip reasoning tokens — the UI already shows loading dots during this phase.
+
+      // Content phase: yield normally
+      if (delta.content && typeof delta.content === 'string') {
+        yield delta.content
+      }
+    }
   }
 
   /** List installed models via native Ollama API (not OpenAI /v1/models). */

@@ -17,9 +17,14 @@ import {
   scanKBDirectory,
   scaffoldKBFiles,
   buildKBContext,
+  buildKBContextDigestOnly,
+  buildKBContextDigestPlusStructural,
   buildSiblingContext,
   buildSystemPrompt,
   buildStartupReport,
+  getPromptProfile,
+  estimateChatTokens,
+  clamp,
   AnthropicProvider,
   createProvider,
   shouldUseTools,
@@ -543,13 +548,34 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
         const lastUserMsgEarly = payload.messages.filter((m) => m.role === 'user').at(-1)
         const isStatusBriefingEarly = lastUserMsgEarly && detectStatusIntent(lastUserMsgEarly.content)
 
+        // ── Prompt profile selection + end-to-end budget computation ──
+        const promptProfile = getPromptProfile(
+          resolvedProvider === 'ollama' ? 'ollama_fast' : 'cloud_full',
+        )
+        const historyTokens = estimateChatTokens(payload.messages)
+        const rawBudget = Math.floor(
+          (promptProfile.modelContextLimit - historyTokens - promptProfile.outputReserve)
+          / promptProfile.safetyFactor,
+        )
+        const systemBudget = clamp(rawBudget, promptProfile.minSystemBudget, promptProfile.maxSystemBudget)
+
         const kbFiles = kbRepo.getFiles(payload.domainId)
         if (!kbFiles.ok) return { ok: false, error: kbFiles.error.message }
 
-        const kbBudget = isStatusBriefingEarly
-          ? TOKEN_BUDGETS.primaryKB - TOKEN_BUDGETS.statusBriefing
-          : TOKEN_BUDGETS.primaryKB
-        const kbContext = await buildKBContext(domain.value.kbPath, kbFiles.value, kbBudget)
+        // KB budget depends on profile strategy
+        const kbBudget = promptProfile.kbStrategy === 'full'
+          ? (isStatusBriefingEarly ? TOKEN_BUDGETS.primaryKB - TOKEN_BUDGETS.statusBriefing : TOKEN_BUDGETS.primaryKB)
+          : Math.floor(systemBudget * 0.65)
+
+        // KB context building: dispatch on strategy
+        let kbContext: Result<{ files: Array<{ path: string; content: string; tier?: string; stalenessLabel?: string }>; totalChars: number; truncated: boolean }, DomainOSError>
+        if (promptProfile.kbStrategy === 'digest_only') {
+          kbContext = await buildKBContextDigestOnly(domain.value.kbPath, kbFiles.value, kbBudget)
+        } else if (promptProfile.kbStrategy === 'digest_plus_structural') {
+          kbContext = await buildKBContextDigestPlusStructural(domain.value.kbPath, kbFiles.value, kbBudget)
+        } else {
+          kbContext = await buildKBContext(domain.value.kbPath, kbFiles.value, kbBudget)
+        }
         if (!kbContext.ok) return { ok: false, error: kbContext.error.message }
 
         const protocols = protocolRepo.getByDomainId(payload.domainId)
@@ -726,8 +752,11 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           brainstormContext,
           activeSkill,
           currentDate,
-        })
+        }, promptProfile, systemBudget)
         const systemPrompt = promptResult.prompt
+
+        // Performance logging for prompt profile budgeting
+        console.log(`[prompt] profile=${promptProfile.name} rawBudget=${rawBudget} cappedBudget=${systemBudget} maxBudget=${promptProfile.maxSystemBudget} history=${historyTokens} outputReserve=${promptProfile.outputReserve} promptTokens=${promptResult.manifest.totalTokenEstimate} excluded=${promptResult.manifest.excludedSections.length}`)
 
         // --- Tool-use branch (Advisory + Gmail + GTasks, uses unified shouldUseTools routing) ---
         const gmailCreds = await loadGmailCredentials()
@@ -735,8 +764,11 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
         const gtasksCreds = await loadGTasksCredentials()
         const gtasksEnabled = !!gtasksCreds // global, no per-domain flag
 
-        // Advisory tools are always available; Gmail/GTasks depend on credentials
-        const toolsAvailable = true
+        // Advisory tools are always available for cloud providers; Gmail/GTasks depend on credentials.
+        // For Ollama, always skip tool loop — the non-streaming tool-use path (stream: false) is
+        // too slow for local models (full response must complete before any UI update). Users who
+        // need tools with Ollama can set forceToolAttempt on the domain.
+        const toolsAvailable = resolvedProvider !== 'ollama'
 
         if (toolsAvailable && shouldUseTools(provider, resolvedProvider, resolvedModel, domain.value, ollamaBaseUrl)) {
           const tools: Array<{ name: string; description: string; inputSchema: Record<string, unknown> }> = []
@@ -847,7 +879,7 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
               gmailClient,
               gtasksClient,
               eventSender: event.sender,
-              ollamaBaseUrl: resolvedProvider === 'ollama' ? ollamaBaseUrl : undefined,
+              ollamaBaseUrl: undefined, // Ollama never enters tool loop (toolsAvailable = false)
               signal: controller.signal,
             })
 
@@ -863,11 +895,22 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
 
         if (!fullResponse) {
           // --- Streaming path (all providers) ---
-          for await (const chunk of provider.chat(payload.messages, systemPrompt, { signal: controller.signal })) {
-            if (controller.signal.aborted) break
-            fullResponse += chunk
-            sendChatChunk(event.sender, requestId, chunk)
+          const streamStart = Date.now()
+          console.log(`[streaming] start provider=${resolvedProvider} model=${resolvedModel} systemPromptLen=${systemPrompt.length} messagesCount=${payload.messages.length}`)
+          let chunkCount = 0
+          try {
+            for await (const chunk of provider.chat(payload.messages, systemPrompt, { signal: controller.signal })) {
+              if (controller.signal.aborted) break
+              chunkCount++
+              if (chunkCount === 1) console.log(`[streaming] first_chunk latency=${Date.now() - streamStart}ms chunk=${JSON.stringify(chunk.slice(0, 50))}`)
+              fullResponse += chunk
+              sendChatChunk(event.sender, requestId, chunk)
+            }
+          } catch (streamErr) {
+            console.error(`[streaming] error after ${chunkCount} chunks, ${Date.now() - streamStart}ms:`, streamErr)
+            throw streamErr
           }
+          console.log(`[streaming] done chunks=${chunkCount} totalMs=${Date.now() - streamStart} responseLen=${fullResponse.length}`)
 
           if (controller.signal.aborted) {
             cancelled = true
