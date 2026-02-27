@@ -1,6 +1,5 @@
 import { autoUpdater } from 'electron-updater'
-import { app, dialog, shell, BrowserWindow } from 'electron'
-import { join } from 'node:path'
+import { app, dialog, BrowserWindow } from 'electron'
 
 export function initAutoUpdater(mainWindow: BrowserWindow): void {
   if (!app.isPackaged) return
@@ -18,14 +17,12 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
   })
 
   autoUpdater.on('update-downloaded', (info) => {
-    const cachePath = join(app.getPath('appData'), '..', 'Caches', '@domain-osdesktop-updater', 'pending')
     dialog.showMessageBox(mainWindow, {
       type: 'info',
       title: 'Update Ready',
-      message: `DomainOS ${info.version} has been downloaded.`,
-      detail: 'The app is unsigned, so automatic install isn\'t available yet. Click "Show Update" to open the folder — unzip and drag DomainOS.app to Applications to replace the current version.',
-      buttons: ['Show Update', 'Later'],
-    }).then((r) => { if (r.response === 0) shell.openPath(cachePath) })
+      message: `DomainOS ${info.version} has been downloaded. Restart now to install?`,
+      buttons: ['Restart', 'Later'],
+    }).then((r) => { if (r.response === 0) autoUpdater.quitAndInstall() })
   })
 
   autoUpdater.on('error', (err) => {
