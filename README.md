@@ -18,6 +18,19 @@
 
 ---
 
+## Download
+
+Get the latest release for macOS:
+
+| Mac type | Download |
+|----------|----------|
+| Apple Silicon (M1/M2/M3/M4) | [Download arm64 DMG](https://github.com/quiet-coder-io/DomainOS/releases/latest) |
+| Intel | [Download x64 DMG](https://github.com/quiet-coder-io/DomainOS/releases/latest) |
+
+Or browse all versions on the [Releases page](https://github.com/quiet-coder-io/DomainOS/releases).
+
+**Install:** Open the DMG, drag DomainOS to Applications. On first launch, right-click the app → **Open** → click **Open** in the dialog (one-time step for unsigned apps). After that, it opens normally. The app checks for updates automatically.
+
 ## Project Status
 
 > **Early alpha.** Architecture is stabilizing. The API surface may change between commits. Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -263,7 +276,9 @@ flowchart LR
 
 ## Quick Start
 
-**Prerequisites:** Node.js >= 22, npm
+**Just want to use DomainOS?** Download the latest DMG from the [Download section](#download) above — no build tools needed.
+
+**Want to develop?** Requires Node.js >= 22, npm:
 
 ```bash
 git clone https://github.com/quiet-coder-io/DomainOS.git

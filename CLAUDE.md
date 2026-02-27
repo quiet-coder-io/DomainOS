@@ -13,11 +13,13 @@ domain-os/
 ## Quick Commands
 
 ```bash
-npm run dev          # Start Electron app in dev mode
-npm run build        # Build core, then desktop
-npm run test         # Run all tests
-npm run typecheck    # Type-check all packages
-npm run clean        # Remove all build artifacts and node_modules
+npm run dev              # Start Electron app in dev mode
+npm run build            # Build core, then desktop
+npm run test             # Run all tests
+npm run typecheck        # Type-check all packages
+npm run clean            # Remove all build artifacts and node_modules
+npm run package:mac:arm64  # Package arm64 DMG + ZIP (Apple Silicon)
+npm run package:mac:x64    # Package x64 DMG + ZIP (Intel)
 ```
 
 Per-package:
@@ -45,6 +47,40 @@ Data flow: Renderer → IPC → Main → Core → SQLite/Filesystem
 ### Two tsconfigs in core
 - `tsconfig.json` — IDE config, includes `src/` + `tests/`
 - `tsconfig.build.json` — emit config, excludes tests, used by `npm run build`
+
+### Packaging & Distribution
+
+**Build pipeline:** `npm run build` (core → integrations → desktop via electron-vite) → `electron-builder` packages into DMG + ZIP.
+
+**Separate arm64 + x64 builds** (not universal) — native `better-sqlite3` binary would double app size in a universal build. Architecture controlled by CLI flags (`--arm64` or `--x64`).
+
+**Workspace symlink workaround:** `apps/desktop/scripts/package.mjs` strips workspace deps (`@domain-os/core`, `@domain-os/integrations`) from `package.json` before electron-builder runs, then restores them after. These packages are bundled by electron-vite (via `externalizeDepsPlugin({ exclude: [...] })`) so they don't need to exist in `node_modules` at runtime. Without this, electron-builder follows workspace symlinks to paths outside `apps/desktop/` and crashes.
+
+**Auto-update:** `electron-updater` checks GitHub Releases 10s after launch and every 4 hours. Prompts user to download, then prompts to restart. Only active in packaged builds (`app.isPackaged`). Public repo — no token needed.
+
+**Unsigned app (Phase 1):** `identity: null` in `electron-builder.yml` skips code signing. First launch requires right-click → Open. Phase 2 (Developer ID + notarization) will eliminate this.
+
+**Key files:**
+| File | Purpose |
+|------|---------|
+| `apps/desktop/electron-builder.yml` | Packaging config (targets, asar, publish) |
+| `apps/desktop/scripts/package.mjs` | Workspace-aware packaging wrapper |
+| `apps/desktop/src/main/updater.ts` | Auto-update lifecycle |
+| `apps/desktop/build/entitlements.mac.plist` | macOS entitlements (scaffolded for Phase 2) |
+
+**Release workflow:**
+```bash
+# 1. Bump version in apps/desktop/package.json
+# 2. Build both architectures
+npm run package:mac:arm64
+mkdir -p apps/desktop/dist-arm64 && mv apps/desktop/dist/* apps/desktop/dist-arm64/
+npm run package:mac:x64
+mkdir -p apps/desktop/dist-x64 && mv apps/desktop/dist/* apps/desktop/dist-x64/
+# 3. Create GitHub Release with all artifacts
+gh release create v0.2.0 apps/desktop/dist-arm64/* apps/desktop/dist-x64/* --title "DomainOS v0.2.0" --draft
+# 4. Verify, then publish
+gh release edit v0.2.0 --draft=false
+```
 
 ## v0.1 Core Loop
 
