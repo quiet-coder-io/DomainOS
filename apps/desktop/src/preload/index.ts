@@ -10,6 +10,7 @@ const api: DomainOSAPI = {
     get: (id) => ipcRenderer.invoke('domain:get', id),
     update: (id, input) => ipcRenderer.invoke('domain:update', id, input),
     delete: (id) => ipcRenderer.invoke('domain:delete', id),
+    reorder: (orderedIds) => ipcRenderer.invoke('domain:reorder', orderedIds),
   },
 
   kb: {

@@ -410,6 +410,19 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
     return domainRepo.delete(id)
   })
 
+  ipcMain.handle('domain:reorder', (_event, orderedIds: string[]) => {
+    if (!Array.isArray(orderedIds) || orderedIds.length === 0 || orderedIds.some((id) => typeof id !== 'string' || !id)) {
+      return { ok: false, error: { code: 'VALIDATION_ERROR', message: 'orderedIds must be a non-empty array of strings' } }
+    }
+    if (new Set(orderedIds).size !== orderedIds.length) {
+      return { ok: false, error: { code: 'VALIDATION_ERROR', message: 'orderedIds must not contain duplicates' } }
+    }
+    if (orderedIds.length > 500) {
+      return { ok: false, error: { code: 'VALIDATION_ERROR', message: 'orderedIds exceeds maximum length' } }
+    }
+    return domainRepo.reorder(orderedIds)
+  })
+
   // --- KB ---
 
   ipcMain.handle('kb:scan', async (_event, domainId: string) => {

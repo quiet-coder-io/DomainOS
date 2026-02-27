@@ -18,6 +18,7 @@ export interface DomainOSAPI {
       modelProvider?: string | null; modelName?: string | null; forceToolAttempt?: boolean
     }): Promise<IPCResult<Domain>>
     delete(id: string): Promise<IPCResult<void>>
+    reorder(orderedIds: string[]): Promise<IPCResult<void>>
   }
 
   kb: {
@@ -332,6 +333,7 @@ export interface Domain {
   modelProvider: string | null
   modelName: string | null
   forceToolAttempt: boolean
+  sortOrder: number
   createdAt: string
   updatedAt: string
 }

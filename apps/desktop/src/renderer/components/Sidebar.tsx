@@ -123,7 +123,7 @@ function TagDots({ tags }: { tags: DomainTag[] }): React.JSX.Element | null {
 // ── Main Sidebar ──
 
 export function Sidebar({ activeView, onViewChange, theme, onToggleTheme }: SidebarProps): React.JSX.Element {
-  const { domains, activeDomainId, loading, fetchDomains, setActiveDomain, deleteDomain } = useDomainStore()
+  const { domains, activeDomainId, loading, fetchDomains, setActiveDomain, deleteDomain, reorderDomain } = useDomainStore()
   const { items: intakeItems, fetchPending } = useIntakeStore()
   const {
     tagsByDomain,
@@ -143,6 +143,10 @@ export function Sidebar({ activeView, onViewChange, theme, onToggleTheme }: Side
   const newButtonRef = useRef<HTMLButtonElement>(null)
   const [contextMenu, setContextMenu] = useState<{ domainId: string; x: number; y: number } | null>(null)
   const [editingDomainId, setEditingDomainId] = useState<string | null>(null)
+
+  // Drag-to-sort state
+  const [dragSourceIdx, setDragSourceIdx] = useState<number | null>(null)
+  const [dropTargetIdx, setDropTargetIdx] = useState<number | null>(null)
 
   // Collapse state — persisted in localStorage
   const [collapsed, setCollapsed] = useState(() => {
@@ -532,43 +536,82 @@ export function Sidebar({ activeView, onViewChange, theme, onToggleTheme }: Side
                     </button>
                   </div>
                 )}
-                {visibleDomains.map((domain) => {
+                {visibleDomains.map((domain, idx) => {
                   const isActive = activeDomainId === domain.id
                   const domainTags = tagsByDomain[domain.id] ?? []
+                  const isDragSource = dragSourceIdx === idx
+                  const canDrag = !hasActiveFilters
                   return (
-                    <button
-                      key={domain.id}
-                      onClick={() => {
-                        setActiveDomain(domain.id)
-                        onViewChange('domains')
-                      }}
-                      onContextMenu={(e) => {
-                        e.preventDefault()
-                        setContextMenu({ domainId: domain.id, x: e.clientX, y: e.clientY })
-                      }}
-                      className={`mb-1 flex w-full items-start gap-2 rounded px-3 py-2 text-left text-sm ${
-                        isActive
-                          ? 'bg-accent-muted text-accent-text'
-                          : 'text-text-secondary hover:bg-surface-2'
-                      }`}
-                    >
-                      <span
-                        className={`mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
-                          isActive ? 'bg-accent' : 'bg-text-tertiary'
-                        }`}
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center">
-                          <span className="font-medium">{domain.name}</span>
-                          <TagDots tags={domainTags} />
+                    <div key={domain.id} className="relative">
+                      {/* Drop indicator line */}
+                      {dropTargetIdx === idx && dragSourceIdx !== null && dragSourceIdx !== idx && (
+                        <div className="absolute -top-[1px] left-2 right-2 h-0.5 rounded bg-accent z-10" />
+                      )}
+                      <button
+                        draggable={canDrag}
+                        onDragStart={(e) => {
+                          setDragSourceIdx(idx)
+                          e.dataTransfer.effectAllowed = 'move'
+                          e.dataTransfer.setData('text/plain', domain.id)
+                        }}
+                        onDragOver={(e) => {
+                          if (!canDrag || dragSourceIdx === null) return
+                          e.preventDefault()
+                          e.dataTransfer.dropEffect = 'move'
+                          const rect = e.currentTarget.getBoundingClientRect()
+                          const midY = rect.top + rect.height / 2
+                          const insertIdx = e.clientY < midY ? idx : idx + 1
+                          setDropTargetIdx(insertIdx)
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault()
+                          if (dragSourceIdx !== null && dropTargetIdx !== null) {
+                            const toIdx = dropTargetIdx > dragSourceIdx ? dropTargetIdx - 1 : dropTargetIdx
+                            reorderDomain(dragSourceIdx, toIdx)
+                          }
+                          setDragSourceIdx(null)
+                          setDropTargetIdx(null)
+                        }}
+                        onDragEnd={() => {
+                          setDragSourceIdx(null)
+                          setDropTargetIdx(null)
+                        }}
+                        onClick={() => {
+                          setActiveDomain(domain.id)
+                          onViewChange('domains')
+                        }}
+                        onContextMenu={(e) => {
+                          e.preventDefault()
+                          setContextMenu({ domainId: domain.id, x: e.clientX, y: e.clientY })
+                        }}
+                        className={`mb-1 flex w-full items-start gap-2 rounded px-3 py-2 text-left text-sm transition-opacity ${
+                          isActive
+                            ? 'bg-accent-muted text-accent-text'
+                            : 'text-text-secondary hover:bg-surface-2'
+                        } ${isDragSource ? 'opacity-30' : ''}`}
+                      >
+                        <span
+                          className={`mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
+                            isActive ? 'bg-accent' : 'bg-text-tertiary'
+                          }`}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center">
+                            <span className="font-medium">{domain.name}</span>
+                            <TagDots tags={domainTags} />
+                          </div>
+                          {domain.description && (
+                            <div className="mt-0.5 truncate text-xs text-text-tertiary">{domain.description}</div>
+                          )}
                         </div>
-                        {domain.description && (
-                          <div className="mt-0.5 truncate text-xs text-text-tertiary">{domain.description}</div>
-                        )}
-                      </div>
-                    </button>
+                      </button>
+                    </div>
                   )
                 })}
+                {/* Drop indicator at the very end of the list */}
+                {dropTargetIdx === visibleDomains.length && dragSourceIdx !== null && (
+                  <div className="relative mx-2 h-0.5 rounded bg-accent" />
+                )}
               </>
             )}
 

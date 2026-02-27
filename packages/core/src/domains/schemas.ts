@@ -58,6 +58,7 @@ export const DomainSchema = z.object({
   modelProvider: ModelProviderEnum.nullable().default(null),
   modelName: z.string().nullable().default(null),
   forceToolAttempt: z.boolean().default(false),
+  sortOrder: z.number().int().default(0),
   createdAt: TimestampSchema,
   updatedAt: TimestampSchema,
 })

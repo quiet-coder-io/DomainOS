@@ -864,6 +864,17 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 21,
+    description: 'Add sort_order to domains for manual ordering',
+    up(db) {
+      runSQL(db, `ALTER TABLE domains ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;`)
+      // Backfill: oldest domain = 0, newest = N (preserves created_at order)
+      const rows = db.prepare('SELECT id FROM domains ORDER BY created_at ASC').all() as Array<{ id: string }>
+      const stmt = db.prepare('UPDATE domains SET sort_order = ? WHERE id = ?')
+      rows.forEach((row, i) => stmt.run(i, row.id))
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

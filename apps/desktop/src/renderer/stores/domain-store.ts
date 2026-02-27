@@ -17,6 +17,7 @@ interface DomainState {
   }): Promise<boolean>
   setActiveDomain(id: string | null): void
   deleteDomain(id: string): Promise<void>
+  reorderDomain(fromIndex: number, toIndex: number): Promise<void>
 }
 
 export const useDomainStore = create<DomainState>((set, get) => ({
@@ -70,5 +71,20 @@ export const useDomainStore = create<DomainState>((set, get) => ({
       set({ activeDomainId: null })
     }
     await state.fetchDomains()
+  },
+
+  async reorderDomain(fromIndex, toIndex) {
+    if (fromIndex === toIndex) return
+    const current = [...get().domains]
+    const [moved] = current.splice(fromIndex, 1)
+    current.splice(toIndex, 0, moved)
+    // Optimistic update
+    set({ domains: current })
+    // Persist
+    const result = await window.domainOS.domain.reorder(current.map((d) => d.id))
+    if (!result.ok) {
+      console.error('reorderDomain failed:', result.error)
+      await get().fetchDomains()
+    }
   },
 }))

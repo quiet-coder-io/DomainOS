@@ -17,11 +17,12 @@ interface DomainRow {
   model_provider: string | null
   model_name: string | null
   force_tool_attempt: number
+  sort_order: number
   created_at: string
   updated_at: string
 }
 
-const DOMAIN_COLUMNS = 'id, name, description, kb_path, identity, escalation_triggers, allow_gmail, model_provider, model_name, force_tool_attempt, created_at, updated_at'
+const DOMAIN_COLUMNS = 'id, name, description, kb_path, identity, escalation_triggers, allow_gmail, model_provider, model_name, force_tool_attempt, sort_order, created_at, updated_at'
 
 const DEFAULT_MODELS: Record<string, string> = {
   anthropic: 'claude-sonnet-4-20250514',
@@ -56,6 +57,7 @@ function rowToDomain(row: DomainRow): Domain {
     modelProvider: modelProvider as Domain['modelProvider'],
     modelName: modelName,
     forceToolAttempt: row.force_tool_attempt === 1,
+    sortOrder: row.sort_order,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -74,9 +76,12 @@ export class DomainRepository {
     const id = uuidv4()
 
     try {
+      const maxRow = this.db.prepare('SELECT MAX(sort_order) as max_order FROM domains').get() as { max_order: number | null } | undefined
+      const sortOrder = (maxRow?.max_order ?? -1) + 1
+
       this.db
         .prepare(
-          'INSERT INTO domains (id, name, description, kb_path, identity, escalation_triggers, allow_gmail, model_provider, model_name, force_tool_attempt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO domains (id, name, description, kb_path, identity, escalation_triggers, allow_gmail, model_provider, model_name, force_tool_attempt, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         )
         .run(
           id,
@@ -89,6 +94,7 @@ export class DomainRepository {
           parsed.data.modelProvider ?? null,
           parsed.data.modelName ?? null,
           parsed.data.forceToolAttempt ? 1 : 0,
+          sortOrder,
           now,
           now,
         )
@@ -104,6 +110,7 @@ export class DomainRepository {
         modelProvider: parsed.data.modelProvider ?? null,
         modelName: parsed.data.modelName ?? null,
         forceToolAttempt: parsed.data.forceToolAttempt ?? false,
+        sortOrder,
         createdAt: now,
         updatedAt: now,
       })
@@ -124,7 +131,7 @@ export class DomainRepository {
   list(): Result<Domain[], DomainOSError> {
     try {
       const rows = this.db
-        .prepare(`SELECT ${DOMAIN_COLUMNS} FROM domains ORDER BY created_at DESC`)
+        .prepare(`SELECT ${DOMAIN_COLUMNS} FROM domains ORDER BY sort_order ASC, created_at ASC`)
         .all() as DomainRow[]
       return Ok(rows.map(rowToDomain))
     } catch (e) {
@@ -179,6 +186,19 @@ export class DomainRepository {
 
     try {
       this.db.prepare('DELETE FROM domains WHERE id = ?').run(id)
+      return Ok(undefined)
+    } catch (e) {
+      return Err(DomainOSError.db((e as Error).message))
+    }
+  }
+
+  reorder(orderedIds: string[]): Result<void, DomainOSError> {
+    try {
+      const stmt = this.db.prepare('UPDATE domains SET sort_order = ? WHERE id = ?')
+      const txn = this.db.transaction(() => {
+        orderedIds.forEach((id, i) => stmt.run(i, id))
+      })
+      txn()
       return Ok(undefined)
     } catch (e) {
       return Err(DomainOSError.db((e as Error).message))
