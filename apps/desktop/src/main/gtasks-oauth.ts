@@ -14,10 +14,8 @@ import { createServer } from 'node:http'
 import { createHash, randomBytes } from 'node:crypto'
 import { google } from 'googleapis'
 import { saveGTasksCredentials, clearGTasksCredentials, loadGTasksCredentials } from './gtasks-credentials'
+import { loadGCPOAuthConfig } from './gcp-oauth-config'
 
-// Client ID/Secret: prefer GTasks-specific vars, fall back to Gmail vars
-const CLIENT_ID = import.meta.env.MAIN_VITE_GTASKS_CLIENT_ID ?? import.meta.env.MAIN_VITE_GMAIL_CLIENT_ID ?? ''
-const CLIENT_SECRET = import.meta.env.MAIN_VITE_GTASKS_CLIENT_SECRET ?? import.meta.env.MAIN_VITE_GMAIL_CLIENT_SECRET ?? ''
 const SCOPES = ['https://www.googleapis.com/auth/tasks']
 const CALLBACK_PATH = '/oauth2callback'
 const AUTH_TIMEOUT_MS = 120_000
@@ -38,11 +36,12 @@ export async function startGTasksOAuth(): Promise<{ clientId: string; refreshTok
 }
 
 async function doOAuth(): Promise<{ clientId: string; refreshToken: string; email: string }> {
-  if (!CLIENT_ID || !CLIENT_SECRET) {
-    throw new Error(
-      'Google Tasks OAuth not configured — set MAIN_VITE_GTASKS_CLIENT_ID/SECRET or MAIN_VITE_GMAIL_CLIENT_ID/SECRET in apps/desktop/.env',
-    )
+  const oauthConfig = await loadGCPOAuthConfig()
+  if (!oauthConfig?.clientId || !oauthConfig?.clientSecret) {
+    throw new Error('Google OAuth not configured. Go to Settings → API Keys → Google OAuth and enter your GCP OAuth Client ID and Secret.')
   }
+  const CLIENT_ID = oauthConfig.clientId
+  const CLIENT_SECRET = oauthConfig.clientSecret
 
   // Generate PKCE code verifier + challenge
   const codeVerifier = randomBytes(32).toString('base64url')

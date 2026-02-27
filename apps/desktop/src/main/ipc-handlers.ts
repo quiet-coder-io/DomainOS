@@ -95,6 +95,7 @@ import { ADVISORY_TOOLS } from './advisory-tools'
 import { BRAINSTORM_TOOLS } from './brainstorm-tools'
 import { loadGTasksCredentials, checkGTasksConnected } from './gtasks-credentials'
 import { startGTasksOAuth, disconnectGTasks } from './gtasks-oauth'
+import { saveGCPOAuthConfig, loadGCPOAuthConfig, clearGCPOAuthConfig } from './gcp-oauth-config'
 import { GTASKS_TOOLS } from './gtasks-tools'
 import { runToolLoop } from './tool-loop'
 import { sendChatChunk, sendChatDone } from './chat-events'
@@ -2144,6 +2145,38 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
   ipcMain.handle('settings:set-provider-config', async (_event, config: ProviderConfigFile) => {
     try {
       await saveProviderConfig(config)
+      return { ok: true, value: undefined }
+    } catch (err) {
+      return { ok: false, error: (err as Error).message }
+    }
+  })
+
+  // --- Settings: GCP OAuth ---
+
+  ipcMain.handle('settings:get-gcp-oauth-status', async () => {
+    try {
+      const config = await loadGCPOAuthConfig()
+      return { ok: true, value: { configured: !!config } }
+    } catch (err) {
+      return { ok: false, error: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle('settings:set-gcp-oauth', async (_event, clientId: string, clientSecret: string) => {
+    try {
+      await saveGCPOAuthConfig({ clientId: clientId.trim(), clientSecret: clientSecret.trim() })
+      return { ok: true, value: undefined }
+    } catch (err) {
+      return { ok: false, error: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle('settings:clear-gcp-oauth', async () => {
+    try {
+      await clearGCPOAuthConfig()
+      // Also disconnect Gmail and GTasks since they depend on these credentials
+      try { await disconnectGmail() } catch { /* noop */ }
+      try { await disconnectGTasks() } catch { /* noop */ }
       return { ok: true, value: undefined }
     } catch (err) {
       return { ok: false, error: (err as Error).message }

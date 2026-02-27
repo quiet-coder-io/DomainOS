@@ -287,6 +287,9 @@ const api: DomainOSAPI = {
     listOllamaModels: (baseUrl?: string) => ipcRenderer.invoke('settings:list-ollama-models', baseUrl),
     testOllama: (baseUrl?: string) => ipcRenderer.invoke('settings:test-ollama', baseUrl),
     testTools: (provider: string, model: string) => ipcRenderer.invoke('settings:test-tools', provider, model),
+    getGCPOAuthStatus: () => ipcRenderer.invoke('settings:get-gcp-oauth-status'),
+    setGCPOAuth: (clientId: string, clientSecret: string) => ipcRenderer.invoke('settings:set-gcp-oauth', clientId, clientSecret),
+    clearGCPOAuth: () => ipcRenderer.invoke('settings:clear-gcp-oauth'),
   },
 
   mission: {

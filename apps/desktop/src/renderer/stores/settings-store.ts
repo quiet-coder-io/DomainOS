@@ -27,6 +27,12 @@ interface SettingsState {
 
   // Tool capability probe
   testTools(provider: string, model: string): Promise<ToolTestResult | null>
+
+  // GCP OAuth
+  gcpOAuthConfigured: boolean | null
+  loadGCPOAuthStatus(): Promise<void>
+  setGCPOAuth(clientId: string, clientSecret: string): Promise<void>
+  clearGCPOAuth(): Promise<void>
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -36,6 +42,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   providerConfig: null,
   ollamaConnected: false,
   ollamaModels: [],
+  gcpOAuthConfigured: null,
 
   async loadApiKey() {
     const result = await window.domainOS.settings.getApiKey()
@@ -101,5 +108,22 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       return result.value
     }
     return null
+  },
+
+  async loadGCPOAuthStatus() {
+    const result = await window.domainOS.settings.getGCPOAuthStatus()
+    if (result.ok && result.value) {
+      set({ gcpOAuthConfigured: result.value.configured })
+    }
+  },
+
+  async setGCPOAuth(clientId: string, clientSecret: string) {
+    await window.domainOS.settings.setGCPOAuth(clientId, clientSecret)
+    set({ gcpOAuthConfigured: true })
+  },
+
+  async clearGCPOAuth() {
+    await window.domainOS.settings.clearGCPOAuth()
+    set({ gcpOAuthConfigured: false })
   },
 }))

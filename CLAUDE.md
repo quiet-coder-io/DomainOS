@@ -211,12 +211,13 @@ Reusable mission definitions with a 10-step lifecycle runner, approval gates, an
 | `src/main/gmail-tools.ts` | `GMAIL_TOOLS` as `ToolDefinition[]` (provider-agnostic), input validation, executor |
 | `src/main/gmail-oauth.ts` | OAuth PKCE flow via system browser + loopback |
 | `src/main/gmail-credentials.ts` | Encrypted credential storage (safeStorage) |
+| `src/main/gcp-oauth-config.ts` | Encrypted GCP OAuth client ID/secret storage — shared by Gmail + GTasks OAuth flows |
 | `src/main/gtasks-tools.ts` | `GTASKS_TOOLS` as `ToolDefinition[]` (gtasks_search, gtasks_read, gtasks_complete, gtasks_update, gtasks_delete), input validation, executor |
-| `src/main/gtasks-oauth.ts` | Google Tasks OAuth PKCE flow — scope `tasks` (read-write), falls back to Gmail client ID/secret |
+| `src/main/gtasks-oauth.ts` | Google Tasks OAuth PKCE flow — scope `tasks` (read-write), loads credentials from `gcp-oauth-config` |
 | `src/main/gtasks-credentials.ts` | Encrypted GTasks credential storage (`gtasks-creds.enc`, safeStorage) |
 | `src/main/kb-watcher.ts` | Filesystem monitoring for KB directories — `startKBWatcher()`, `stopKBWatcher()`, debounced (500ms), sends `kb:files-changed` to renderer |
 | `src/preload/api.ts` | IPC type contract: `DomainOSAPI`, `ProviderConfig`, `ProviderKeysStatus`, `ToolTestResult`, `PortfolioHealth`, `BriefingAnalysis`, `MissionRunDetailData`, `MissionProgressEventData` |
-| `src/renderer/components/SettingsDialog.tsx` | Multi-provider settings modal (API keys, Ollama connection, model defaults, tool test) |
+| `src/renderer/components/SettingsDialog.tsx` | Multi-provider settings modal (API keys, Google OAuth config, Ollama connection, model defaults, tool test) |
 | `src/renderer/pages/DomainChatPage.tsx` | Chat page with per-domain model override UI (tri-state: global default / override / clear) |
 | `src/renderer/pages/BriefingPage.tsx` | Portfolio health dashboard + LLM analysis streaming UI with alerts, actions, monitors + GTasks connect/disconnect + overdue badge |
 | `src/renderer/stores/settings-store.ts` | Zustand store for provider keys (boolean+last4), global config, Ollama state |
@@ -362,19 +363,20 @@ Decrypted keys cached in-memory after first read. Keys never cross IPC to render
 | `mission:latest-run` | renderer→main | Get latest completed run for a domain (for switchDomain restore) |
 | `mission:run-progress` | main→renderer | Streaming events: `llm_chunk`, `gate_triggered`, `run_complete`, `run_failed` |
 
-## Environment Variables
+## Google OAuth Configuration
 
-Gmail/GTasks OAuth credentials are loaded from `apps/desktop/.env` (gitignored). Required for integrations:
+Gmail and Google Tasks integration requires GCP OAuth credentials (Client ID + Secret from a Desktop/Native app OAuth client with `gmail.readonly`, `gmail.compose`, and `tasks` scopes).
 
-```
-MAIN_VITE_GMAIL_CLIENT_ID=<your-gcp-oauth-client-id>
-MAIN_VITE_GMAIL_CLIENT_SECRET=<your-gcp-oauth-client-secret>
-# Optional: GTasks-specific overrides (falls back to Gmail vars if not set)
-# MAIN_VITE_GTASKS_CLIENT_ID=<your-gcp-oauth-client-id>
-# MAIN_VITE_GTASKS_CLIENT_SECRET=<your-gcp-oauth-client-secret>
-```
+**Users configure these in Settings → API Keys → Google OAuth.** Credentials are encrypted via `safeStorage` (OS keychain) and stored as `gcp-oauth-config.enc` in the app's `userData` directory. They are never baked into the build.
 
-These come from a GCP project with a Desktop/Native app OAuth client and `gmail.readonly` + `tasks` scopes enabled. Without these, connect will show a clear error; all other features work normally.
+Without configured OAuth credentials, Gmail/GTasks "Connect" shows a clear error directing users to Settings; all other features work normally.
+
+**Key files:**
+| File | Purpose |
+|------|---------|
+| `apps/desktop/src/main/gcp-oauth-config.ts` | Encrypted save/load/clear for GCP OAuth config |
+| `apps/desktop/src/main/gmail-oauth.ts` | Gmail OAuth flow — loads credentials from `gcp-oauth-config` at runtime |
+| `apps/desktop/src/main/gtasks-oauth.ts` | GTasks OAuth flow — loads credentials from `gcp-oauth-config` at runtime |
 
 ## Native Modules
 

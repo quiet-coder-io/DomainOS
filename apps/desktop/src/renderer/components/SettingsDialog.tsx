@@ -39,11 +39,15 @@ export function SettingsDialog({ onClose }: Props): React.JSX.Element {
     providerConfig,
     ollamaConnected,
     ollamaModels,
+    gcpOAuthConfigured,
     loadProviderKeysStatus,
     loadProviderConfig,
+    loadGCPOAuthStatus,
     setProviderKey,
     clearProviderKey,
     setProviderConfig,
+    setGCPOAuth,
+    clearGCPOAuth,
     testOllama,
     listOllamaModels,
     testTools,
@@ -55,6 +59,11 @@ export function SettingsDialog({ onClose }: Props): React.JSX.Element {
   const [anthropicKey, setAnthropicKey] = useState('')
   const [openaiKey, setOpenaiKey] = useState('')
   const [savingKey, setSavingKey] = useState<string | null>(null)
+
+  // GCP OAuth state
+  const [gcpClientId, setGcpClientId] = useState('')
+  const [gcpClientSecret, setGcpClientSecret] = useState('')
+  const [gcpSaving, setGcpSaving] = useState(false)
 
   // Ollama state
   const [ollamaUrl, setOllamaUrl] = useState('')
@@ -74,7 +83,8 @@ export function SettingsDialog({ onClose }: Props): React.JSX.Element {
   useEffect(() => {
     loadProviderKeysStatus()
     loadProviderConfig()
-  }, [loadProviderKeysStatus, loadProviderConfig])
+    loadGCPOAuthStatus()
+  }, [loadProviderKeysStatus, loadProviderConfig, loadGCPOAuthStatus])
 
   // Sync local state from loaded providerConfig
   useEffect(() => {
@@ -123,6 +133,23 @@ export function SettingsDialog({ onClose }: Props): React.JSX.Element {
     }
     setOllamaTesting(false)
   }, [ollamaUrl, testOllama, listOllamaModels])
+
+  // --- GCP OAuth handlers ---
+
+  const handleSaveGCPOAuth = useCallback(async () => {
+    if (!gcpClientId.trim() || !gcpClientSecret.trim()) return
+    setGcpSaving(true)
+    await setGCPOAuth(gcpClientId.trim(), gcpClientSecret.trim())
+    setGcpClientId('')
+    setGcpClientSecret('')
+    setGcpSaving(false)
+  }, [gcpClientId, gcpClientSecret, setGCPOAuth])
+
+  const handleClearGCPOAuth = useCallback(async () => {
+    setGcpSaving(true)
+    await clearGCPOAuth()
+    setGcpSaving(false)
+  }, [clearGCPOAuth])
 
   // --- Defaults handlers ---
 
@@ -314,6 +341,64 @@ export function SettingsDialog({ onClose }: Props): React.JSX.Element {
                         {ollamaModels.length} model{ollamaModels.length === 1 ? '' : 's'} available
                       </span>
                     )}
+                  </div>
+                )}
+              </div>
+
+              {/* Google OAuth */}
+              <div className="mb-4 rounded border border-border-subtle bg-surface-0 p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-text-primary">Google OAuth</span>
+                  {gcpOAuthConfigured && (
+                    <span className="text-xs text-success">Configured</span>
+                  )}
+                </div>
+                <p className="text-xs text-text-tertiary mb-2">
+                  Required for Gmail and Google Tasks. Create a Desktop OAuth client in your{' '}
+                  <a
+                    href="https://console.cloud.google.com/apis/credentials"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-accent hover:underline"
+                  >
+                    GCP Console
+                  </a>{' '}
+                  with Gmail and Tasks API scopes enabled.
+                </p>
+
+                {gcpOAuthConfigured ? (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleClearGCPOAuth}
+                      disabled={gcpSaving}
+                      className="rounded border border-border px-3 py-2 text-xs text-text-tertiary hover:text-danger hover:border-danger disabled:opacity-50"
+                    >
+                      {gcpSaving ? '...' : 'Remove'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      value={gcpClientId}
+                      onChange={(e) => setGcpClientId(e.target.value)}
+                      className={inputClass}
+                      placeholder="Client ID"
+                    />
+                    <input
+                      type="password"
+                      value={gcpClientSecret}
+                      onChange={(e) => setGcpClientSecret(e.target.value)}
+                      className={inputClass}
+                      placeholder="Client Secret"
+                    />
+                    <button
+                      onClick={handleSaveGCPOAuth}
+                      disabled={gcpSaving || !gcpClientId.trim() || !gcpClientSecret.trim()}
+                      className="rounded bg-accent px-3 py-2 text-xs text-white hover:bg-accent-hover disabled:opacity-50"
+                    >
+                      {gcpSaving ? 'Saving...' : 'Save'}
+                    </button>
                   </div>
                 )}
               </div>

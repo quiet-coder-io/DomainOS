@@ -11,12 +11,8 @@ import { createServer } from 'node:http'
 import { createHash, randomBytes } from 'node:crypto'
 import { google } from 'googleapis'
 import { saveGmailCredentials, clearGmailCredentials, loadGmailCredentials } from './gmail-credentials'
+import { loadGCPOAuthConfig } from './gcp-oauth-config'
 
-// Desktop/Native app OAuth from GCP project DomainOS
-// Google requires client_secret even for Desktop apps (it's not truly secret for installed apps)
-// Loaded from .env: MAIN_VITE_GMAIL_CLIENT_ID, MAIN_VITE_GMAIL_CLIENT_SECRET
-const CLIENT_ID = import.meta.env.MAIN_VITE_GMAIL_CLIENT_ID ?? ''
-const CLIENT_SECRET = import.meta.env.MAIN_VITE_GMAIL_CLIENT_SECRET ?? ''
 const SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.compose',
@@ -38,9 +34,12 @@ export async function startGmailOAuth(): Promise<{ clientId: string; refreshToke
 }
 
 async function doOAuth(): Promise<{ clientId: string; refreshToken: string; email: string }> {
-  if (!CLIENT_ID || !CLIENT_SECRET) {
-    throw new Error('Gmail OAuth credentials not configured. Add MAIN_VITE_GMAIL_CLIENT_ID and MAIN_VITE_GMAIL_CLIENT_SECRET to apps/desktop/.env')
+  const oauthConfig = await loadGCPOAuthConfig()
+  if (!oauthConfig?.clientId || !oauthConfig?.clientSecret) {
+    throw new Error('Google OAuth not configured. Go to Settings → API Keys → Google OAuth and enter your GCP OAuth Client ID and Secret.')
   }
+  const CLIENT_ID = oauthConfig.clientId
+  const CLIENT_SECRET = oauthConfig.clientSecret
 
   // Generate PKCE code verifier + challenge
   const codeVerifier = randomBytes(32).toString('base64url')
