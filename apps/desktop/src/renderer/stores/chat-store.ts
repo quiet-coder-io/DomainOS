@@ -335,10 +335,10 @@ export const useChatStore = create<ChatState>((set, get) => {
 
       const requestId = crypto.randomUUID()
 
-      // Renderer-generated IDs and timestamp for persistence
+      // Renderer-generated IDs and timestamps for persistence
       const userMsgId = crypto.randomUUID()
       const assistantMsgId = crypto.randomUUID()
-      const createdAt = new Date().toISOString()
+      const userCreatedAt = new Date().toISOString()
       const runDomainId = domainId
       const runClearToken = getClearToken(domainId)
       let persisted = false
@@ -409,11 +409,11 @@ export const useChatStore = create<ChatState>((set, get) => {
           // Persist: user + cancelled assistant
           if (partialContent) {
             persistOnce([
-              { id: userMsgId, role: 'user', content: displayContent, createdAt },
-              { id: assistantMsgId, role: 'assistant', content: partialContent, status: 'cancelled', createdAt },
+              { id: userMsgId, role: 'user', content: displayContent, createdAt: userCreatedAt },
+              { id: assistantMsgId, role: 'assistant', content: partialContent, status: 'cancelled', createdAt: new Date().toISOString() },
             ])
           } else {
-            persistOnce([{ id: userMsgId, role: 'user', content: displayContent, createdAt }])
+            persistOnce([{ id: userMsgId, role: 'user', content: displayContent, createdAt: userCreatedAt }])
           }
           return
         }
@@ -448,8 +448,8 @@ export const useChatStore = create<ChatState>((set, get) => {
           if (result.value.gapFlags?.length) meta.gapFlags = result.value.gapFlags
           if (result.value.decisions?.length) meta.decisions = result.value.decisions
           persistOnce([
-            { id: userMsgId, role: 'user', content: displayContent, createdAt },
-            { id: assistantMsgId, role: 'assistant', content: result.value.content, metadata: meta, createdAt },
+            { id: userMsgId, role: 'user', content: displayContent, createdAt: userCreatedAt },
+            { id: assistantMsgId, role: 'assistant', content: result.value.content, metadata: meta, createdAt: new Date().toISOString() },
           ])
         } else {
           let errorContent = result.error ?? 'Unknown error occurred'
@@ -472,8 +472,8 @@ export const useChatStore = create<ChatState>((set, get) => {
           }))
           // Persist: user + error assistant
           persistOnce([
-            { id: userMsgId, role: 'user', content: displayContent, createdAt },
-            { id: assistantMsgId, role: 'assistant', content: `Error: ${errorContent}`, status: 'error', metadata: { errorMessage: result.error ?? 'Unknown error occurred' }, createdAt },
+            { id: userMsgId, role: 'user', content: displayContent, createdAt: userCreatedAt },
+            { id: assistantMsgId, role: 'assistant', content: `Error: ${errorContent}`, status: 'error', metadata: { errorMessage: result.error ?? 'Unknown error occurred' }, createdAt: new Date().toISOString() },
           ])
         }
       } catch (err) {
@@ -482,8 +482,8 @@ export const useChatStore = create<ChatState>((set, get) => {
           streamingContentByDomain: { ...s.streamingContentByDomain, [domainId]: '' },
         }))
         persistOnce([
-          { id: userMsgId, role: 'user', content: displayContent, createdAt },
-          { id: assistantMsgId, role: 'assistant', content: `Error: ${String(err)}`, status: 'error', metadata: { errorMessage: String(err) }, createdAt },
+          { id: userMsgId, role: 'user', content: displayContent, createdAt: userCreatedAt },
+          { id: assistantMsgId, role: 'assistant', content: `Error: ${String(err)}`, status: 'error', metadata: { errorMessage: String(err) }, createdAt: new Date().toISOString() },
         ])
       }
       // Note: isStreaming/isSending/activeToolCall/activeRequestId are NOT touched here.
