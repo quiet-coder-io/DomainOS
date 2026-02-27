@@ -73,8 +73,8 @@ describe('KNOWN_MODELS', () => {
     expect(KNOWN_MODELS.openai).toContain('gpt-4o')
   })
 
-  it('ollama includes llama3.2', () => {
-    expect(KNOWN_MODELS.ollama).toContain('llama3.2')
+  it('ollama includes qwen3', () => {
+    expect(KNOWN_MODELS.ollama).toContain('qwen3:30b-a3b')
   })
 })
 
