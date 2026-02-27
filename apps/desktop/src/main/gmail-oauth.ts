@@ -34,12 +34,13 @@ export async function startGmailOAuth(): Promise<{ clientId: string; refreshToke
 }
 
 async function doOAuth(): Promise<{ clientId: string; refreshToken: string; email: string }> {
+  // Fallback chain: Settings UI override → built-in env vars → error
   const oauthConfig = await loadGCPOAuthConfig()
-  if (!oauthConfig?.clientId || !oauthConfig?.clientSecret) {
+  const CLIENT_ID = oauthConfig?.clientId || import.meta.env.MAIN_VITE_GMAIL_CLIENT_ID || ''
+  const CLIENT_SECRET = oauthConfig?.clientSecret || import.meta.env.MAIN_VITE_GMAIL_CLIENT_SECRET || ''
+  if (!CLIENT_ID || !CLIENT_SECRET) {
     throw new Error('Google OAuth not configured. Go to Settings → API Keys → Google OAuth and enter your GCP OAuth Client ID and Secret.')
   }
-  const CLIENT_ID = oauthConfig.clientId
-  const CLIENT_SECRET = oauthConfig.clientSecret
 
   // Generate PKCE code verifier + challenge
   const codeVerifier = randomBytes(32).toString('base64url')

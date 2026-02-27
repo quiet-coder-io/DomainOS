@@ -40,6 +40,8 @@ export function SettingsDialog({ onClose }: Props): React.JSX.Element {
     ollamaConnected,
     ollamaModels,
     gcpOAuthConfigured,
+    gcpOAuthHasBuiltIn,
+    gcpOAuthHasOverride,
     loadProviderKeysStatus,
     loadProviderConfig,
     loadGCPOAuthStatus,
@@ -64,6 +66,7 @@ export function SettingsDialog({ onClose }: Props): React.JSX.Element {
   const [gcpClientId, setGcpClientId] = useState('')
   const [gcpClientSecret, setGcpClientSecret] = useState('')
   const [gcpSaving, setGcpSaving] = useState(false)
+  const [gcpShowCustomForm, setGcpShowCustomForm] = useState(false)
 
   // Ollama state
   const [ollamaUrl, setOllamaUrl] = useState('')
@@ -349,32 +352,71 @@ export function SettingsDialog({ onClose }: Props): React.JSX.Element {
               <div className="mb-4 rounded border border-border-subtle bg-surface-0 p-3">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm font-medium text-text-primary">Google OAuth</span>
-                  {gcpOAuthConfigured && (
-                    <span className="text-xs text-success">Configured</span>
-                  )}
+                  {gcpOAuthHasOverride ? (
+                    <span className="text-xs text-success">Custom</span>
+                  ) : gcpOAuthHasBuiltIn ? (
+                    <span className="text-xs text-success">Using built-in defaults</span>
+                  ) : null}
                 </div>
                 <p className="text-xs text-text-tertiary mb-2">
-                  Required for Gmail and Google Tasks. Create a Desktop OAuth client in your{' '}
-                  <a
-                    href="https://console.cloud.google.com/apis/credentials"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-accent hover:underline"
-                  >
-                    GCP Console
-                  </a>{' '}
-                  with Gmail and Tasks API scopes enabled.
+                  Required for Gmail and Google Tasks.
+                  {!gcpOAuthHasBuiltIn && !gcpOAuthHasOverride && (
+                    <> Create a Desktop OAuth client in your{' '}
+                    <a
+                      href="https://console.cloud.google.com/apis/credentials"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-accent hover:underline"
+                    >
+                      GCP Console
+                    </a>{' '}
+                    with Gmail and Tasks API scopes enabled.</>
+                  )}
                 </p>
 
-                {gcpOAuthConfigured ? (
+                {gcpOAuthHasOverride ? (
                   <div className="flex items-center gap-2">
                     <button
                       onClick={handleClearGCPOAuth}
                       disabled={gcpSaving}
                       className="rounded border border-border px-3 py-2 text-xs text-text-tertiary hover:text-danger hover:border-danger disabled:opacity-50"
                     >
-                      {gcpSaving ? '...' : 'Remove'}
+                      {gcpSaving ? '...' : 'Remove custom credentials'}
                     </button>
+                  </div>
+                ) : gcpOAuthHasBuiltIn ? (
+                  <div>
+                    <button
+                      onClick={() => setGcpShowCustomForm(!gcpShowCustomForm)}
+                      className="text-xs text-text-tertiary hover:text-text-secondary"
+                    >
+                      {gcpShowCustomForm ? 'Cancel' : 'Use custom credentials'}
+                    </button>
+                    {gcpShowCustomForm && (
+                      <div className="mt-2 space-y-2">
+                        <input
+                          type="text"
+                          value={gcpClientId}
+                          onChange={(e) => setGcpClientId(e.target.value)}
+                          className={inputClass}
+                          placeholder="Client ID"
+                        />
+                        <input
+                          type="password"
+                          value={gcpClientSecret}
+                          onChange={(e) => setGcpClientSecret(e.target.value)}
+                          className={inputClass}
+                          placeholder="Client Secret"
+                        />
+                        <button
+                          onClick={handleSaveGCPOAuth}
+                          disabled={gcpSaving || !gcpClientId.trim() || !gcpClientSecret.trim()}
+                          className="rounded bg-accent px-3 py-2 text-xs text-white hover:bg-accent-hover disabled:opacity-50"
+                        >
+                          {gcpSaving ? 'Saving...' : 'Save'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-2">

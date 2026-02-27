@@ -2156,7 +2156,9 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
   ipcMain.handle('settings:get-gcp-oauth-status', async () => {
     try {
       const config = await loadGCPOAuthConfig()
-      return { ok: true, value: { configured: !!config } }
+      const hasOverride = !!config
+      const hasBuiltIn = !!(import.meta.env.MAIN_VITE_GMAIL_CLIENT_ID && import.meta.env.MAIN_VITE_GMAIL_CLIENT_SECRET)
+      return { ok: true, value: { configured: hasOverride || hasBuiltIn, hasBuiltIn, hasOverride } }
     } catch (err) {
       return { ok: false, error: (err as Error).message }
     }

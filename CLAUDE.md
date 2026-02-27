@@ -367,16 +367,20 @@ Decrypted keys cached in-memory after first read. Keys never cross IPC to render
 
 Gmail and Google Tasks integration requires GCP OAuth credentials (Client ID + Secret from a Desktop/Native app OAuth client with `gmail.readonly`, `gmail.compose`, and `tasks` scopes).
 
-**Users configure these in Settings → API Keys → Google OAuth.** Credentials are encrypted via `safeStorage` (OS keychain) and stored as `gcp-oauth-config.enc` in the app's `userData` directory. They are never baked into the build.
+**Dual-source credential resolution (fallback chain):**
+1. **Settings UI override** — user enters custom Client ID/Secret in Settings → API Keys → Google OAuth, encrypted via `safeStorage` as `gcp-oauth-config.enc`
+2. **Built-in defaults** — shipped via `.env` at build time (`MAIN_VITE_GMAIL_CLIENT_ID`, `MAIN_VITE_GMAIL_CLIENT_SECRET`), injected by electron-vite into `import.meta.env`
+3. **Error** — if neither source has credentials, Gmail/GTasks "Connect" shows a clear error directing users to Settings
 
-Without configured OAuth credentials, Gmail/GTasks "Connect" shows a clear error directing users to Settings; all other features work normally.
+Users get Gmail/GTasks working out of the box with built-in credentials. The Settings UI is an optional override for power users who want to use their own GCP project. Settings UI shows "Using built-in defaults" when no override is configured, and a "Use custom credentials" toggle to reveal the form.
 
 **Key files:**
 | File | Purpose |
 |------|---------|
-| `apps/desktop/src/main/gcp-oauth-config.ts` | Encrypted save/load/clear for GCP OAuth config |
-| `apps/desktop/src/main/gmail-oauth.ts` | Gmail OAuth flow — loads credentials from `gcp-oauth-config` at runtime |
-| `apps/desktop/src/main/gtasks-oauth.ts` | GTasks OAuth flow — loads credentials from `gcp-oauth-config` at runtime |
+| `apps/desktop/.env` | Built-in OAuth credentials (MAIN_VITE_* prefix for electron-vite main process injection) |
+| `apps/desktop/src/main/gcp-oauth-config.ts` | Encrypted save/load/clear for user-override OAuth config |
+| `apps/desktop/src/main/gmail-oauth.ts` | Gmail OAuth flow — fallback chain: Settings override → built-in env vars |
+| `apps/desktop/src/main/gtasks-oauth.ts` | GTasks OAuth flow — fallback chain: Settings override → built-in env vars |
 
 ## Native Modules
 

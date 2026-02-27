@@ -30,6 +30,8 @@ interface SettingsState {
 
   // GCP OAuth
   gcpOAuthConfigured: boolean | null
+  gcpOAuthHasBuiltIn: boolean
+  gcpOAuthHasOverride: boolean
   loadGCPOAuthStatus(): Promise<void>
   setGCPOAuth(clientId: string, clientSecret: string): Promise<void>
   clearGCPOAuth(): Promise<void>
@@ -43,6 +45,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   ollamaConnected: false,
   ollamaModels: [],
   gcpOAuthConfigured: null,
+  gcpOAuthHasBuiltIn: false,
+  gcpOAuthHasOverride: false,
 
   async loadApiKey() {
     const result = await window.domainOS.settings.getApiKey()
@@ -113,17 +117,31 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   async loadGCPOAuthStatus() {
     const result = await window.domainOS.settings.getGCPOAuthStatus()
     if (result.ok && result.value) {
-      set({ gcpOAuthConfigured: result.value.configured })
+      set({
+        gcpOAuthConfigured: result.value.configured,
+        gcpOAuthHasBuiltIn: result.value.hasBuiltIn,
+        gcpOAuthHasOverride: result.value.hasOverride,
+      })
     }
   },
 
   async setGCPOAuth(clientId: string, clientSecret: string) {
     await window.domainOS.settings.setGCPOAuth(clientId, clientSecret)
-    set({ gcpOAuthConfigured: true })
+    set({ gcpOAuthConfigured: true, gcpOAuthHasOverride: true })
   },
 
   async clearGCPOAuth() {
     await window.domainOS.settings.clearGCPOAuth()
-    set({ gcpOAuthConfigured: false })
+    // After clearing override, re-check status (built-in may still be available)
+    const result = await window.domainOS.settings.getGCPOAuthStatus()
+    if (result.ok && result.value) {
+      set({
+        gcpOAuthConfigured: result.value.configured,
+        gcpOAuthHasBuiltIn: result.value.hasBuiltIn,
+        gcpOAuthHasOverride: false,
+      })
+    } else {
+      set({ gcpOAuthConfigured: false, gcpOAuthHasOverride: false })
+    }
   },
 }))

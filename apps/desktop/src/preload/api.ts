@@ -295,7 +295,7 @@ export interface DomainOSAPI {
     // Tool capability probe
     testTools(provider: string, model: string): Promise<IPCResult<ToolTestResult>>
     // GCP OAuth config
-    getGCPOAuthStatus(): Promise<IPCResult<{ configured: boolean }>>
+    getGCPOAuthStatus(): Promise<IPCResult<{ configured: boolean; hasBuiltIn: boolean; hasOverride: boolean }>>
     setGCPOAuth(clientId: string, clientSecret: string): Promise<IPCResult<void>>
     clearGCPOAuth(): Promise<IPCResult<void>>
   }
