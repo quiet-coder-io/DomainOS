@@ -58,7 +58,7 @@ Data flow: Renderer → IPC → Main → Core → SQLite/Filesystem
 
 **Auto-update:** `electron-updater` checks GitHub Releases 10s after launch and every 4 hours. Prompts user to download, then prompts to restart. Only active in packaged builds (`app.isPackaged`). Public repo — no token needed.
 
-**Unsigned app (Phase 1):** `identity: null` in `electron-builder.yml` skips code signing. First launch requires right-click → Open. Phase 2 (Developer ID + notarization) will eliminate this.
+**Unsigned app (Phase 1):** `identity: null` in `electron-builder.yml` skips code signing. macOS quarantine flags downloaded unsigned apps as "damaged" — run `xattr -cr /Applications/DomainOS.app` before first launch. Phase 2 (Developer ID + notarization) will eliminate this.
 
 **Key files:**
 | File | Purpose |
@@ -76,10 +76,20 @@ npm run package:mac:arm64
 mkdir -p apps/desktop/dist-arm64 && mv apps/desktop/dist/* apps/desktop/dist-arm64/
 npm run package:mac:x64
 mkdir -p apps/desktop/dist-x64 && mv apps/desktop/dist/* apps/desktop/dist-x64/
-# 3. Create GitHub Release with all artifacts
-gh release create v0.2.0 apps/desktop/dist-arm64/* apps/desktop/dist-x64/* --title "DomainOS v0.2.0" --draft
-# 4. Verify, then publish
-gh release edit v0.2.0 --draft=false
+# 3. Generate combined latest-mac.yml (electron-updater needs all architectures in one manifest)
+#    Merge files[] arrays from dist-arm64/latest-mac.yml and dist-x64/latest-mac.yml
+#    Set top-level path/sha512 to arm64 zip; keep single releaseDate
+#    Save to /tmp/latest-mac.yml
+# 4. Create GitHub Release with all artifacts + combined manifest + blockmaps
+gh release create v0.2.0 \
+  apps/desktop/dist-arm64/DomainOS-*-arm64-mac.zip \
+  apps/desktop/dist-arm64/DomainOS-*-arm64.dmg \
+  apps/desktop/dist-arm64/*.blockmap \
+  apps/desktop/dist-x64/DomainOS-*-mac.zip \
+  apps/desktop/dist-x64/DomainOS-*.dmg \
+  apps/desktop/dist-x64/*.blockmap \
+  /tmp/latest-mac.yml \
+  --title "DomainOS v0.2.0"
 ```
 
 ## v0.1 Core Loop
