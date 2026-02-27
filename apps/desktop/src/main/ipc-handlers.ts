@@ -117,6 +117,28 @@ export const missionEvents = new EventEmitter()
 const activeMissionRuns = new Map<string, AbortController>()
 const requestIdByRunId = new Map<string, string>()
 
+// ── Stale tool-claim detection ──────────────────────────────────────────────
+// When tools become available mid-conversation, old assistant messages saying
+// "I can't access Gmail" poison the context. This detector flags those stale
+// claims so an ephemeral reset message can be injected before the LLM call.
+
+const STALE_TOOL_CLAIM_PATTERNS = [
+  /(?:don't|do not|cannot|can't|unable to)\s+(?:have|access|use|connect to|search|read)(?:\s+\w+){0,3}?\s+(?:your\s+)?(?:email|gmail|google\s*tasks?|tools?|integrations?)/i,
+  /(?:lack|without|no)\s+(?:email|gmail|tool|integration)\s+(?:access|capability|connection)/i,
+  /(?:email|gmail|tasks?).*(?:unavailable|not available|not connected)/i,
+  /(?:don't|do not)\s+have\s+(?:a\s+)?(?:live|direct|real)\s+(?:connection|access)/i,
+  /copy[- ]?paste\s+(?:the\s+)?(?:email|content|text)/i,
+  /(?:share|paste|provide)\s+(?:the\s+)?(?:email|correspondence|thread)\s+(?:content|text|here)/i,
+]
+
+export function detectStaleToolClaims(
+  messages: Array<{ role: string; content: string }>,
+): boolean {
+  return messages.some(
+    (m) => m.role === 'assistant' && STALE_TOOL_CLAIM_PATTERNS.some((p) => p.test(m.content)),
+  )
+}
+
 // ── KB content loader for loan-document-review missions ──
 
 interface KBFileEntry {
@@ -773,6 +795,30 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
             gtasksClient = undefined
           }
 
+          // --- Capability-reset injection: counter stale tool claims in history ---
+          let messagesForLlm: ChatMessage[] = payload.messages
+          if (integrationNames.length > 0) {
+            try {
+              if (detectStaleToolClaims(payload.messages)) {
+                const resetMsg: ChatMessage = {
+                  role: 'user',
+                  content: `[System note: Your tool capabilities have changed since earlier messages in this conversation. You now have LIVE, AUTHENTICATED access to: ${integrationNames.join('; ')}. Any earlier assistant messages claiming you lack email, task, or tool access are OUTDATED and INCORRECT. Use your tools when relevant.]`,
+                }
+                const lastUserIdx = payload.messages.map((m) => m.role).lastIndexOf('user')
+                if (lastUserIdx >= 0) {
+                  messagesForLlm = [
+                    ...payload.messages.slice(0, lastUserIdx),
+                    resetMsg,
+                    ...payload.messages.slice(lastUserIdx),
+                  ]
+                }
+              }
+            } catch {
+              // Safety fallback: if detection throws (e.g. malformed content), use original messages
+              messagesForLlm = payload.messages
+            }
+          }
+
           if (tools.length > 0) {
             const result = await runToolLoop({
               provider: provider as ToolCapableProvider,
@@ -780,7 +826,7 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
               model: resolvedModel,
               domainId: payload.domainId,
               requestId,
-              userMessages: payload.messages,
+              userMessages: messagesForLlm,
               systemPrompt: systemPrompt + toolsHint,
               tools,
               db,
