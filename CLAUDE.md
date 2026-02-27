@@ -389,6 +389,29 @@ Without configured OAuth credentials, Gmail/GTasks "Connect" shows a clear error
 - CI: set `ENSURE_NATIVE_SKIP=1` if binary is pre-cached in correct ABI
 - Always prefer running `npm run dev` from repo root
 
+## Development Workflow
+
+**Daily development:**
+```bash
+npm run dev          # Hot-reload Electron app (run from repo root)
+npm run typecheck    # Before every commit
+npm run test         # Run full test suite
+```
+
+**Branching strategy:**
+- Work on feature branches off `main` (e.g., `git checkout -b feature/domain-oauth-settings`)
+- Keep `main` as the stable, releasable branch
+- Merge to `main` when ready, then tag a release
+
+**Release cycle:**
+1. Bump version in `apps/desktop/package.json`
+2. `npm run package:mac:arm64` — build
+3. `gh release create v0.X.0 apps/desktop/dist/* --title "DomainOS v0.X.0"` — publish
+4. Auto-updater picks it up for existing users
+
+**Testing packaged builds:**
+Dev mode and packaged mode can behave differently (`app.isPackaged` gates, asar paths, native module ABIs). Test packaged builds occasionally before releasing.
+
 ## Conventions
 
 - **ESM everywhere** — `"type": "module"`, use `.js` extensions in imports within core
