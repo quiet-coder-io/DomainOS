@@ -9,6 +9,7 @@ import { startIntakeServer, stopIntakeServer } from './intake-server'
 import { stopAllKBWatchers } from './kb-watcher'
 import { startAutomationEngine, stopAutomationEngine } from './automation-engine'
 import { DomainRepository, MissionRunRepository, createProvider, DEFAULT_MODELS } from '@domain-os/core'
+import { initAutoUpdater } from './updater'
 import type { ProviderName } from '@domain-os/core'
 import { GTasksClient } from '@domain-os/integrations'
 import { loadGTasksCredentials } from './gtasks-credentials'
@@ -135,6 +136,7 @@ app.whenReady().then(() => {
   generateIntakeToken()
 
   mainWindow = createWindow()
+  initAutoUpdater(mainWindow)
 
   // ── Window close interception: hide to tray during active mission ──
   mainWindow.on('close', (e) => {

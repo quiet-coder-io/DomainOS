@@ -1,0 +1,54 @@
+appId: io.quietcoder.domain-os
+productName: DomainOS
+electronVersion: "34.5.8"
+
+directories:
+  buildResources: build
+  output: dist
+
+files:
+  - out/**/*
+  - package.json
+  - "!src/**"
+  - "!tests/**"
+  - "!electron-vite.config.ts"
+  - "!tsconfig*"
+  - "!vitest.config.ts"
+  - "!postcss.config.js"
+  - "!.env"
+  - "!dist/**"
+  - "!**/*.map"
+  - "!**/*.d.ts"
+  - "!**/src/**"
+  - "!**/tests/**"
+  - "!node_modules/@domain-os/**"
+
+asar: true
+asarUnpack:
+  - "node_modules/better-sqlite3/**"
+  - "node_modules/bindings/**"
+  - "node_modules/file-uri-to-path/**"
+
+npmRebuild: true
+
+mac:
+  category: public.app-category.productivity
+  target:
+    - dmg
+    - zip
+  darkModeSupport: true
+  identity: null
+
+dmg:
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+publish:
+  provider: github
+  owner: quiet-coder-io
+  repo: DomainOS

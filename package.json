@@ -19,7 +19,10 @@
     "build": "npm run build --workspace=@domain-os/core && npm run build --workspace=@domain-os/integrations && npm run build --workspace=@domain-os/desktop",
     "test": "npm test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "clean": "npm run clean --workspaces --if-present && rm -rf node_modules"
+    "clean": "npm run clean --workspaces --if-present && rm -rf node_modules",
+    "package:mac": "npm run build && npm run package:mac --workspace=@domain-os/desktop",
+    "package:mac:arm64": "npm run build && npm run package:mac:arm64 --workspace=@domain-os/desktop",
+    "package:mac:x64": "npm run build && npm run package:mac:x64 --workspace=@domain-os/desktop"
   },
   "dependencies": {
     "mammoth": "^1.11.0",
