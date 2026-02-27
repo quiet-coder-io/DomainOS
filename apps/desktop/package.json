@@ -1,6 +1,6 @@
 {
   "name": "@domain-os/desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
@@ -17,8 +17,6 @@
     "package:mac:x64": "node scripts/package.mjs --mac --x64"
   },
   "dependencies": {
-    "@domain-os/core": "*",
-    "@domain-os/integrations": "*",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "better-sqlite3": "^11.10.0",
