@@ -64,6 +64,11 @@ const PaperclipIcon = () => (
   </svg>
 )
 
+type AttachEmailResult =
+  | { status: 'attached'; fileId: string; displayName: string }
+  | { status: 'duplicate'; displayName: string }
+  | { status: 'error'; message: string }
+
 type Suggestion = {
   id: 'latest' | 'status' | 'deadlines' | 'brainstorm'
   label: string
@@ -196,10 +201,18 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
   // --- Gmail email drop state ---
   const [isFetchingEmail, setIsFetchingEmail] = useState(false)
   const [emailPreview, setEmailPreview] = useState<{
+    mode: 'confirm' | 'inspect'
     messages: GmailContextMessage[]
     url: string
+    fileId?: string
   } | null>(null)
   const [emailSearchPrompt, setEmailSearchPrompt] = useState<{ url: string } | null>(null)
+  const [emailAttachConfirm, setEmailAttachConfirm] = useState<{
+    fileId: string
+    displayName: string
+    messages: GmailContextMessage[]
+  } | null>(null)
+  const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Scroll to bottom when messages change (non-streaming)
   useEffect(() => {
@@ -229,6 +242,13 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
     document.addEventListener('keydown', handleEsc)
     return () => document.removeEventListener('keydown', handleEsc)
   }, [isStreaming, isSending, cancelChat])
+
+  // Cleanup confirm timer on unmount
+  useEffect(() => {
+    return () => {
+      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
+    }
+  }, [])
 
   // --- File processing with budget enforcement ---
   const processFiles = useCallback(async (files: File[]): Promise<void> => {
@@ -380,47 +400,14 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
   }, [attachedFiles])
 
   // --- Gmail email drop ---
-  const handleGmailDrop = useCallback(async (url: string, subjectHint?: string) => {
-    if (isFetchingEmail) return
 
-    if (attachedFiles.length >= MAX_FILE_COUNT) {
-      setFileError(`Maximum ${MAX_FILE_COUNT} attachments`)
-      return
-    }
-
-    setIsFetchingEmail(true)
-    setFileError(null)
-
-    try {
-      const res = await window.domainOS.gmail.fetchForContext({ url, subjectHint })
-      if (!res.ok || !res.value?.length) {
-        if (res.error === 'NEEDS_SUBJECT') {
-          // Opaque Gmail URL — prompt user for subject to search
-          setEmailSearchPrompt({ url })
-        } else {
-          setFileError(res.error ?? 'Could not fetch email')
-        }
-        return
-      }
-      setEmailPreview({ messages: res.value, url })
-    } catch (err) {
-      console.error('[gmail-drop] fetchForContext failed:', err)
-      setFileError(err instanceof Error ? err.message : 'Failed to fetch email')
-    } finally {
-      setIsFetchingEmail(false)
-    }
-  }, [attachedFiles, isFetchingEmail])
-
-  const confirmEmailAttach = useCallback(async () => {
-    if (!emailPreview) return
-    const { messages } = emailPreview
-
+  /** Race-safe email attach using functional state updater for atomic dedup + budget + insert */
+  const attachEmail = useCallback(async (messages: GmailContextMessage[]): Promise<AttachEmailResult> => {
     // Format each message with structured headers + attachment text
     const formatted = messages.map((m) => {
       const toStr = Array.isArray(m.to) ? m.to.join(', ') : m.to
       let text = `From: ${m.from}\nTo: ${toStr}\nSubject: ${m.subject}\nDate: ${m.date}\n\n${m.body}`
 
-      // Attachment digest header
       const nExtracted = m.attachments?.length ?? 0
       const nSkipped = m.skippedAttachments?.length ?? 0
       if (nExtracted > 0 || nSkipped > 0) {
@@ -430,7 +417,6 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
         text += `\n\nAttachments: ${parts.join(', ')}`
       }
 
-      // Extracted attachment text with provenance
       if (m.attachments?.length) {
         for (const att of m.attachments) {
           const truncNote = att.text.endsWith('[truncated]') ? ' (truncated)' : ''
@@ -439,7 +425,6 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
         }
       }
 
-      // Skipped attachments summary for LLM transparency (capped at 10)
       if (m.skippedAttachments?.length) {
         const MAX_SKIPPED_LINES = 10
         const shown = m.skippedAttachments.slice(0, MAX_SKIPPED_LINES)
@@ -456,7 +441,6 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
       return text
     }).join('\n\n---\n\n')
 
-    // Truncate first, then compute size from final content
     const { content, truncated } = truncateContent(formatted)
     const sizeBytes = new TextEncoder().encode(content).length
 
@@ -477,45 +461,118 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
       truncated,
     }
 
-    // Dedup hash based on email section content
     const sectionStr = buildEmailSection(tempFile)
     const hash = await sha256(sectionStr)
 
-    const existingHashes = new Set(attachedFiles.map((f) => f.sha256))
-    if (existingHashes.has(hash)) {
-      setEmailPreview(null)
+    // Functional updater: dedup + budget + insert atomically against latest state
+    let result: AttachEmailResult = { status: 'duplicate', displayName: tempFile.displayName }
+    setAttachedFiles((prev) => {
+      // Dedup check
+      if (prev.some((f) => f.sha256 === hash)) {
+        result = { status: 'duplicate', displayName: tempFile.displayName }
+        return prev
+      }
+
+      // Slot check
+      if (prev.length >= MAX_FILE_COUNT) {
+        result = { status: 'error', message: `Maximum ${MAX_FILE_COUNT} attachments` }
+        return prev
+      }
+
+      // Budget checks
+      const currentBytes = prev.reduce((s, f) => s + f.size, 0)
+      if (currentBytes + sizeBytes > MAX_TOTAL_SIZE) {
+        result = { status: 'error', message: 'Email would exceed total size limit' }
+        return prev
+      }
+
+      const existingChars = prev.length > 0
+        ? prev.reduce((s, f) => s + fileSectionChars(f), 0)
+          + separatorChars(prev.length) + BASE_BLOCK_OVERHEAD_CHARS
+        : 0
+      if (existingChars + sectionStr.length > MAX_TOTAL_CHARS) {
+        result = { status: 'error', message: 'Email would exceed total character limit' }
+        return prev
+      }
+
+      const displayName = deduplicateDisplayName(tempFile.displayName, prev.map((f) => f.displayName))
+      const fileId = crypto.randomUUID()
+
+      result = { status: 'attached', fileId, displayName }
+      return [...prev, { ...tempFile, id: fileId, displayName, sha256: hash }]
+    })
+
+    return result
+  }, [])
+
+  /** Show the non-blocking confirmation bar with auto-dismiss */
+  const showAttachConfirm = useCallback((fileId: string, displayName: string, messages: GmailContextMessage[]) => {
+    // Clear any previous timer (rapid multi-drop: latest bar wins)
+    if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
+
+    setEmailAttachConfirm({ fileId, displayName, messages })
+    confirmTimerRef.current = setTimeout(() => {
+      setEmailAttachConfirm(null)
+      confirmTimerRef.current = null
+    }, 4000)
+  }, [])
+
+  /** Unified post-fetch pipeline: auto-attach or preview modal (Option-key) */
+  const handleFetchedEmail = useCallback(async (
+    messages: GmailContextMessage[],
+    url: string,
+    optionKeyHeld: boolean,
+  ) => {
+    if (optionKeyHeld) {
+      setEmailPreview({ mode: 'confirm', messages, url })
       return
     }
-
-    // Budget checks (using sizeBytes from truncated content)
-    const currentBytes = attachedFiles.reduce((s, f) => s + f.size, 0)
-    if (currentBytes + sizeBytes > MAX_TOTAL_SIZE) {
-      setFileError('Email would exceed total size limit')
-      setEmailPreview(null)
-      return
+    const result = await attachEmail(messages)
+    if (result.status === 'attached') {
+      showAttachConfirm(result.fileId, result.displayName, messages)
+    } else if (result.status === 'error') {
+      setFileError(result.message)
     }
+    // duplicate → silent no-op
+  }, [attachEmail, showAttachConfirm])
 
-    const existingChars = attachedFiles.length > 0
-      ? attachedFiles.reduce((s, f) => s + fileSectionChars(f), 0)
-        + separatorChars(attachedFiles.length) + BASE_BLOCK_OVERHEAD_CHARS
-      : 0
-    if (existingChars + sectionStr.length > MAX_TOTAL_CHARS) {
-      setFileError('Email would exceed total character limit')
-      setEmailPreview(null)
-      return
+  const handleGmailDrop = useCallback(async (url: string, subjectHint?: string, altKey?: boolean) => {
+    if (isFetchingEmail) return
+
+    setIsFetchingEmail(true)
+    setFileError(null)
+
+    try {
+      const res = await window.domainOS.gmail.fetchForContext({ url, subjectHint })
+      if (!res.ok || !res.value?.length) {
+        if (res.error === 'NEEDS_SUBJECT') {
+          setEmailSearchPrompt({ url })
+        } else {
+          setFileError(res.error ?? 'Could not fetch email')
+        }
+        return
+      }
+      await handleFetchedEmail(res.value, url, !!altKey)
+    } catch (err) {
+      console.error('[gmail-drop] fetchForContext failed:', err)
+      setFileError(err instanceof Error ? err.message : 'Failed to fetch email')
+    } finally {
+      setIsFetchingEmail(false)
     }
+  }, [isFetchingEmail, handleFetchedEmail])
 
-    const allDisplayNames = attachedFiles.map((f) => f.displayName)
-    const displayName = deduplicateDisplayName(tempFile.displayName, allDisplayNames)
-
-    setAttachedFiles((prev) => [...prev, {
-      ...tempFile,
-      id: crypto.randomUUID(),
-      displayName,
-      sha256: hash,
-    }])
+  /** Confirm attach from preview modal (Option-drop path) */
+  const confirmEmailAttach = useCallback(async () => {
+    if (!emailPreview) return
+    const { messages, url } = emailPreview
     setEmailPreview(null)
-  }, [emailPreview, attachedFiles])
+    const result = await attachEmail(messages)
+    if (result.status === 'attached') {
+      showAttachConfirm(result.fileId, result.displayName, messages)
+    } else if (result.status === 'error') {
+      setFileError(result.message)
+    }
+  }, [emailPreview, attachEmail, showAttachConfirm])
 
   // --- Drag-and-drop handlers ---
   function handleDragOver(e: React.DragEvent): void {
@@ -573,7 +630,7 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
               const plainText = e.dataTransfer.getData('text/plain')?.trim()
               if (plainText && !/^https?:\/\//i.test(plainText)) subjectHint = plainText
             }
-            handleGmailDrop(u.toString(), subjectHint)
+            handleGmailDrop(u.toString(), subjectHint, e.altKey)
             return
           }
         } catch {
@@ -883,7 +940,7 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
                     if (subject) {
                       const url = emailSearchPrompt.url
                       setEmailSearchPrompt(null)
-                      handleGmailDrop(url, subject)
+                      handleGmailDrop(url, subject, false)
                     }
                   } else if (e.key === 'Escape') {
                     setEmailSearchPrompt(null)
@@ -900,11 +957,61 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
           </div>
         )}
 
-        {/* Email preview confirmation */}
+        {/* Email attach confirmation bar (auto-dismiss after 4s) */}
+        {emailAttachConfirm && (() => {
+          const { fileId, displayName, messages: confirmMsgs } = emailAttachConfirm
+          const latest = confirmMsgs[confirmMsgs.length - 1]
+          const senderName = latest.from.replace(/<.*>/, '').trim() || latest.from
+          const msgCount = confirmMsgs.length
+
+          return (
+            <div
+              className="mx-0 mt-1 rounded border border-success/30 bg-success/5 px-3 py-1.5 text-xs animate-fade-in"
+              role="status"
+              aria-live="polite"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex-1 min-w-0 truncate text-text-secondary">
+                  <span className="text-success">✓</span>{' '}
+                  Attached: &ldquo;{displayName}&rdquo; — {senderName}
+                  {msgCount > 1 && ` (${msgCount} messages)`}
+                </div>
+                <div className="flex gap-1.5 shrink-0">
+                  <button
+                    onClick={() => {
+                      setEmailPreview({ mode: 'inspect', messages: confirmMsgs, url: '', fileId })
+                      if (confirmTimerRef.current) {
+                        clearTimeout(confirmTimerRef.current)
+                        confirmTimerRef.current = null
+                      }
+                    }}
+                    className="rounded border border-border px-2 py-0.5 text-[0.65rem] text-text-secondary hover:bg-surface-2"
+                  >
+                    Inspect
+                  </button>
+                  <button
+                    onClick={() => {
+                      setAttachedFiles((prev) => prev.filter((f) => f.id !== fileId))
+                      setEmailAttachConfirm(null)
+                      if (confirmTimerRef.current) {
+                        clearTimeout(confirmTimerRef.current)
+                        confirmTimerRef.current = null
+                      }
+                    }}
+                    className="rounded border border-border px-2 py-0.5 text-[0.65rem] text-text-secondary hover:bg-surface-2 hover:text-danger"
+                  >
+                    Undo
+                  </button>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
+
+        {/* Email preview modal (Option-drop confirm or Inspect) */}
         {emailPreview && (() => {
           const latest = emailPreview.messages[emailPreview.messages.length - 1]
           const senderName = latest.from.replace(/<.*>/, '').trim() || latest.from
-          // Clean preview: take first 3 non-empty lines, join with · , cap at 120 chars
           const bodySnippet = latest.body
             .replace(/\r/g, '')
             .split('\n')
@@ -920,6 +1027,8 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
           const skippedCount = emailPreview.messages.reduce(
             (n, m) => n + (m.skippedAttachments?.length ?? 0), 0,
           )
+
+          const isInspect = emailPreview.mode === 'inspect'
 
           return (
             <div className="mx-0 mt-1 rounded border border-accent/30 bg-accent/5 px-3 py-2 text-xs animate-fade-in">
@@ -937,18 +1046,47 @@ export function ChatPanel({ domainId }: Props): React.JSX.Element {
                   </div>
                 </div>
                 <div className="flex gap-1.5 shrink-0">
-                  <button
-                    onClick={confirmEmailAttach}
-                    className="rounded bg-accent px-2 py-0.5 text-[0.65rem] text-white hover:bg-accent-hover"
-                  >
-                    Attach
-                  </button>
-                  <button
-                    onClick={() => setEmailPreview(null)}
-                    className="rounded border border-border px-2 py-0.5 text-[0.65rem] text-text-secondary hover:bg-surface-2"
-                  >
-                    Cancel
-                  </button>
+                  {isInspect ? (
+                    <>
+                      <button
+                        onClick={() => {
+                          if (emailPreview.fileId) {
+                            setAttachedFiles((prev) => prev.filter((f) => f.id !== emailPreview.fileId))
+                          }
+                          setEmailPreview(null)
+                          setEmailAttachConfirm(null)
+                          if (confirmTimerRef.current) {
+                            clearTimeout(confirmTimerRef.current)
+                            confirmTimerRef.current = null
+                          }
+                        }}
+                        className="rounded border border-danger/40 px-2 py-0.5 text-[0.65rem] text-danger hover:bg-danger/10"
+                      >
+                        Detach
+                      </button>
+                      <button
+                        onClick={() => setEmailPreview(null)}
+                        className="rounded border border-border px-2 py-0.5 text-[0.65rem] text-text-secondary hover:bg-surface-2"
+                      >
+                        Close
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={confirmEmailAttach}
+                        className="rounded bg-accent px-2 py-0.5 text-[0.65rem] text-white hover:bg-accent-hover"
+                      >
+                        Attach
+                      </button>
+                      <button
+                        onClick={() => setEmailPreview(null)}
+                        className="rounded border border-border px-2 py-0.5 text-[0.65rem] text-text-secondary hover:bg-surface-2"
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
