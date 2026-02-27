@@ -74,9 +74,10 @@ DomainOS gives each area of your professional life its own AI-powered operating 
 - **Three providers** — Anthropic (Claude), OpenAI (GPT-4o, o3-mini), and Ollama (local LLMs like Llama, Mistral, CodeLlama)
 - **Per-domain model selection** — each domain can override the global default provider and model; one domain can use Claude while another uses GPT-4o or a local Ollama model
 - **Tool-use across providers** — Gmail and Google Tasks tools and AI-proposed KB updates work with all providers via a normalized tool-use abstraction
+- **Gmail & Google Tasks out of the box** — OAuth credentials are built in; just click Connect, no GCP setup required. Power users can override with their own credentials in Settings
 - **Graceful tool fallback** — if a model doesn't support tool calls (common with Ollama), the system detects this automatically and falls back to plain chat with no user intervention
 - **Tool capability caching** — 4-state cache (supported / not observed / not supported / unknown) avoids wasted latency on models known to lack tool support
-- **Settings dialog** — manage API keys for Anthropic and OpenAI, test Ollama connections, browse installed Ollama models, probe tool support per model
+- **Settings dialog** — manage API keys for Anthropic and OpenAI, test Ollama connections, browse installed Ollama models, probe tool support per model, optional Google OAuth credential override
 - **Encrypted key storage** — per-provider API keys stored via Electron `safeStorage`, encrypted by your OS keychain; keys never reach the renderer process
 
 ### Strategic Advisory
