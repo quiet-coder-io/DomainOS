@@ -147,6 +147,8 @@ export function Sidebar({ activeView, onViewChange, theme, onToggleTheme }: Side
   // Drag-to-sort state
   const [dragSourceIdx, setDragSourceIdx] = useState<number | null>(null)
   const [dropTargetIdx, setDropTargetIdx] = useState<number | null>(null)
+  // Ref mirrors dropTargetIdx synchronously — avoids stale closure in onDrop
+  const dropTargetRef = useRef<number | null>(null)
 
   // Collapse state — persisted in localStorage
   const [collapsed, setCollapsed] = useState(() => {
@@ -496,7 +498,26 @@ export function Sidebar({ activeView, onViewChange, theme, onToggleTheme }: Side
             </div>
           )}
 
-          <nav ref={navRef} className="flex-1 min-h-0 overflow-y-auto p-2">
+          <nav
+            ref={navRef}
+            className="flex-1 min-h-0 overflow-y-auto p-2"
+            onDragOver={(e) => {
+              if (dragSourceIdx === null) return
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'move'
+            }}
+            onDrop={(e) => {
+              e.preventDefault()
+              const target = dropTargetRef.current
+              if (dragSourceIdx !== null && target !== null) {
+                const toIdx = target > dragSourceIdx ? target - 1 : target
+                reorderDomain(dragSourceIdx, toIdx)
+              }
+              dropTargetRef.current = null
+              setDragSourceIdx(null)
+              setDropTargetIdx(null)
+            }}
+          >
             {activeView === 'domains' && (
               <>
                 {loading && domains.length === 0 && (
@@ -561,18 +582,22 @@ export function Sidebar({ activeView, onViewChange, theme, onToggleTheme }: Side
                           const rect = e.currentTarget.getBoundingClientRect()
                           const midY = rect.top + rect.height / 2
                           const insertIdx = e.clientY < midY ? idx : idx + 1
+                          dropTargetRef.current = insertIdx
                           setDropTargetIdx(insertIdx)
                         }}
                         onDrop={(e) => {
                           e.preventDefault()
-                          if (dragSourceIdx !== null && dropTargetIdx !== null) {
-                            const toIdx = dropTargetIdx > dragSourceIdx ? dropTargetIdx - 1 : dropTargetIdx
+                          const target = dropTargetRef.current
+                          if (dragSourceIdx !== null && target !== null) {
+                            const toIdx = target > dragSourceIdx ? target - 1 : target
                             reorderDomain(dragSourceIdx, toIdx)
                           }
+                          dropTargetRef.current = null
                           setDragSourceIdx(null)
                           setDropTargetIdx(null)
                         }}
                         onDragEnd={() => {
+                          dropTargetRef.current = null
                           setDragSourceIdx(null)
                           setDropTargetIdx(null)
                         }}
