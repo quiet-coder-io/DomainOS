@@ -85,7 +85,7 @@ export interface DomainOSAPI {
 
   gtasks: {
     startOAuth(): Promise<IPCResult<void>>
-    checkConnected(): Promise<IPCResult<{ connected: boolean; blocked?: boolean; email?: string }>>
+    checkConnected(): Promise<IPCResult<{ connected: boolean; blocked?: boolean; expired?: boolean; email?: string }>>
     disconnect(): Promise<IPCResult<void>>
     completeTask(taskListId: string, taskId: string): Promise<IPCResult<void>>
     deleteTask(taskListId: string, taskId: string): Promise<IPCResult<void>>

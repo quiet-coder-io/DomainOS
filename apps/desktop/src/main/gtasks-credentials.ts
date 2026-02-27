@@ -7,6 +7,7 @@
 import { safeStorage, app } from 'electron'
 import { writeFile, readFile, unlink, access } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { GTasksClient } from '@domain-os/integrations'
 
 export interface GTasksCredentials {
   clientId: string
@@ -69,10 +70,13 @@ export async function clearGTasksCredentials(): Promise<void> {
 
 /**
  * Check connection status. Returns structured state for UI rendering.
+ * Validates token freshness by calling Google API — all failure modes
+ * (expired token, network error, revoked access) are treated as `expired`.
  */
 export async function checkGTasksConnected(): Promise<{
   connected: boolean
   blocked: boolean
+  expired?: boolean
   email?: string
 }> {
   const blocked = !safeStorage.isEncryptionAvailable()
@@ -83,6 +87,22 @@ export async function checkGTasksConnected(): Promise<{
   const creds = await loadGTasksCredentials()
   if (!creds) {
     return { connected: false, blocked: false }
+  }
+
+  // Validate token freshness
+  try {
+    const client = new GTasksClient({
+      clientId: creds.clientId,
+      clientSecret: creds.clientSecret,
+      refreshToken: creds.refreshToken,
+    })
+    const profile = await client.getProfile()
+    if (!profile.ok) {
+      return { connected: false, blocked: false, expired: true, email: creds.email }
+    }
+  } catch {
+    // Bare catch — intentionally no logging to avoid leaking clientId/clientSecret
+    return { connected: false, blocked: false, expired: true, email: creds.email }
   }
 
   return { connected: true, blocked: false, email: creds.email }

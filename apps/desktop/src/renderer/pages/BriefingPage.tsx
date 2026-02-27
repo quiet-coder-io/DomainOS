@@ -823,6 +823,7 @@ export function BriefingPage({ onViewChange }: BriefingPageProps): React.JSX.Ele
 
   // GTasks connection state
   const [gtasksConnected, setGtasksConnected] = useState(false)
+  const [gtasksExpired, setGtasksExpired] = useState(false)
   const [gtasksEmail, setGtasksEmail] = useState<string | undefined>()
   const [gtasksLoading, setGtasksLoading] = useState(false)
 
@@ -830,6 +831,7 @@ export function BriefingPage({ onViewChange }: BriefingPageProps): React.JSX.Ele
     const res = await window.domainOS.gtasks.checkConnected()
     if (res.ok && res.value) {
       setGtasksConnected(res.value.connected)
+      setGtasksExpired(res.value.expired ?? false)
       setGtasksEmail(res.value.email)
     }
   }, [])
@@ -854,6 +856,7 @@ export function BriefingPage({ onViewChange }: BriefingPageProps): React.JSX.Ele
     const res = await window.domainOS.gtasks.startOAuth()
     setGtasksLoading(false)
     if (res.ok) {
+      setGtasksExpired(false)
       await checkGTasksStatus()
       fetchHealth() // re-fetch to get updated overdue count
     } else {
@@ -951,7 +954,21 @@ export function BriefingPage({ onViewChange }: BriefingPageProps): React.JSX.Ele
         </div>
         <div className="flex items-center gap-2">
           {/* GTasks connection */}
-          {gtasksConnected ? (
+          {gtasksExpired ? (
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-yellow-500">
+                Tasks: token expired
+              </span>
+              <button
+                type="button"
+                onClick={handleGTasksConnect}
+                disabled={gtasksLoading}
+                className="rounded border border-yellow-500/50 px-2 py-1 text-[10px] text-yellow-500 transition-colors hover:bg-yellow-500/10 disabled:opacity-50"
+              >
+                {gtasksLoading ? 'Reconnecting...' : 'Reconnect'}
+              </button>
+            </div>
+          ) : gtasksConnected ? (
             <div className="flex items-center gap-2">
               <span className="text-[10px] text-text-tertiary">
                 Tasks: {gtasksEmail || 'connected'}
