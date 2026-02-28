@@ -230,6 +230,32 @@ Token-aware history slicing and conversation summaries to keep long conversation
 
 **Perf logging**: Structured JSON `[chat:perf]` log after each chat:send with history counts, summary stats, prompt budget, gate states, timing (first chunk latency, total ms).
 
+### Plugin System (Completed)
+Install, manage, and use Anthropic's plugin ecosystems — both [knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins) (11 general plugins: sales, legal, finance, data, product-mgmt, marketing, productivity, customer-support, engineering, bio-research, enterprise-search) and [financial-services-plugins](https://github.com/anthropics/financial-services-plugins) (7 financial plugins: financial-analysis core, investment-banking, equity-research, private-equity, wealth-management, LSEG, S&P Global). A single spec-driven loader handles both repos plus any future plugin sources.
+
+**Plugin format**: Plugins use `plugin.json` manifest (checked at root, then `.claude-plugin/` for Anthropic repos). Manifest parsed via Zod schema matching Claude's official plugin spec with `.passthrough()` for forward compatibility. Component discovery prefers manifest-declared `skills`/`commands` paths, falls back to filesystem scan of `skills/` and `commands/` directories.
+
+**Atomic installer** (`installer.ts`): staging → extraction safety checks (path traversal, symlinks, file count/size limits, file type allowlist) → manifest validation → SHA-256 hashes + file manifest → single DB transaction → finalize (move staging to install path, or rollback). Startup cleanup of interrupted installs via `cleanupStaging()`.
+
+**Plugin components**:
+- **Skills** (`skills/{name}/SKILL.md` + supporting files) → DomainOS `skills` table with `plugin_id` FK. Three-way content model: `source_content` (original), `content` (editable), `source_hash` (for modification detection). Asset tracking via `has_assets` + `assets_index_json`. Plugin skills appear in the existing SkillSelector and are usable in chat immediately.
+- **Commands** (`commands/{name}.md`) → `commands` table. Dual slug system: `canonical_slug` (`plugin:slug`, persisted, always unique) + `display_slug` (computed per domain at query time — short form if unambiguous, canonical if collision). Injection-hardened argument block in prompt (triple-tilde fence, 8K char limit, never interpolated into procedure text).
+- **Connectors** (`.mcp.json`) → Phase 2 (disabled by default).
+
+**Trust & provenance**: Source allowlist (Anthropic repos trusted by default), commit SHA tracking, per-file content hashes, `manifest_hash` for integrity checks. Per-item `source_ref`/`source_path` for diffs/blame. LICENSE + NOTICE files preserved in DB and shown in UI.
+
+**Dependency system**: Source-aware hard dependencies keyed by `(source_repo, plugin_name)`. Hard deps block enable-for-domain and command invocation (not install). Financial-services add-ons have hard dep on `financial-analysis` core. Soft deps show warnings only.
+
+**Three-way content + lifecycle**: Modified detection via hash comparison. `removed_upstream_at` flag for items deleted in upstream updates. Update workflow: not modified → fast-forward; modified → show diff with Keep/Overwrite options.
+
+**Marketplace**: Multi-source GitHub fetcher with ETag/If-None-Match caching, SQLite-persisted cache (`marketplace_cache` table), rate-limit resilience (show cached with banner), offline support. Repo-index pattern: one API call per source to list plugins, manifest fetched on demand.
+
+**DB migration v24**: 6 tables/extensions — `plugins`, `plugin_dependencies` (with seeded financial-services hard deps), `plugin_domain_assoc`, `commands`, `command_invocations`, `marketplace_cache` + skills table extensions (`plugin_id`, `plugin_skill_key`, `source_content`, `source_hash`, `source_ref`, `source_path`, `removed_upstream_at`, `has_assets`, `assets_index_json`).
+
+**UI**: PluginLibraryPage with Installed/Marketplace tabs + search + install-from-folder. PluginCard (installed + marketplace variants) with trust badges. PluginDetailPanel showing version, author, source, description, skills (with asset/removed badges), commands (with canonical slugs), license, install path, enable/uninstall controls. Icon-based sidebar tabs (5 views). CommandAutocomplete scaffold. PluginDiffDialog scaffold.
+
+**IPC**: 15 plugin/command channels — list, get (with skills+commands), install-from-directory, uninstall, toggle, enable/disable-for-domain, list-for-domain, check-updates, marketplace-list, command list/get/display-slugs/invoke-log.
+
 ## Key Files Reference
 
 ### Core Library (`packages/core/`)
@@ -279,7 +305,16 @@ Token-aware history slicing and conversation summaries to keep long conversation
 | `src/loan-review/prompt-builder.ts` | `buildLoanReviewPrompt(ctx, inputs)` — CMBS methodology system prompt with `<doc_inventory>` + `<kb_context>` blocks, review depth modes (triage/attorney-prep/full-review) |
 | `src/loan-review/output-parser.ts` | `parseLoanReview(rawText)` — deterministic fence extraction for `loan_review_memo` + `loan_review_heatmap_json` blocks with single-occurrence enforcement and diagnostics |
 | `src/loan-review/index.ts` | Barrel export: `LoanReviewContext` type, `buildLoanReviewPrompt`, `parseLoanReview` |
-| `src/storage/` | SQLite schema, migrations (v1–v23). v8: per-domain model override. v9: directed relationships. v11: decision quality columns. v12: advisory_artifacts table. v14: brainstorm_sessions table. v16: skills table. v18: missions (6 tables + audit_log CHECK drop + seed data). v19: Loan Document Review mission seed. v20: methodology/outputLabels patch. v21: status_intent flag + briefing context. v22: kb_chunks + kb_chunk_embeddings + kb_embedding_jobs tables. v23: conversation_summaries table |
+| `src/plugins/schemas.ts` | Zod schemas matching official Claude plugin spec: `PluginManifestSchema` (structured `author`, optional component paths, `.passthrough()`), `InstalledPlugin`, `Command`, `FileManifestEntry`, `AssetIndexEntry`, extraction limits, trusted repos, marketplace sources |
+| `src/plugins/repository.ts` | `PluginRepository` — CRUD, domain association (lazy row creation), effective-enable logic, toggle, integrity check. `enableForDomain()` enforces hard deps |
+| `src/plugins/command-repository.ts` | `CommandRepository` — command CRUD, `listByPlugin()`, `listForDomain()`, `computeDisplaySlugs(domainId)` (domain-scoped collision resolution), `CommandInvocationRepository` for audit logging |
+| `src/plugins/installer.ts` | Atomic installer: stage → extraction safety (path traversal, symlinks, size/count limits, file type allowlist) → validate manifest → compute hashes → single DB transaction → finalize. `cleanupStaging()` for startup cleanup |
+| `src/plugins/skill-bridge.ts` | `parsePluginSkill(skillDir)` — SKILL.md parser + asset enumeration → `ParsedPluginSkill` with `source_content`, `source_hash`, `has_assets`, `assets_index_json` |
+| `src/plugins/command-bridge.ts` | `parsePluginCommand(filePath, content)` — frontmatter + body parser → `ParsedPluginCommand` with `canonical_slug`, `source_content`, `source_hash` |
+| `src/plugins/dependencies.ts` | Source-aware dependency checker: `checkDependencies()` → `{hard, soft}` missing deps. `checkCommandDependencies()` for invoke-time enforcement |
+| `src/plugins/marketplace.ts` | `MarketplaceCache` (SQLite-backed), `fetchPluginList()`, `fetchPluginManifest()`, `listMarketplace()` with multi-source GitHub fetching + ETag caching + offline fallback |
+| `src/plugins/index.ts` | Barrel exports for all plugin types, schemas, repositories, installer, marketplace |
+| `src/storage/` | SQLite schema, migrations (v1–v24). v8: per-domain model override. v9: directed relationships. v11: decision quality columns. v12: advisory_artifacts table. v14: brainstorm_sessions table. v16: skills table. v18: missions (6 tables + audit_log CHECK drop + seed data). v19: Loan Document Review mission seed. v20: methodology/outputLabels patch. v21: status_intent flag + briefing context. v22: kb_chunks + kb_chunk_embeddings + kb_embedding_jobs tables. v23: conversation_summaries table. v24: plugin system (plugins, plugin_dependencies, plugin_domain_assoc, commands, command_invocations, marketplace_cache + skills table extensions) |
 | `src/chat/repository.ts` | `ChatMessageRepository` (append, paginate, clear) + `ConversationSummaryRepository` (heuristic summaries for history slicing, hash-based dedup) |
 | `src/common/` | Result type, shared Zod schemas |
 
@@ -303,7 +338,7 @@ Token-aware history slicing and conversation summaries to keep long conversation
 
 | File | Purpose |
 |------|---------|
-| `src/main/ipc-handlers.ts` | 80+ IPC handlers: domains, KB, chat, briefing, intake, protocols, sessions, relationships, gap flags, decisions, audit, advisory, skills, missions, Gmail (incl. `enrichWithAttachments` for email attachment text extraction), GTasks, settings, file text extraction |
+| `src/main/ipc-handlers.ts` | 95+ IPC handlers: domains, KB, chat, briefing, intake, protocols, sessions, relationships, gap flags, decisions, audit, advisory, skills, missions, plugins (15 handlers: CRUD, install, domain assoc, marketplace), Gmail (incl. `enrichWithAttachments` for email attachment text extraction), GTasks, settings, file text extraction |
 | `src/main/text-extractor.ts` | Shared text extraction module: `resolveFormat()` (extension-first + mimeType fallback), `extractTextFromBuffer()` (PDF via `unpdf`, Excel via `xlsx`, Word via `mammoth`), `isFormatSupported()`. Used by both `file:extract-text` IPC and gmail attachment enrichment |
 | `src/main/tool-loop.ts` | **Provider-agnostic** tool-use loop — works with Anthropic, OpenAI, Ollama; prefix-based dispatch (`gmail_*`, `gtasks_*`, `advisory_*`), ROWYS Gmail guard, tool output sanitization, transcript validation, size guards (75KB/result, 400KB total), capability cache management |
 | `src/main/advisory-tools.ts` | `ADVISORY_TOOLS` as `ToolDefinition[]` (advisory_search_decisions, advisory_search_deadlines, advisory_cross_domain_context, advisory_risk_snapshot), executors with output caps (10 items, 300 char truncation), `schemaVersion` wrapper |
@@ -322,7 +357,7 @@ Token-aware history slicing and conversation summaries to keep long conversation
 | `src/main/embedding-manager.ts` | `EmbeddingManager` — per-domain job coalescing with dirty-flag, AbortController, `indexDomain()`, `cancel()`, `cancelAll()` |
 | `src/main/embedding-cache.ts` | In-memory embedding cache (`Map<domainId:modelName, StoredEmbedding[]>`) with explicit invalidation hooks + 15-min TTL |
 | `src/main/app-menu.ts` | Application menu with Edit, View, Window, Help (User Guide + GitHub link) |
-| `src/preload/api.ts` | IPC type contract: `DomainOSAPI`, `ProviderConfig` (incl. `responseStyle`, `historyWindow`), `ProviderKeysStatus`, `ToolTestResult`, `PortfolioHealth`, `BriefingAnalysis`, `MissionRunDetailData`, `MissionProgressEventData`, `EmbeddingStatus` |
+| `src/preload/api.ts` | IPC type contract: `DomainOSAPI`, `ProviderConfig` (incl. `responseStyle`, `historyWindow`), `ProviderKeysStatus`, `ToolTestResult`, `PortfolioHealth`, `BriefingAnalysis`, `MissionRunDetailData`, `MissionProgressEventData`, `EmbeddingStatus`, `PluginData`, `PluginDetailData`, `CommandData`, `MarketplaceEntryData` |
 | `src/renderer/components/SettingsDialog.tsx` | Multi-provider settings modal (API keys, Google OAuth config, Ollama connection, model defaults, response style, tool test, KB search toggle/provider/model/re-index) |
 | `src/renderer/App.tsx` | Root app component with `WindowTitlebar` (pin window + toggle-all-panels), layout (Sidebar + main content), toast container, intake/automation listeners |
 | `src/renderer/pages/DomainChatPage.tsx` | Chat page with collapsible header bar, per-domain model override, right KB sidebar with resize/collapse, panelToggleAll listener |
@@ -342,6 +377,13 @@ Token-aware history slicing and conversation summaries to keep long conversation
 | `src/renderer/pages/MissionControlPage.tsx` | Mission Control page — mission selector dropdown, dynamic parameter form (from definition), data-driven capabilities (methodology + outputLabels), `LoanReviewMemoCard` (markdown memo + heatmap risk table), `WarningsBanner`, streaming output with inline stop, provenance panel, run history |
 | `src/renderer/components/MissionGateModal.tsx` | Gate approval dialog — shows pending actions (deadlines, email drafts) for user approval/rejection |
 | `src/renderer/stores/mission-store.ts` | Zustand store for missions: `startRun()` with streaming progress, `cancelRun()` (prefers requestId-based cancel), `decideGate()`, `checkActiveRun()` for tab-switch recovery, `clearRun()` |
+| `src/renderer/pages/PluginLibraryPage.tsx` | Plugin library: Installed (with count) + Marketplace tabs, search, install-from-folder button, error banner |
+| `src/renderer/components/PluginCard.tsx` | `InstalledPluginCard` (name, version, trust badge, toggle) + `MarketplacePluginCard` (name, description, install status) |
+| `src/renderer/components/PluginDetailPanel.tsx` | Detail panel: version, author, source, description, skills list (with asset/removed badges), commands list (with canonical slugs), license/notice, install path, enable/uninstall controls |
+| `src/renderer/components/CommandAutocomplete.tsx` | Slash command popover scaffold — `display_slug` with plugin subtitle, argument hint |
+| `src/renderer/components/PluginDiffDialog.tsx` | Side-by-side diff dialog scaffold for customized items during plugin update |
+| `src/renderer/stores/plugin-store.ts` | Zustand store for plugins: `fetchPlugins()`, `fetchMarketplace()`, `installFromDirectory()`, `uninstall()`, `toggle()` |
+| `src/renderer/stores/command-store.ts` | Zustand store for commands: `fetchForDomain()`, `fetchDisplaySlugs()` |
 
 ## Multi-Provider LLM Architecture
 
@@ -474,6 +516,20 @@ Decrypted keys cached in-memory after first read. Keys never cross IPC to render
 | `mission:active-run` | renderer→main | Get any non-terminal run (for state recovery on remount) |
 | `mission:latest-run` | renderer→main | Get latest completed run for a domain (for switchDomain restore) |
 | `mission:run-progress` | main→renderer | Streaming events: `llm_chunk`, `gate_triggered`, `run_complete`, `run_failed` |
+| `plugin:list` | renderer→main | All installed plugins |
+| `plugin:get` | renderer→main | Full detail: plugin + skills + commands + provenance |
+| `plugin:install-from-directory` | renderer→main | Atomic install from local path |
+| `plugin:uninstall` | renderer→main | Remove plugin + cascade delete skills/commands + disk cleanup |
+| `plugin:toggle` | renderer→main | Global enable/disable |
+| `plugin:enable-for-domain` | renderer→main | Enable for domain (hard dep enforcement) |
+| `plugin:disable-for-domain` | renderer→main | Disable for domain |
+| `plugin:list-for-domain` | renderer→main | Effective-enabled plugins for domain |
+| `plugin:check-updates` | renderer→main | ETag-based version check (MVP: always returns no update) |
+| `plugin:marketplace-list` | renderer→main | Fetch from all marketplace sources (cached) |
+| `command:list-for-domain` | renderer→main | Available commands with display slugs + modification flags |
+| `command:get` | renderer→main | Command by ID |
+| `command:display-slugs` | renderer→main | Computed display slugs for domain (canonical→display map) |
+| `command:invoke-log` | renderer→main | Log command invocation to audit table |
 
 ## Google OAuth Configuration
 
