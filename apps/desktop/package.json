@@ -1,6 +1,6 @@
 {
   "name": "@domain-os/desktop",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
