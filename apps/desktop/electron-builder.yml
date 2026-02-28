@@ -23,6 +23,10 @@ files:
   - "!**/tests/**"
   - "!node_modules/@domain-os/**"
 
+extraResources:
+  - from: resources/help.html
+    to: help.html
+
 asar: true
 asarUnpack:
   - "node_modules/better-sqlite3/**"

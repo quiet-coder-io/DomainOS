@@ -10,6 +10,7 @@ import { stopAllKBWatchers } from './kb-watcher'
 import { startAutomationEngine, stopAutomationEngine } from './automation-engine'
 import { DomainRepository, MissionRunRepository, createProvider, DEFAULT_MODELS } from '@domain-os/core'
 import { initAutoUpdater } from './updater'
+import { setupApplicationMenu } from './app-menu'
 import type { ProviderName } from '@domain-os/core'
 import { GTasksClient } from '@domain-os/integrations'
 import { loadGTasksCredentials } from './gtasks-credentials'
@@ -116,6 +117,7 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
+  setupApplicationMenu()
   const db = initDatabase()
 
   // ── Startup reconciliation: mark stale non-terminal runs as failed ──

@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DomainOS User Guide</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-alt: #f8f9fa;
+    --bg-code: #f1f3f5;
+    --text: #1a1a2e;
+    --text-secondary: #555;
+    --accent: #4361ee;
+    --accent-light: #e8ecff;
+    --border: #dee2e6;
+    --heading: #16213e;
+    --success: #2d8a56;
+    --warning: #e67e22;
+    --info: #3498db;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a2e;
+      --bg-alt: #222240;
+      --bg-code: #2a2a4a;
+      --text: #e0e0e0;
+      --text-secondary: #aaa;
+      --accent: #7b8cff;
+      --accent-light: #2a2a4a;
+      --border: #3a3a5a;
+      --heading: #c5c8ff;
+      --success: #4ecca3;
+      --warning: #f0a050;
+      --info: #64b5f6;
+    }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.65;
+    color: var(--text);
+    background: var(--bg);
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 40px 32px 80px;
+  }
+  h1 { font-size: 2rem; color: var(--heading); margin-bottom: 8px; }
+  h2 {
+    font-size: 1.45rem; color: var(--heading); margin-top: 48px; margin-bottom: 16px;
+    padding-bottom: 8px; border-bottom: 2px solid var(--border);
+  }
+  h3 { font-size: 1.15rem; color: var(--heading); margin-top: 28px; margin-bottom: 10px; }
+  h4 { font-size: 1rem; color: var(--heading); margin-top: 20px; margin-bottom: 8px; }
+  p { margin-bottom: 12px; }
+  ul, ol { margin: 0 0 14px 24px; }
+  li { margin-bottom: 6px; }
+  code {
+    font-family: 'SF Mono', Menlo, Monaco, monospace;
+    font-size: 0.88em;
+    background: var(--bg-code);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  pre {
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 18px;
+    overflow-x: auto;
+    margin-bottom: 14px;
+    font-size: 0.88em;
+    line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; }
+  .subtitle { color: var(--text-secondary); font-size: 1rem; margin-bottom: 32px; }
+  .callout {
+    border-left: 4px solid var(--accent);
+    background: var(--accent-light);
+    padding: 12px 16px;
+    border-radius: 0 6px 6px 0;
+    margin: 16px 0;
+  }
+  .callout.tip { border-left-color: var(--success); }
+  .callout.warning { border-left-color: var(--warning); }
+  .callout.info { border-left-color: var(--info); }
+  .callout strong { display: block; margin-bottom: 4px; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0;
+    font-size: 0.92em;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+  }
+  th { background: var(--bg-alt); font-weight: 600; }
+  kbd {
+    display: inline-block;
+    padding: 2px 6px;
+    font-size: 0.82em;
+    font-family: 'SF Mono', Menlo, monospace;
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    box-shadow: 0 1px 0 var(--border);
+  }
+  .toc { margin: 24px 0 40px; }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .toc ul { list-style: none; margin-left: 0; }
+  .toc li { padding: 3px 0; }
+  .toc li::before { content: none; }
+  .toc > ul > li { font-weight: 600; margin-top: 6px; }
+  .toc > ul > li > ul > li { font-weight: 400; padding-left: 18px; }
+  a { color: var(--accent); }
+  hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+</style>
+</head>
+<body>
+
+<h1>DomainOS User Guide</h1>
+<p class="subtitle">Version 0.1.4 &mdash; Your domain-scoped AI workspace</p>
+
+<nav class="toc">
+<ul>
+  <li><a href="#overview">1. Overview</a></li>
+  <li><a href="#getting-started">2. Getting Started</a>
+    <ul>
+      <li><a href="#first-launch">First Launch</a></li>
+      <li><a href="#unsigned-app">Unsigned App (macOS)</a></li>
+    </ul>
+  </li>
+  <li><a href="#navigation">3. Navigation</a>
+    <ul>
+      <li><a href="#sidebar">Sidebar</a></li>
+      <li><a href="#views">Main Views</a></li>
+    </ul>
+  </li>
+  <li><a href="#domains">4. Domain Management</a>
+    <ul>
+      <li><a href="#create-domain">Creating a Domain</a></li>
+      <li><a href="#edit-domain">Editing a Domain</a></li>
+      <li><a href="#domain-relationships">Cross-Domain Relationships</a></li>
+      <li><a href="#domain-tags">Tags &amp; Filtering</a></li>
+    </ul>
+  </li>
+  <li><a href="#chat">5. Chat</a>
+    <ul>
+      <li><a href="#sending-messages">Sending Messages</a></li>
+      <li><a href="#model-override">Per-Domain Model Override</a></li>
+      <li><a href="#file-attachments">File Attachments</a></li>
+      <li><a href="#email-attachments">Email Drag-and-Drop</a></li>
+      <li><a href="#skills">Skills</a></li>
+      <li><a href="#kb-proposals">KB Update Proposals</a></li>
+      <li><a href="#strategic-brainstorming">Strategic Brainstorming</a></li>
+    </ul>
+  </li>
+  <li><a href="#kb">6. Knowledge Base</a>
+    <ul>
+      <li><a href="#kb-files">KB Files Panel</a></li>
+      <li><a href="#kb-tiers">File Tiers</a></li>
+      <li><a href="#vector-search">Vector Search (RAG)</a></li>
+    </ul>
+  </li>
+  <li><a href="#domain-panels">7. Domain Side Panels</a>
+    <ul>
+      <li><a href="#gap-flags">Gap Flags</a></li>
+      <li><a href="#decision-log">Decision Log</a></li>
+      <li><a href="#advisory">Advisory Artifacts</a></li>
+      <li><a href="#audit-log">Audit Log</a></li>
+    </ul>
+  </li>
+  <li><a href="#briefing">8. Portfolio Briefing</a>
+    <ul>
+      <li><a href="#health-dashboard">Health Dashboard</a></li>
+      <li><a href="#deadlines">Deadlines</a></li>
+      <li><a href="#llm-analysis">LLM Analysis</a></li>
+      <li><a href="#gtasks">Google Tasks Integration</a></li>
+    </ul>
+  </li>
+  <li><a href="#missions">9. Mission Control</a>
+    <ul>
+      <li><a href="#running-mission">Running a Mission</a></li>
+      <li><a href="#mission-gates">Approval Gates</a></li>
+      <li><a href="#mission-history">Run History</a></li>
+    </ul>
+  </li>
+  <li><a href="#intake">10. Intake Pipeline</a></li>
+  <li><a href="#settings">11. Settings</a>
+    <ul>
+      <li><a href="#api-keys">API Keys</a></li>
+      <li><a href="#model-defaults">Model Defaults</a></li>
+      <li><a href="#kb-search-settings">Knowledge Base Search</a></li>
+      <li><a href="#google-oauth">Google OAuth</a></li>
+    </ul>
+  </li>
+  <li><a href="#vector-search-setup">12. Setting Up Vector Search</a></li>
+  <li><a href="#chrome-extension">13. Chrome Extension</a></li>
+  <li><a href="#auto-updates">14. Auto-Updates</a></li>
+  <li><a href="#keyboard-shortcuts">15. Keyboard Shortcuts</a></li>
+  <li><a href="#troubleshooting">16. Troubleshooting</a></li>
+</ul>
+</nav>
+
+<hr>
+
+<!-- ─── 1. OVERVIEW ──────────────────────────────────────────── -->
+
+<h2 id="overview">1. Overview</h2>
+
+<p>DomainOS is a desktop AI workspace that organizes your work into <strong>domains</strong> &mdash; each domain has its own knowledge base, chat context, protocols, and AI configuration. When you chat with the AI about a domain, it automatically loads the relevant knowledge base so responses are grounded in your actual data.</p>
+
+<p>Key capabilities:</p>
+<ul>
+  <li><strong>Domain-scoped AI chat</strong> &mdash; each domain has its own context, KB, and conversation history</li>
+  <li><strong>Multi-provider LLM support</strong> &mdash; Anthropic (Claude), OpenAI (GPT), and Ollama (local models)</li>
+  <li><strong>Knowledge Base management</strong> &mdash; point to a folder of markdown/PDF/Excel/Word files that the AI uses as context</li>
+  <li><strong>Semantic KB search (RAG)</strong> &mdash; vector search finds the most relevant KB content for each question</li>
+  <li><strong>Portfolio briefing</strong> &mdash; cross-domain health monitoring with LLM-powered analysis</li>
+  <li><strong>Mission system</strong> &mdash; reusable analytical workflows with approval gates and provenance tracking</li>
+  <li><strong>Strategic brainstorming</strong> &mdash; AI-facilitated brainstorming with 106 techniques</li>
+  <li><strong>File &amp; email attachments</strong> &mdash; drag files or Gmail emails directly into chat</li>
+  <li><strong>KB update proposals</strong> &mdash; AI suggests edits to your knowledge base; you approve/reject</li>
+  <li><strong>Gmail &amp; Google Tasks integration</strong> &mdash; read-only email access + task management via AI tools</li>
+  <li><strong>Browser ingestion</strong> &mdash; send web content from Chrome to DomainOS for AI classification</li>
+</ul>
+
+<!-- ─── 2. GETTING STARTED ──────────────────────────────────── -->
+
+<h2 id="getting-started">2. Getting Started</h2>
+
+<h3 id="first-launch">First Launch</h3>
+
+<ol>
+  <li>Open DomainOS from your Applications folder</li>
+  <li>Open <strong>Settings</strong> (gear icon in the top-right) to configure at least one LLM provider:
+    <ul>
+      <li><strong>Anthropic</strong> &mdash; paste your API key from <a href="https://console.anthropic.com/">console.anthropic.com</a></li>
+      <li><strong>OpenAI</strong> &mdash; paste your API key from <a href="https://platform.openai.com/">platform.openai.com</a></li>
+      <li><strong>Ollama</strong> &mdash; install <a href="https://ollama.com">Ollama</a>, start it, and test the connection</li>
+    </ul>
+  </li>
+  <li>Create your first domain by clicking the <strong>+</strong> button in the sidebar:
+    <ul>
+      <li><strong>Add existing KB</strong> &mdash; select a folder containing your knowledge base files</li>
+      <li><strong>Create new domain</strong> &mdash; set up a new domain from scratch</li>
+    </ul>
+  </li>
+  <li>Click the domain in the sidebar to open the chat page and start asking questions</li>
+</ol>
+
+<h3 id="unsigned-app">Unsigned App (macOS)</h3>
+
+<p>DomainOS is currently unsigned (Phase 1). macOS may flag it as "damaged" when downloaded. To fix this, run the following in Terminal before first launch:</p>
+
+<pre><code>xattr -cr /Applications/DomainOS.app</code></pre>
+
+<!-- ─── 3. NAVIGATION ───────────────────────────────────────── -->
+
+<h2 id="navigation">3. Navigation</h2>
+
+<h3 id="sidebar">Sidebar</h3>
+
+<p>The left sidebar has four main navigation views, accessible via icons at the top:</p>
+
+<table>
+  <tr><th>Icon</th><th>View</th><th>Purpose</th></tr>
+  <tr><td>Layers</td><td>Domains</td><td>Your domain list &mdash; click a domain to open its chat</td></tr>
+  <tr><td>Shield</td><td>Briefing</td><td>Portfolio health dashboard and cross-domain analysis</td></tr>
+  <tr><td>Target</td><td>Missions</td><td>Mission Control &mdash; run structured analytical workflows</td></tr>
+  <tr><td>Inbox</td><td>Intake</td><td>Pending web content for AI classification (badge shows count)</td></tr>
+</table>
+
+<p>The sidebar can be <strong>collapsed</strong> to a narrow rail showing only icons and domain initials. Click the collapse button or drag the sidebar edge.</p>
+
+<p>At the bottom of the sidebar: a <strong>theme toggle</strong> (light/dark mode).</p>
+
+<h3 id="views">Main Views</h3>
+
+<p>When no domain is selected, the <strong>Domains</strong> view shows a welcome page with domain health chips &mdash; a quick overview of all your domains with status indicators.</p>
+
+<!-- ─── 4. DOMAIN MANAGEMENT ────────────────────────────────── -->
+
+<h2 id="domains">4. Domain Management</h2>
+
+<h3 id="create-domain">Creating a Domain</h3>
+
+<p>Click the <strong>+</strong> button in the sidebar header (visible in the Domains view):</p>
+
+<ul>
+  <li><strong>Add existing KB</strong> &mdash; name your domain and select the folder containing its knowledge base files (markdown, PDF, Excel, Word). DomainOS will scan and index the folder.</li>
+  <li><strong>Create new domain</strong> &mdash; provide a name and description. You can add a KB path later.</li>
+</ul>
+
+<h3 id="edit-domain">Editing a Domain</h3>
+
+<p>Right-click a domain in the sidebar or use the context menu (three dots) to access:</p>
+
+<ul>
+  <li><strong>Edit</strong> &mdash; change name, description, KB path, tags, and cross-domain relationships</li>
+  <li><strong>Delete</strong> &mdash; permanently remove the domain and all its data (confirmation required)</li>
+</ul>
+
+<p>You can <strong>drag to reorder</strong> domains in the sidebar list.</p>
+
+<h3 id="domain-relationships">Cross-Domain Relationships</h3>
+
+<p>Domains can have directed relationships with dependency types:</p>
+
+<table>
+  <tr><th>Type</th><th>Meaning</th></tr>
+  <tr><td><code>blocks</code></td><td>This domain blocks another from proceeding</td></tr>
+  <tr><td><code>depends_on</code></td><td>This domain depends on another</td></tr>
+  <tr><td><code>informs</code></td><td>This domain provides information to another</td></tr>
+  <tr><td><code>parallel</code></td><td>Domains proceed in parallel</td></tr>
+  <tr><td><code>monitor_only</code></td><td>Watch relationship only</td></tr>
+</table>
+
+<p>Relationships power cross-domain alerts in the Portfolio Briefing.</p>
+
+<h3 id="domain-tags">Tags &amp; Filtering</h3>
+
+<p>Assign tags to domains (Property, Contact, Type categories) and use the tag filter in the sidebar to narrow your domain list.</p>
+
+<!-- ─── 5. CHAT ──────────────────────────────────────────────── -->
+
+<h2 id="chat">5. Chat</h2>
+
+<p>Click any domain in the sidebar to open its <strong>Chat Page</strong>. This is the primary interface for interacting with the AI about a specific domain.</p>
+
+<h3 id="sending-messages">Sending Messages</h3>
+
+<p>Type your message in the text area at the bottom and press <kbd>Enter</kbd> (or click Send). The AI responds with context from the domain's knowledge base.</p>
+
+<p><strong>Quick suggestions</strong> appear above the input as clickable chips:</p>
+<ul>
+  <li>"What's the latest" &mdash; get a status summary</li>
+  <li>"Status update" &mdash; current domain state</li>
+  <li>"Any deadlines coming up?" &mdash; upcoming deadlines</li>
+  <li>"Deep brainstorm" &mdash; start a strategic brainstorming session</li>
+</ul>
+
+<p>During streaming, a <strong>Stop</strong> button replaces the Send button to cancel the response.</p>
+
+<h3 id="model-override">Per-Domain Model Override</h3>
+
+<p>At the top of the chat page, you can override the global LLM model for this specific domain:</p>
+<ul>
+  <li><strong>Default</strong> &mdash; uses the global model from Settings</li>
+  <li><strong>Override</strong> &mdash; select a specific provider and model for this domain</li>
+  <li><strong>Clear</strong> &mdash; remove the override and return to global default</li>
+</ul>
+
+<p>Use <strong>Force Tool Attempt</strong> to try tool-use even with models that previously didn't support it.</p>
+
+<h3 id="file-attachments">File Attachments</h3>
+
+<p><strong>Drag and drop</strong> files from Finder onto the chat panel to attach them as context for the AI.</p>
+
+<table>
+  <tr><th>File Type</th><th>Limit</th></tr>
+  <tr><td>Text files (.md, .ts, .json, .csv, etc.)</td><td>100 KB per file</td></tr>
+  <tr><td>PDF, Excel (.xlsx/.xls), Word (.docx)</td><td>2 MB per file</td></tr>
+  <tr><td>Total across all files</td><td>500 KB / 200K chars / 20 files max</td></tr>
+</table>
+
+<p>Attached files appear as chips below the input showing filename, size, and a truncation badge if the file was trimmed. Files are deduplicated by content hash.</p>
+
+<h3 id="email-attachments">Email Drag-and-Drop</h3>
+
+<p>With the <a href="#chrome-extension">Chrome Extension</a> installed, drag emails from Gmail directly into the chat panel. The extension injects drag handles on Gmail rows. DomainOS searches for the email, displays a preview, and attaches it (including text extracted from PDF/Excel/Word attachments).</p>
+
+<h3 id="skills">Skills</h3>
+
+<p>Skills are reusable analytical procedures (e.g., "CMBS loan review") that inject specialized instructions into the AI prompt for a single message.</p>
+
+<p>To use a skill:</p>
+<ol>
+  <li>Click a <strong>skill chip</strong> above the text area to activate it</li>
+  <li>Type your message and send &mdash; the skill's instructions are included in this message only</li>
+  <li>The skill auto-deactivates after the message is sent</li>
+</ol>
+
+<p>To manage skills, click the <strong>Skill Library</strong> button (top-right toolbar) to:</p>
+<ul>
+  <li>Create, edit, or delete skills</li>
+  <li>Enable/disable skills</li>
+  <li>Import/export skills as <code>.skill.md</code> files</li>
+  <li>Configure output format (freeform or structured JSON), tool hints</li>
+</ul>
+
+<h3 id="kb-proposals">KB Update Proposals</h3>
+
+<p>The AI can suggest edits to your knowledge base files. When it does, a <strong>proposal card</strong> appears inline in the chat with:</p>
+<ul>
+  <li><strong>Approve</strong> &mdash; apply the suggested changes to the KB file</li>
+  <li><strong>Reject</strong> &mdash; dismiss the proposal</li>
+  <li><strong>Edit</strong> &mdash; modify the suggested content before applying</li>
+</ul>
+
+<h3 id="strategic-brainstorming">Strategic Brainstorming</h3>
+
+<p>Type "deep brainstorm" or click the suggestion chip to start an AI-facilitated brainstorming session using the BMAD method (106 techniques across 10 categories). The AI acts as a facilitator &mdash; not a generator &mdash; guiding you through idea capture, anti-bias pivots, and synthesis.</p>
+
+<p>The AI has 6 brainstorming tools: start session, get techniques, capture ideas, check status, synthesize, and control the session. Synthesis produces ranked options with keyword clustering.</p>
+
+<!-- ─── 6. KNOWLEDGE BASE ───────────────────────────────────── -->
+
+<h2 id="kb">6. Knowledge Base</h2>
+
+<h3 id="kb-files">KB Files Panel</h3>
+
+<p>On the chat page, the <strong>left sidebar</strong> shows the domain's knowledge base files. Click any file to expand and see its content. The panel shows:</p>
+<ul>
+  <li>File name and path</li>
+  <li>File tier (structural, status, intelligence, general)</li>
+  <li>Last modified date</li>
+  <li>Sync status indicator</li>
+</ul>
+
+<p>DomainOS <strong>watches your KB folder</strong> for changes and auto-syncs when files are modified.</p>
+
+<h3 id="kb-tiers">File Tiers</h3>
+
+<p>KB files are organized into importance tiers that affect how they're prioritized in the AI context:</p>
+
+<table>
+  <tr><th>Tier</th><th>Examples</th><th>Priority</th></tr>
+  <tr><td><code>structural</code></td><td>CLAUDE.md, domain config</td><td>Highest &mdash; always included</td></tr>
+  <tr><td><code>status</code></td><td>Status updates, open items</td><td>High &mdash; included when relevant</td></tr>
+  <tr><td><code>intelligence</code></td><td>Research, analysis files</td><td>Medium</td></tr>
+  <tr><td><code>general</code></td><td>Reference materials</td><td>Standard</td></tr>
+</table>
+
+<h3 id="vector-search">Vector Search (RAG)</h3>
+
+<p>When enabled, DomainOS uses <strong>semantic search</strong> to find the most relevant KB content for each question &mdash; instead of loading files by tier priority. This dramatically improves response quality for large knowledge bases.</p>
+
+<p>How it works:</p>
+<ol>
+  <li>KB files are split into heading-aware chunks</li>
+  <li>Each chunk is embedded as a vector using a local model (Ollama) or OpenAI</li>
+  <li>When you ask a question, your query is embedded and compared to all chunks</li>
+  <li>The most relevant chunks are injected into the AI prompt</li>
+</ol>
+
+<p>Vector search is <strong>automatic</strong> when Ollama is running with an embedding model. See <a href="#vector-search-setup">Setting Up Vector Search</a> for installation steps.</p>
+
+<div class="callout tip">
+  <strong>Tip</strong>
+  Vector search works with any chat provider (Claude, GPT, Ollama). The embedding model is separate from your chat model.
+</div>
+
+<!-- ─── 7. DOMAIN SIDE PANELS ───────────────────────────────── -->
+
+<h2 id="domain-panels">7. Domain Side Panels</h2>
+
+<p>The <strong>right sidebar</strong> on the chat page has collapsible sections for domain data:</p>
+
+<h3 id="gap-flags">Gap Flags</h3>
+<p>Open gaps or issues identified in the domain. Each gap flag shows its description and status. Gap alerts also appear as banners in the chat.</p>
+
+<h3 id="decision-log">Decision Log</h3>
+<p>Important decisions recorded for the domain with quality gate metadata: confidence level, time horizon, reversibility class, category, and authority source tier.</p>
+
+<h3 id="advisory">Advisory Artifacts</h3>
+<p>Strategic artifacts generated during chat &mdash; brainstorm results, risk assessments, scenario analyses, and strategic reviews. You can:</p>
+<ul>
+  <li>Filter by status (active/archived) and type</li>
+  <li>Archive or unarchive artifacts</li>
+  <li>Rename artifact titles</li>
+  <li>Extract tasks from artifacts</li>
+</ul>
+
+<h3 id="audit-log">Audit Log</h3>
+<p>Chronological record of all changes and actions taken in the domain.</p>
+
+<!-- ─── 8. PORTFOLIO BRIEFING ───────────────────────────────── -->
+
+<h2 id="briefing">8. Portfolio Briefing</h2>
+
+<p>Access via the <strong>Briefing</strong> icon in the sidebar. Provides a cross-domain view of your entire portfolio.</p>
+
+<h3 id="health-dashboard">Health Dashboard</h3>
+<p>Domain cards showing at-a-glance status:</p>
+<ul>
+  <li><strong>Status indicators</strong> &mdash; active, quiet, stale-risk, blocked</li>
+  <li><strong>File count</strong> &mdash; number of KB files</li>
+  <li><strong>Gap flags</strong> &mdash; open issues count</li>
+  <li><strong>Overdue deadlines</strong> &mdash; red badge if any</li>
+  <li><strong>Dependency indicators</strong> &mdash; blocked/blocking relationships</li>
+</ul>
+
+<h3 id="deadlines">Deadlines</h3>
+<p>All pending deadlines across all domains, categorized:</p>
+<ul>
+  <li><strong>Overdue</strong> (red) &mdash; past due date</li>
+  <li><strong>Today</strong> (orange) &mdash; due today</li>
+  <li><strong>This week</strong> (yellow) &mdash; due within the week</li>
+  <li><strong>Upcoming</strong> &mdash; due within 30 days</li>
+  <li><strong>Future</strong> &mdash; beyond 30 days</li>
+</ul>
+
+<p>Actions on each deadline: <strong>Complete</strong>, <strong>Snooze</strong>, <strong>Cancel</strong>.</p>
+
+<h3 id="llm-analysis">LLM Analysis</h3>
+
+<p>Click <strong>"Analyze Portfolio"</strong> to stream an AI-powered analysis that produces:</p>
+<ul>
+  <li><strong>Alerts</strong> &mdash; critical issues needing attention (with severity)</li>
+  <li><strong>Actions</strong> &mdash; prioritized next steps (with deadlines)</li>
+  <li><strong>Monitors</strong> &mdash; items to watch</li>
+</ul>
+
+<p>Snapshot hashing detects when the portfolio state has changed since the last analysis.</p>
+
+<h3 id="gtasks">Google Tasks Integration</h3>
+
+<p>Connect Google Tasks from the Briefing page to:</p>
+<ul>
+  <li>View overdue tasks across all task lists</li>
+  <li>Let the AI search, read, complete, update, or delete tasks via tools</li>
+  <li>Sync deadlines between DomainOS and Google Tasks</li>
+</ul>
+
+<p>Click <strong>"Connect GTasks"</strong> to start the OAuth flow. Requires <a href="#google-oauth">Google OAuth credentials</a> to be configured.</p>
+
+<!-- ─── 9. MISSION CONTROL ──────────────────────────────────── -->
+
+<h2 id="missions">9. Mission Control</h2>
+
+<p>Access via the <strong>Missions</strong> icon in the sidebar. Missions are structured analytical workflows that run through a 10-step lifecycle.</p>
+
+<h3 id="running-mission">Running a Mission</h3>
+
+<ol>
+  <li>Select a domain (missions run in the context of a specific domain)</li>
+  <li>Choose a mission from the dropdown (e.g., "Portfolio Briefing", "Loan Document Review")</li>
+  <li>Fill in any required parameters</li>
+  <li>Click <strong>Run</strong> &mdash; the AI streams its analysis in real time</li>
+</ol>
+
+<p>Available missions include:</p>
+<ul>
+  <li><strong>Portfolio Briefing</strong> &mdash; cross-domain health analysis with alerts/actions/monitors</li>
+  <li><strong>Loan Document Review</strong> &mdash; CMBS methodology review producing an attorney memo and risk heatmap</li>
+</ul>
+
+<h3 id="mission-gates">Approval Gates</h3>
+
+<p>Before certain actions (creating deadlines, drafting emails), the mission pauses and shows a <strong>Gate Modal</strong> for your approval. You can approve or reject each proposed action. Rejection doesn't cancel the run &mdash; it just skips those actions.</p>
+
+<h3 id="mission-history">Run History</h3>
+
+<p>Past runs are listed at the bottom of the Mission Control page with status, timestamp, and duration. Click any run to view its full output and provenance (definition hash, model, KB digests).</p>
+
+<!-- ─── 10. INTAKE PIPELINE ─────────────────────────────────── -->
+
+<h2 id="intake">10. Intake Pipeline</h2>
+
+<p>Access via the <strong>Intake</strong> icon in the sidebar (badge shows pending item count).</p>
+
+<p>The intake pipeline lets you send web content from Chrome to DomainOS using the <a href="#chrome-extension">Chrome Extension</a>. Each item goes through a classification flow:</p>
+
+<ol>
+  <li><strong>Pending</strong> &mdash; content received, not yet classified. Click "Classify" to run AI domain classification.</li>
+  <li><strong>Classified</strong> &mdash; AI suggests which domain this content belongs to (with confidence score). You can "Confirm" (accept), "Reclassify" (try again), or "Dismiss".</li>
+  <li><strong>Ingested</strong> &mdash; content added to the suggested domain's KB.</li>
+  <li><strong>Dismissed</strong> &mdash; content discarded.</li>
+</ol>
+
+<!-- ─── 11. SETTINGS ────────────────────────────────────────── -->
+
+<h2 id="settings">11. Settings</h2>
+
+<p>Open Settings from the <strong>gear icon</strong> in the top-right corner of any page.</p>
+
+<h3 id="api-keys">Tab: API Keys</h3>
+
+<p>Configure your LLM provider credentials. You need at least one to use DomainOS.</p>
+
+<table>
+  <tr><th>Provider</th><th>What to Enter</th><th>Where to Get It</th></tr>
+  <tr><td>Anthropic (Claude)</td><td>API key</td><td><a href="https://console.anthropic.com/">console.anthropic.com</a></td></tr>
+  <tr><td>OpenAI</td><td>API key</td><td><a href="https://platform.openai.com/">platform.openai.com</a></td></tr>
+  <tr><td>Ollama (Local)</td><td>Base URL (default: localhost:11434)</td><td><a href="https://ollama.com">ollama.com</a> &mdash; install &amp; run</td></tr>
+</table>
+
+<p>Keys are encrypted using macOS Keychain (Electron safeStorage) and never leave your machine.</p>
+
+<h4>Google OAuth</h4>
+
+<p>Gmail and Google Tasks integration uses built-in OAuth credentials by default. Power users can override with custom GCP credentials (Client ID + Secret with <code>gmail.readonly</code>, <code>gmail.compose</code>, and <code>tasks</code> scopes).</p>
+
+<h3 id="model-defaults">Tab: Model Defaults</h3>
+
+<p>Set the global defaults for:</p>
+<ul>
+  <li><strong>Default Provider</strong> &mdash; Anthropic, OpenAI, or Ollama</li>
+  <li><strong>Default Model</strong> &mdash; choose from known models or enter a custom model ID</li>
+  <li><strong>Ollama Base URL</strong> &mdash; visible when Ollama is selected</li>
+  <li><strong>Test Tool Support</strong> &mdash; verify if the selected model supports function calling (tool-use)</li>
+</ul>
+
+<p>Individual domains can override these defaults from the chat page.</p>
+
+<h3 id="kb-search-settings">Knowledge Base Search</h3>
+
+<p>Located in the Model Defaults tab:</p>
+
+<table>
+  <tr><th>Setting</th><th>Options</th><th>Default</th></tr>
+  <tr><td>Search Engine</td><td>Auto, Ollama, OpenAI, Off</td><td>Auto</td></tr>
+  <tr><td>Embedding Model</td><td>Text input</td><td>nomic-embed-text (Ollama) / text-embedding-3-small (OpenAI)</td></tr>
+  <tr><td>Re-index All Domains</td><td>Button</td><td>&mdash;</td></tr>
+</table>
+
+<ul>
+  <li><strong>Auto</strong> (recommended) &mdash; uses Ollama if available, otherwise disables vector search. KB content stays local.</li>
+  <li><strong>Ollama</strong> &mdash; explicitly use Ollama for embeddings (fails if Ollama is unreachable)</li>
+  <li><strong>OpenAI</strong> &mdash; sends KB content chunks to OpenAI for embedding. Shows a privacy warning.</li>
+  <li><strong>Off</strong> &mdash; disable vector search entirely; falls back to tier-based KB loading</li>
+</ul>
+
+<div class="callout warning">
+  <strong>Privacy Note</strong>
+  The "Auto" and "Ollama" options keep all KB content local. Selecting "OpenAI" sends chunks of your knowledge base to OpenAI servers for embedding.
+</div>
+
+<h3 id="google-oauth">Google OAuth</h3>
+
+<p>Gmail and Google Tasks use built-in OAuth credentials out of the box. To use your own GCP project:</p>
+<ol>
+  <li>Go to Settings &gt; API Keys &gt; Google OAuth</li>
+  <li>Toggle "Use custom credentials"</li>
+  <li>Enter your Client ID and Client Secret from a GCP Desktop/Native OAuth client</li>
+  <li>Required scopes: <code>gmail.readonly</code>, <code>gmail.compose</code>, <code>tasks</code></li>
+</ol>
+
+<!-- ─── 12. VECTOR SEARCH SETUP ─────────────────────────────── -->
+
+<h2 id="vector-search-setup">12. Setting Up Vector Search</h2>
+
+<p>Vector search enables semantic retrieval from your knowledge bases. Follow these steps based on your setup:</p>
+
+<h3>Option A: Ollama (Recommended &mdash; everything stays local)</h3>
+
+<ol>
+  <li>Install Ollama:
+    <pre><code>brew install ollama</code></pre>
+    Or download from <a href="https://ollama.com">ollama.com</a>
+  </li>
+  <li>Pull the embedding model:
+    <pre><code>ollama pull nomic-embed-text</code></pre>
+  </li>
+  <li>Start Ollama (if not already running):
+    <pre><code>ollama serve</code></pre>
+  </li>
+  <li>Restart DomainOS or switch domains &mdash; embedding auto-detection begins</li>
+</ol>
+
+<div class="callout info">
+  <strong>How to verify it's working</strong>
+  Check the terminal where DomainOS is running (if in dev mode) for log lines:
+  <pre><code>[embedding] resolved: nomic-embed-text (768d)
+[embedding] indexed 191 chunks for domain abc123 in 1.8s
+[vector-search] top-3 scores: 0.82, 0.71, 0.65 (3 files)</code></pre>
+</div>
+
+<h3>Option B: OpenAI Embeddings</h3>
+
+<ol>
+  <li>Go to Settings &gt; Model Defaults &gt; Knowledge Base Search</li>
+  <li>Change Search Engine to <strong>OpenAI</strong></li>
+  <li>Confirm the privacy warning</li>
+  <li>Ensure your OpenAI API key is configured (Settings &gt; API Keys)</li>
+</ol>
+
+<h3>Option C: No Vector Search</h3>
+
+<p>If you don't install an embedding model, DomainOS falls back to its existing tier-based KB loading. Everything still works &mdash; vector search is an optional enhancement.</p>
+
+<!-- ─── 13. CHROME EXTENSION ────────────────────────────────── -->
+
+<h2 id="chrome-extension">13. Chrome Extension</h2>
+
+<p>The DomainOS Chrome extension enables two features:</p>
+
+<h3>Browser Intake ("Send to DomainOS")</h3>
+<p>Click the extension popup to send the current page's content to DomainOS for AI classification and KB ingestion.</p>
+
+<h3>Gmail Email Drag-and-Drop</h3>
+<p>The extension injects drag handles on Gmail email rows. Drag an email from Gmail and drop it onto the DomainOS chat panel to attach it as context. Email attachment text (PDF, Excel, Word) is automatically extracted.</p>
+
+<h3>Extension Setup</h3>
+<ol>
+  <li>Open DomainOS Settings &gt; Extension tab to view the auth token</li>
+  <li>Load the extension in Chrome (<code>chrome://extensions</code> &gt; "Load unpacked")</li>
+  <li>Click the extension icon &gt; Options &gt; paste the auth token</li>
+</ol>
+
+<!-- ─── 14. AUTO-UPDATES ────────────────────────────────────── -->
+
+<h2 id="auto-updates">14. Auto-Updates</h2>
+
+<p>DomainOS checks for updates automatically:</p>
+<ul>
+  <li>10 seconds after launch</li>
+  <li>Every 4 hours while running</li>
+</ul>
+
+<p>When an update is available, you'll be prompted to download it. After download, you'll be prompted to restart.</p>
+
+<!-- ─── 15. KEYBOARD SHORTCUTS ──────────────────────────────── -->
+
+<h2 id="keyboard-shortcuts">15. Keyboard Shortcuts</h2>
+
+<table>
+  <tr><th>Shortcut</th><th>Action</th></tr>
+  <tr><td><kbd>Enter</kbd></td><td>Send message</td></tr>
+  <tr><td><kbd>Shift</kbd> + <kbd>Enter</kbd></td><td>New line in message</td></tr>
+  <tr><td><kbd>Cmd</kbd> + <kbd>,</kbd></td><td>Open Settings</td></tr>
+  <tr><td><kbd>Cmd</kbd> + <kbd>Q</kbd></td><td>Quit (or hide to tray during active mission)</td></tr>
+  <tr><td><kbd>Esc</kbd></td><td>Close dialog/modal</td></tr>
+</table>
+
+<!-- ─── 16. TROUBLESHOOTING ─────────────────────────────────── -->
+
+<h2 id="troubleshooting">16. Troubleshooting</h2>
+
+<h3>"App is damaged" on first launch</h3>
+<p>Run in Terminal:</p>
+<pre><code>xattr -cr /Applications/DomainOS.app</code></pre>
+
+<h3>Ollama connection fails</h3>
+<ul>
+  <li>Ensure Ollama is running: <code>ollama serve</code></li>
+  <li>Check the base URL in Settings (default: <code>http://localhost:11434</code>)</li>
+  <li>Test the connection in Settings &gt; API Keys &gt; Ollama &gt; Test</li>
+</ul>
+
+<h3>Vector search not working</h3>
+<ul>
+  <li>Verify the embedding model is installed: <code>ollama list</code> (should show <code>nomic-embed-text</code>)</li>
+  <li>Check Settings &gt; Model Defaults &gt; KB Search is not set to "Off"</li>
+  <li>Try "Re-index All Domains" in Settings</li>
+  <li>If using OpenAI: verify your API key is configured</li>
+</ul>
+
+<h3>Gmail/Google Tasks won't connect</h3>
+<ul>
+  <li>Verify Google OAuth credentials are configured (built-in defaults or custom)</li>
+  <li>If using custom credentials: ensure the OAuth client has the correct scopes</li>
+  <li>Try disconnecting and reconnecting</li>
+</ul>
+
+<h3>AI doesn't use tools (Gmail, GTasks, brainstorming)</h3>
+<ul>
+  <li>Some models don't support function calling. Use the "Test Tool Support" button in Settings &gt; Model Defaults.</li>
+  <li>Try enabling "Force Tool Attempt" on the domain's model override.</li>
+  <li>Not all Ollama models support tools &mdash; try <code>llama3.2</code> or <code>mistral</code>.</li>
+</ul>
+
+<h3>KB files not syncing</h3>
+<ul>
+  <li>Verify the KB path is correct in domain settings (Edit domain)</li>
+  <li>Switch away from and back to the domain to trigger a re-scan</li>
+  <li>Check that files are in supported formats (markdown, PDF, Excel, Word)</li>
+</ul>
+
+<h3>App data location</h3>
+<p>DomainOS stores its database and configuration in the Electron user data directory:</p>
+<pre><code>~/Library/Application Support/domain-os/</code></pre>
+
+<hr>
+<p style="color: var(--text-secondary); font-size: 0.88em; text-align: center; margin-top: 40px;">
+  DomainOS v0.1.4 &bull; Built with Electron + React &bull; <a href="https://github.com/quiet-coder-io/DomainOS">GitHub</a>
+</p>
+
+</body>
+</html>

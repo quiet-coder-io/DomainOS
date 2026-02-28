@@ -115,6 +115,7 @@ This loop validates the core value prop: domain-scoped AI that reads and writes 
 - **File attachments in chat** — drag-and-drop files onto chat as context for the LLM. Supports text files (.md, .ts, .json, etc.) and binary documents (PDF, Excel, Word) with server-side text extraction. Files are sent as user message preamble; only metadata (filename, size, sha256) stored in chat history. Budget enforcement: 100KB/file text, 2MB/file binary, 500KB total, 200K chars total, max 20 files. Hash-based dedup, encoding validation, deterministic truncation.
 - **Skill library** — reusable analytical procedures (e.g., "CMBS loan review") with per-message activation, freeform/structured output, tool hints, import/export as `.skill.md` files, and full CRUD management dialog. Skills inject into the system prompt between shared protocols and domain protocols with protocol precedence enforcement.
 - **Mission system** — reusable mission definitions with a 10-step lifecycle runner (validate → context → prompt → LLM → parse → persist → gate → actions → audit → finalize). Generalized runner with optional dep hooks (`buildContext`, `buildPrompts`, `shouldGate`, `buildEmailBody`, `buildEmailSubject`) — mission-specific logic injected at IPC layer. Data-driven mission metadata (`methodology`, `outputLabels`) for self-describing missions. Two seeded missions: Portfolio Briefing and Loan Document Review (CMBS methodology, attorney memo + risk heatmap). Dynamic parameter form from definition, mission selector, cancel-by-requestId, real Gmail draft creation. Per-run provenance (definition hash, prompt hash, context hash, model, KB digest timestamps). Per-domain enable/disable, run history, gate modal.
+- **Knowledge Base vector search (RAG)** — semantic search over domain KBs via local Ollama embeddings (nomic-embed-text, 768d) or OpenAI (explicit opt-in). Heading-aware markdown chunking with stable content-anchored identity, cosine similarity + MMR diversity retrieval, structural-tier reserve for domain identity, in-memory embedding cache with 15-min TTL. Auto-indexes on domain switch/KB file changes. Falls back to existing tier-based context when embeddings unavailable.
 
 ### Out of scope (future)
 - Protocol marketplace/sharing
@@ -147,6 +148,37 @@ Reusable analytical procedures stored globally and activated per-message. Full v
 ### Mission System (Completed — v1 + v2)
 Reusable mission definitions with a 10-step lifecycle runner, approval gates, and full provenance. DB migrations v18–v20: 6 tables (`missions`, `mission_domain_assoc`, `mission_runs`, `mission_run_outputs`, `mission_run_gates`, `mission_run_actions`) + drops audit_log CHECK constraint + v19 Loan Document Review seed + v20 methodology/outputLabels patch. Two seeded missions: Portfolio Briefing and Loan Document Review. **Runner** (`MissionRunner`): framework-agnostic 10-step lifecycle (validate inputs → check permissions → assemble context → build prompt → stream LLM → parse outputs → persist → evaluate gates → execute actions → finalize). All deps injected via `MissionRunnerDeps` (no Electron imports in core). **Generalized dep hooks** (v2): `buildContext` (mission-specific context + provenance snapshot), `buildPrompts` (system + user prompt construction), `shouldGate` (mission-specific gate evaluation with input validation), `buildEmailBody`, `buildEmailSubject`. Fallback: when deps not provided, current portfolio-briefing logic. **Loan Document Review**: CMBS methodology prompt builder (`buildLoanReviewPrompt`), strict fenced-block output parser (`loan_review_memo` + `loan_review_heatmap_json`), `docPaths` parameter for scoped KB loading with per-file provenance, `<doc_inventory>` block in prompt listing reviewed + missing docs. Real Gmail draft creation via shared `createRealGmailDraft()` helper. **Data-driven metadata** (v2): `methodology` and `outputLabels` fields on `MissionDefinition` for self-describing missions (no hardcoded maps). **Gates**: side-effect intent check — deadlines gated if parsed actions > 0, email always gated if valid recipient provided. Gate rejection ≠ cancellation (run succeeds with actions skipped; `cancelled` reserved for user abort). Email validation in `shouldGate` implementation (not runner) — invalid email → gate skipped with warning. **Provenance**: every run stores `definition_hash`, `prompt_hash`, `context_hash`, `model_id`, `provider`, `context_json` (KB digest timestamps, domain list, `systemPromptChars`, `userPromptChars`, `missionType`, `inputsHash`). **Output parser registry**: `Map<missionId, MissionOutputParser>` with `initMissionParsers()` bootstrap; loan review parser extracts fenced memo + heatmap JSON with diagnostics. **Cancel-by-requestId**: `mission:run-cancel-by-request-id` IPC channel for aborting during streaming before `runId` is known. **State transitions**: enforced in `MissionRunRepository` (pending → running → gated → success/failed/cancelled). Single active run per app. **UI**: MissionControlPage with mission selector dropdown, dynamic parameter form (from `definition.parameters` + `parametersOrder`), data-driven capabilities (methodology + output labels), `LoanReviewMemoCard` (markdown memo + heatmap risk table), `WarningsBanner` for run warnings, streaming output with inline stop button, provenance panel, run history. Gate modal (`MissionGateModal`) shows pending actions for approval. Zustand store (`mission-store`) with tab-switch-safe state management, `cancelRun()` prefers requestId-based cancel during streaming. 13 IPC channels + 1 streaming event channel.
 
+### Knowledge Base Vector Search — RAG (Completed)
+Semantic search over domain knowledge bases so the LLM receives the most relevant KB content for each user question — instead of loading files by tier priority or truncating to a digest. Works with any chat provider (Claude, GPT, Ollama). Embeddings generated locally via Ollama or via OpenAI API (explicit opt-in only).
+
+**Architecture**: KB files → heading-aware chunker → embed via Ollama `/api/embed` or OpenAI → L2-normalize + store as Float32 BLOBs in SQLite → cache in-memory per (domain_id, model_name) → at chat time: embed query → cosine similarity → MMR diversity selection → inject into prompt.
+
+**DB migration v21–v22**: 3 tables: `kb_chunks` (chunked content with stable `chunk_key` identity via SHA-256 content anchors), `kb_chunk_embeddings` (Float32 BLOB vectors, multi-model safe via `UNIQUE(chunk_id, model_name)`), `kb_embedding_jobs` (per-domain per-model indexing state with composite PK).
+
+**Chunker** (`chunker.ts`): heading-aware markdown splitting with fixed-size fallback (1500 char max, 200 char overlap, 100 char min merge). YAML frontmatter → own chunk. Tracks `startLine`/`endLine` for source offsets. Code block indentation preserved in anchor normalization.
+
+**Stable chunk identity**: `chunk_key = sha256(fileId + headingPath + anchorHash)` — resilient to heading insertion, minor split-boundary changes. Content anchor normalization preserves code block indentation, strips heading lines from input, collapses whitespace in prose. Sync matches on `chunk_key` not `chunk_index`; only changed chunks re-embedded.
+
+**Embedding providers**: Ollama (default auto-detection, `nomic-embed-text` 768d, max 50 texts/batch) and OpenAI (`text-embedding-3-small` 1536d, explicit opt-in only — KB content never sent externally without user consent). Privacy rule: `'auto'` mode only tries Ollama.
+
+**Provider fingerprint**: `${provider}:${modelName}:${version}` detects silent model changes (e.g., Ollama model update). Fingerprint mismatch triggers re-embedding.
+
+**Retrieval**: Brute-force cosine similarity over all domain embeddings (<5ms for 1000×768). MMR-lite diversity with two-tier penalty: same heading_path = 0.30, same file = 0.10. Anchor heading boost (+0.1) for operationally relevant headings (STATUS, DEADLINE, OPEN GAP, etc.).
+
+**Structural reserve**: Top 1–3 structural-tier chunks appended after semantic results (capped, not a budget slice). Ensures domain identity/constraints always appear. Never repacks after appending — stops at 95% budget.
+
+**Fallback chain**: vector retrieval → if embedding client fails → existing `buildKBContextDigestPlusStructural()`. If no embeddings indexed → fallback. If all scores below minScore → fallback with note. Caller never sees an error.
+
+**Job coalescing**: Dirty-flag pattern — watcher fires during indexing → sets `dirty = true` → indexer finishes current file, reloads list, loops. Hard cancel via AbortController only on model/provider change or domain deletion.
+
+**In-memory cache**: `Map<${domainId}:${modelName}, StoredEmbedding[]>` with explicit invalidation hooks + 15-min TTL safety net. Typical domain: 500 embeddings × 3KB = 1.5MB.
+
+**Settings UI**: KB Search toggle (on/off), Search Engine dropdown (Auto/Ollama/OpenAI with privacy warning for OpenAI), Search Model text input, Re-index All Domains button. Status indicator shows per-domain embedding state.
+
+**Console logging**: `[embedding] resolved: nomic-embed-text (768d)`, `[embedding] indexed 191 chunks for domain X in 1.8s`, `[vector-search] top-3 scores: 0.82, 0.71, 0.65 (3 files)`.
+
+**User setup**: Install Ollama (`brew install ollama`), pull `nomic-embed-text` (`ollama pull nomic-embed-text`), start Ollama (`ollama serve`). DomainOS auto-detects and indexes on next domain switch.
+
 ## Key Files Reference
 
 ### Core Library (`packages/core/`)
@@ -157,7 +189,13 @@ Reusable mission definitions with a 10-step lifecycle runner, approval gates, an
 | `src/domains/schemas.ts` | Zod schemas for domain create/update with per-domain LLM overrides |
 | `src/domains/repository.ts` | SQLite CRUD for domains, `DOMAIN_COLUMNS`, `rowToDomain()` |
 | `src/domains/relationships.ts` | `DomainRelationshipRepository` — directed relationships with `DependencyType` (blocks/depends_on/informs/parallel/monitor_only), reciprocation, `RelationshipView` |
-| `src/kb/` | KB file indexing, digest generation, tiered importance |
+| `src/kb/` | KB file indexing, digest generation, tiered importance, vector search |
+| `src/kb/chunker.ts` | Heading-aware markdown chunker with source offsets, stable `chunk_key` identity via SHA-256 content anchors, code block indentation preservation |
+| `src/kb/embedding-client.ts` | `EmbeddingClient` interface: `embed()`, `modelName`, `dimensions`, `providerFingerprint` |
+| `src/kb/chunk-repository.ts` | `KBChunkRepository` — chunk + embedding + job CRUD, `syncChunks()` with key-based matching, `getChunksNeedingEmbedding()`, `storeEmbeddings()`, `hasEmbeddings()` |
+| `src/kb/vector-search.ts` | `cosineSimilarity()`, `searchChunksWithDiversity()` (MMR-lite), `packFloat32()`/`unpackFloat32()`, anchor heading boost |
+| `src/kb/vector-context-builder.ts` | `buildVectorKBContext()` — semantic retrieval + structural reserve + fallback chain, tier-aware packing |
+| `src/kb/embedding-indexer.ts` | `indexDomainKB()` pipeline with backpressure, file-level change detection, progress callbacks |
 | `src/protocols/` | Protocol parsing and composition |
 | `src/briefing/portfolio-health.ts` | `computePortfolioHealth()`, `DomainStatus`, `DomainHealth`, `StaleSummary`, `CrossDomainAlert`, snapshot hashing |
 | `src/briefing/prompt-builder.ts` | `buildBriefingPrompt()`, `projectPortfolioHealthForLLM()`, token budget compression, `redactForLLM()` |
@@ -190,7 +228,7 @@ Reusable mission definitions with a 10-step lifecycle runner, approval gates, an
 | `src/loan-review/prompt-builder.ts` | `buildLoanReviewPrompt(ctx, inputs)` — CMBS methodology system prompt with `<doc_inventory>` + `<kb_context>` blocks, review depth modes (triage/attorney-prep/full-review) |
 | `src/loan-review/output-parser.ts` | `parseLoanReview(rawText)` — deterministic fence extraction for `loan_review_memo` + `loan_review_heatmap_json` blocks with single-occurrence enforcement and diagnostics |
 | `src/loan-review/index.ts` | Barrel export: `LoanReviewContext` type, `buildLoanReviewPrompt`, `parseLoanReview` |
-| `src/storage/` | SQLite schema, migrations (v1–v20). v8: per-domain model override. v9: directed relationships. v11: decision quality columns. v12: advisory_artifacts table. v14: brainstorm_sessions table. v16: skills table. v18: missions (6 tables + audit_log CHECK drop + seed data). v19: Loan Document Review mission seed. v20: methodology/outputLabels patch for existing missions |
+| `src/storage/` | SQLite schema, migrations (v1–v22). v8: per-domain model override. v9: directed relationships. v11: decision quality columns. v12: advisory_artifacts table. v14: brainstorm_sessions table. v16: skills table. v18: missions (6 tables + audit_log CHECK drop + seed data). v19: Loan Document Review mission seed. v20: methodology/outputLabels patch. v21: status_intent flag + briefing context. v22: kb_chunks + kb_chunk_embeddings + kb_embedding_jobs tables |
 | `src/common/` | Result type, shared Zod schemas |
 
 ### Integrations (`packages/integrations/`)
@@ -226,11 +264,17 @@ Reusable mission definitions with a 10-step lifecycle runner, approval gates, an
 | `src/main/gtasks-oauth.ts` | Google Tasks OAuth PKCE flow — scope `tasks` (read-write), loads credentials from `gcp-oauth-config` |
 | `src/main/gtasks-credentials.ts` | Encrypted GTasks credential storage (`gtasks-creds.enc`, safeStorage) |
 | `src/main/kb-watcher.ts` | Filesystem monitoring for KB directories — `startKBWatcher()`, `stopKBWatcher()`, debounced (500ms), sends `kb:files-changed` to renderer |
-| `src/preload/api.ts` | IPC type contract: `DomainOSAPI`, `ProviderConfig`, `ProviderKeysStatus`, `ToolTestResult`, `PortfolioHealth`, `BriefingAnalysis`, `MissionRunDetailData`, `MissionProgressEventData` |
-| `src/renderer/components/SettingsDialog.tsx` | Multi-provider settings modal (API keys, Google OAuth config, Ollama connection, model defaults, tool test) |
+| `src/main/ollama-embeddings.ts` | Ollama `/api/embed` client — L2 normalization, batch limits (50 texts, 100K chars), 30s timeout, AbortController |
+| `src/main/openai-embeddings.ts` | OpenAI embeddings client (`text-embedding-3-small`, 1536d) — L2 normalization, explicit opt-in only |
+| `src/main/embedding-resolver.ts` | Privacy-respecting provider resolution: auto = Ollama-only, OpenAI requires explicit selection, smoke test on resolve |
+| `src/main/embedding-manager.ts` | `EmbeddingManager` — per-domain job coalescing with dirty-flag, AbortController, `indexDomain()`, `cancel()`, `cancelAll()` |
+| `src/main/embedding-cache.ts` | In-memory embedding cache (`Map<domainId:modelName, StoredEmbedding[]>`) with explicit invalidation hooks + 15-min TTL |
+| `src/main/app-menu.ts` | Application menu with Edit, View, Window, Help (User Guide + GitHub link) |
+| `src/preload/api.ts` | IPC type contract: `DomainOSAPI`, `ProviderConfig`, `ProviderKeysStatus`, `ToolTestResult`, `PortfolioHealth`, `BriefingAnalysis`, `MissionRunDetailData`, `MissionProgressEventData`, `EmbeddingStatus` |
+| `src/renderer/components/SettingsDialog.tsx` | Multi-provider settings modal (API keys, Google OAuth config, Ollama connection, model defaults, tool test, KB search toggle/provider/model/re-index) |
 | `src/renderer/pages/DomainChatPage.tsx` | Chat page with per-domain model override UI (tri-state: global default / override / clear) |
 | `src/renderer/pages/BriefingPage.tsx` | Portfolio health dashboard + LLM analysis streaming UI with alerts, actions, monitors + GTasks connect/disconnect + overdue badge |
-| `src/renderer/stores/settings-store.ts` | Zustand store for provider keys (boolean+last4), global config, Ollama state |
+| `src/renderer/stores/settings-store.ts` | Zustand store for provider keys (boolean+last4), global config, Ollama state, embedding status + re-index |
 | `src/renderer/stores/domain-store.ts` | Zustand store for domains including `modelProvider`, `modelName`, `forceToolAttempt` |
 | `src/renderer/stores/advisory-store.ts` | Zustand store for advisory artifacts: fetch, filter (status/type), archive/unarchive, rename |
 | `src/renderer/stores/briefing-store.ts` | Zustand store: `fetchHealth()`, `analyze()` with streaming + cancel, snapshot hash stale detection |
@@ -316,8 +360,10 @@ Decrypted keys cached in-memory after first read. Keys never cross IPC to render
 
 `provider-config.json` (versioned, no secrets):
 ```json
-{ "version": 1, "defaultProvider": "anthropic", "defaultModel": "claude-sonnet-4-20250514", "ollamaBaseUrl": "http://localhost:11434" }
+{ "version": 1, "defaultProvider": "anthropic", "defaultModel": "claude-sonnet-4-20250514", "ollamaBaseUrl": "http://localhost:11434", "embeddingProvider": "auto", "embeddingModel": "nomic-embed-text" }
 ```
+
+`embeddingProvider`: `'auto'` (default, Ollama-only) | `'ollama'` | `'openai'` | `'off'`. `embeddingModel`: model name for embedding (default per provider).
 
 ### IPC Channels (Provider-Related)
 
@@ -336,6 +382,9 @@ Decrypted keys cached in-memory after first read. Keys never cross IPC to render
 | `briefing:analyze-cancel` | renderer→main | Cancel active briefing analysis |
 | `briefing:analysis-chunk` | main→renderer | Streaming chunk event during analysis |
 | `kb:files-changed` | main→renderer | KB watcher detected file changes |
+| `kb:reindex-embeddings` | renderer→main | Trigger vector search re-indexing for one domain or all |
+| `kb:embedding-status` | renderer→main | Get rich embedding status per domain (enabled, provider, model, chunks, errors) |
+| `kb:embedding-progress` | main→renderer | Streaming progress during KB embedding indexing |
 | `gtasks:start-oauth` | renderer→main | Start Google Tasks OAuth PKCE flow |
 | `gtasks:check-connected` | renderer→main | Check GTasks connection status |
 | `gtasks:disconnect` | renderer→main | Disconnect GTasks + revoke token |
