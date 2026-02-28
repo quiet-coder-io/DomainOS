@@ -56,16 +56,33 @@ Data flow: Renderer → IPC → Main → Core → SQLite/Filesystem
 
 **Workspace symlink workaround:** `apps/desktop/scripts/package.mjs` strips workspace deps (`@domain-os/core`, `@domain-os/integrations`) from `package.json` before electron-builder runs, then restores them after. These packages are bundled by electron-vite (via `externalizeDepsPlugin({ exclude: [...] })`) so they don't need to exist in `node_modules` at runtime. Without this, electron-builder follows workspace symlinks to paths outside `apps/desktop/` and crashes.
 
-**Auto-update:** `electron-updater` checks GitHub Releases 10s after launch and every 4 hours. Prompts user to download, then prompts to restart. Only active in packaged builds (`app.isPackaged`). Public repo — no token needed.
+**Auto-update (hardened manual installer):** `electron-updater` checks GitHub Releases 10s after launch and every 4 hours. Prompts user to download, then prompts to restart. Only active in packaged builds (`app.isPackaged`). Public repo — no token needed.
 
-**Unsigned app (Phase 1):** `identity: null` in `electron-builder.yml` skips code signing. macOS quarantine flags downloaded unsigned apps as "damaged" — run `xattr -cr /Applications/DomainOS.app` before first launch. Phase 2 (Developer ID + notarization) will eliminate this.
+Squirrel.Mac (electron-updater's default macOS installer) requires code-signed apps — `quitAndInstall()` is silently a no-op for unsigned apps. Instead, `updater.ts` implements a hardened manual installer that:
+1. **Preflight checks**: DMG/AppTranslocation detection, bundle ID verification (`io.quietcoder.domain-os`), zip freshness validation (>10MB, <30min old), destination writability test
+2. **Spawns a detached bash script** that waits for the app PID to exit, extracts via `ditto`, validates version + architecture, then performs an atomic swap (`mv current → .bak`, `mv .new → current`) with rollback on failure
+3. **Admin elevation**: when `/Applications` isn't writable, writes swap commands to a separate script and elevates via `osascript ... with administrator privileges`
+4. **Next-launch marker**: every exit path writes `~/Library/Application Support/DomainOS/last-update-result.json`; on next launch `checkLastUpdateResult()` shows success notification or failure dialog with "Open Log" / "Install Manually" options
+5. **Logging**: full trace to `~/Library/Logs/DomainOS/updater.log`
+
+**Unsigned app (Phase 1):** `identity: null` in `electron-builder.yml` skips code signing. macOS quarantine flags downloaded unsigned apps as "damaged" — run `xattr -cr /Applications/DomainOS.app` before first launch. The updater clears quarantine on extracted apps before and after swap. Phase 2 (Developer ID + notarization) will eliminate the manual `xattr` step.
+
+**Key pitfalls (learned the hard way, v0.1.4–v0.1.12):**
+- `autoUpdater.quitAndInstall()` does nothing for unsigned apps — Squirrel.Mac's `ShipIt` requires code signing
+- `autoInstallOnAppQuit` must be `false` — prevents Squirrel from interfering
+- Bundle ID must match exactly (`io.quietcoder.domain-os`, set in `electron-builder.yml` as `appId`) — wrong ID causes preflight to always fail
+- `app.exit(0)` (not `app.quit()`) is required to ensure the process actually exits so the detached script can replace the bundle
+- Same-volume staging (e.g., `/Applications/DomainOS.app.update-staging.*`) ensures `mv` is atomic; cross-volume would be copy+delete
+- `ditto` copy to `.new` then `mv` swap (not `mv` from staging directly) — prevents staging cleanup from accidentally deleting the installed app
+- Find `.app` by `CFBundleIdentifier` match, not `find | head -1` — prevents installing wrong app from multi-app zips
+- The update zip location is `~/Library/Caches/@domain-osdesktop-updater/update.zip` (package name `@domain-os/desktop` → cache dir `@domain-osdesktop-updater`)
 
 **Key files:**
 | File | Purpose |
 |------|---------|
-| `apps/desktop/electron-builder.yml` | Packaging config (targets, asar, publish) |
+| `apps/desktop/electron-builder.yml` | Packaging config (targets, asar, publish, `appId`) |
 | `apps/desktop/scripts/package.mjs` | Workspace-aware packaging wrapper |
-| `apps/desktop/src/main/updater.ts` | Auto-update lifecycle |
+| `apps/desktop/src/main/updater.ts` | Auto-update: preflight, script generation, admin path, next-launch check |
 | `apps/desktop/build/entitlements.mac.plist` | macOS entitlements (scaffolded for Phase 2) |
 
 **Release workflow:**
