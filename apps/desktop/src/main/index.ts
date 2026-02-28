@@ -9,7 +9,7 @@ import { startIntakeServer, stopIntakeServer } from './intake-server'
 import { stopAllKBWatchers } from './kb-watcher'
 import { startAutomationEngine, stopAutomationEngine } from './automation-engine'
 import { DomainRepository, MissionRunRepository, createProvider, DEFAULT_MODELS } from '@domain-os/core'
-import { initAutoUpdater } from './updater'
+import { initAutoUpdater, checkLastUpdateResult } from './updater'
 import { setupApplicationMenu } from './app-menu'
 import type { ProviderName } from '@domain-os/core'
 import { GTasksClient } from '@domain-os/integrations'
@@ -117,6 +117,9 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
+  // Non-blocking: show update result from previous launch before anything else
+  checkLastUpdateResult()
+
   setupApplicationMenu()
   const db = initDatabase()
 
