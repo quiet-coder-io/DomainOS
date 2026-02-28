@@ -144,6 +144,45 @@ DomainOS gives each area of your professional life its own AI-powered operating 
 - **Google Tasks as AI tools** — the chat assistant can search, read, complete, update, and delete Google Tasks via tool-use, enabling conversational task management within any domain
 - **KB file watching** — automatic filesystem monitoring with debounced re-scan when KB files change on disk
 
+### Knowledge Base Vector Search (RAG)
+
+- **Semantic search over domain KBs** — the AI receives the most relevant KB content for each user question, instead of loading files by tier priority or truncating to a digest
+- **Heading-aware chunking** — markdown files are split by headings with stable content-anchored identity (SHA-256), so only changed chunks are re-embedded on re-index
+- **Two embedding providers** — Ollama (default, auto-detected, fully local via `nomic-embed-text`) or OpenAI (`text-embedding-3-small`, explicit opt-in only — KB content is never sent externally without user consent)
+- **MMR diversity retrieval** — cosine similarity with Maximal Marginal Relevance to avoid redundant results; same-heading and same-file penalties ensure diverse coverage
+- **Structural reserve** — top structural-tier chunks (domain identity, constraints) are always appended after semantic results, ensuring the AI never loses domain context
+- **Automatic indexing** — embeddings are generated on domain switch and when KB files change; dirty-flag coalescing prevents redundant re-indexing
+- **In-memory cache** — embeddings cached per domain with 15-minute TTL for sub-5ms retrieval on typical domains
+- **Graceful fallback** — if embeddings are unavailable (Ollama not running, no embeddings indexed), falls back to the existing tier-based KB context with no user-visible error
+- **Settings UI** — toggle KB search on/off, choose search engine (Auto/Ollama/OpenAI), set model name, re-index button, per-domain embedding status
+
+### Mission System
+
+- **Reusable mission definitions** — define repeatable analytical workflows with parameters, methodology, and expected outputs; enable/disable per domain
+- **10-step lifecycle runner** — validate inputs → check permissions → assemble context → build prompt → stream LLM → parse outputs → persist → evaluate gates → execute actions → finalize
+- **Two seeded missions** — Portfolio Briefing (cross-domain health analysis) and Loan Document Review (CMBS methodology with attorney memo + risk heatmap)
+- **Approval gates** — side-effect actions (deadline creation, email drafts) require explicit user approval via a gate modal before execution
+- **Real Gmail draft creation** — mission outputs can generate Gmail drafts with structured content, subject lines, and recipient lists
+- **Full provenance** — every run stores definition hash, prompt hash, context hash, model ID, provider, and context metadata (KB digest timestamps, domain list, prompt sizes)
+- **Dynamic parameter form** — mission parameters render as a form from the definition; data-driven capabilities (methodology, output labels) make missions self-describing
+- **Run history** — browse past mission runs per domain with outputs, gates, actions, and provenance details
+- **Cancel support** — cancel during streaming (before run ID is known) via request ID, or by run ID after
+- **Loan Document Review** — CMBS methodology prompt builder, document inventory tracking, strict fenced-block output parser for attorney memo + risk heatmap JSON
+
+### File Attachments in Chat
+
+- **Drag-and-drop files** — drag files from Finder onto the chat panel to attach them as context for the AI
+- **Text files** — `.md`, `.ts`, `.json`, `.csv`, and 30+ other text formats read directly with encoding validation (100KB limit)
+- **Binary documents** — PDF, Excel (`.xlsx`/`.xls`), and Word (`.docx`) files extracted to text server-side via `unpdf`, `xlsx`, and `mammoth` (2MB limit)
+- **Budget enforcement** — 500KB total text, 200K chars total, max 20 files per message; hash-based dedup prevents re-attaching the same file
+- **Privacy-first storage** — file contents are sent inline in the LLM message; only metadata (filename, size, SHA-256 hash) is persisted in chat history
+
+### Email Attachment Extraction
+
+- **Automatic text extraction** — when emails are attached to chat via Gmail drag-and-drop, the app automatically extracts text from PDF, Excel, and Word attachments
+- **Budget limits** — 5MB/attachment, 10K chars/attachment, 5 attachments/message, 25 per thread; low-signal PDF guard skips scanned documents
+- **Transparency** — skipped attachments (unsupported format, too large, extraction failed) are listed in a summary so the AI knows what it didn't see
+
 ### Skill Library
 
 - **Reusable analytical procedures** — define structured skills (like "CMBS loan review" or "contract analysis") with step-by-step instructions that are injected into the AI's system prompt when activated
@@ -183,6 +222,8 @@ graph TB
                 ADVISORY["Advisory<br/><small>Parser · Artifacts · Tasks</small>"]
                 BRAINSTORM["Brainstorm<br/><small>Techniques · Synthesis</small>"]
                 SKILLS["Skills<br/><small>Library · Import/Export</small>"]
+                MISSIONS["Missions<br/><small>Runner · Gates · Actions</small>"]
+                VECTORSEARCH["Vector Search<br/><small>Embeddings · RAG</small>"]
                 BRIEFMOD["Briefing<br/><small>Health · Alerts</small>"]
                 AUTOMATIONS["Automations<br/><small>Cron · Events · Dedupe</small>"]
                 SESSIONS[Sessions]
@@ -204,6 +245,7 @@ graph TB
     subgraph LLM["LLM Providers (BYOK)"]
         ANTHROPIC["Anthropic<br/><small>Claude Sonnet · Opus</small>"]
         OPENAI["OpenAI<br/><small>GPT-4o · o3-mini</small>"]
+        EMBEDDINGS["Embedding Providers<br/><small>Ollama · OpenAI</small>"]
         OLLAMA["Ollama (Local)<br/><small>Llama · Mistral · etc.</small>"]
     end
 
@@ -215,6 +257,7 @@ graph TB
     EXT -- "localhost" --> INTAKESVR
     Renderer -- "IPC" --> IPC --> Main
     AGENTS -- "provider factory" --> LLM
+    VECTORSEARCH -- "embed" --> EMBEDDINGS
     Main -- "OAuth PKCE" --> Google
     Core --> SQLITE
     Core --> FS
@@ -271,6 +314,7 @@ flowchart LR
 | Core library | TypeScript, framework-agnostic |
 | LLM providers | Anthropic SDK, OpenAI SDK (also used for Ollama via OpenAI-compatible API) |
 | Google APIs | Gmail (read-only), Google Tasks (read-write) via OAuth PKCE |
+| Embeddings | Ollama (nomic-embed-text, local) or OpenAI (text-embedding-3-small, opt-in) |
 | Database | SQLite (better-sqlite3) |
 | Validation | Zod |
 | Package management | npm workspaces |
@@ -317,12 +361,14 @@ domain-os/
 │   │       ├── advisory/     # Advisory parser, artifact repository, task extractor, schemas
 │   │       ├── brainstorm/  # BMAD technique library, session repository, deterministic synthesizer
 │   │       ├── skills/       # Skill library: schemas, repository, import/export serialization
+│   │       ├── missions/     # Mission system: definitions, runner, gates, actions, output parsers
+│   │       ├── loan-review/  # Loan Document Review: CMBS prompt builder, output parser
 │   │       ├── automations/  # Automation schemas, cron parser, dedupe, templates, repository
 │   │       ├── briefing/     # Portfolio health computation, LLM analysis, output parsing
 │   │       ├── sessions/     # Session lifecycle management
 │   │       ├── audit/        # Event audit trail
 │   │       ├── intake/       # Browser intake classification
-│   │       ├── storage/      # SQLite schema and migrations (v1–v16)
+│   │       ├── storage/      # SQLite schema and migrations (v1–v22)
 │   │       └── common/       # Result type, shared schemas
 │   └── integrations/         # External service integrations (Gmail, Google Tasks)
 ├── apps/
