@@ -88,6 +88,49 @@ This roadmap reflects current priorities and may shift as the project evolves. I
 - [x] Gmail email drag-and-drop into chat (Chrome extension content script with drag handles, subject-in-URL encoding for cross-app transfer)
 - [x] Cross-domain directed relationships (blocks, depends_on, informs, parallel, monitor_only)
 
+### Plugin System
+- [x] Install plugins from Anthropic's knowledge-work-plugins (11 plugins) and financial-services-plugins (7 plugins)
+- [x] Atomic installer with extraction safety (path traversal, symlinks, size/count limits, file type allowlist)
+- [x] Trust & provenance — source allowlist, commit SHA, per-file content hashes, manifest integrity checks
+- [x] Plugin skills automatically appear in skill selector for immediate use in chat
+- [x] Plugin commands with dual slug namespacing (canonical for persistence, display for UX)
+- [x] Source-aware hard dependency enforcement at domain-enable and command invocation time
+- [x] Three-way content model (original/customized/updated) with modification detection and diff dialog
+- [x] Marketplace browser with ETag caching, rate-limit resilience, and offline fallback
+- [x] Plugin detail panel: skills, commands, version, author, source, license, install path
+- [x] Per-domain plugin association with lazy row creation
+
+### Knowledge Base Vector Search (RAG)
+- [x] Semantic search over domain KBs via local Ollama embeddings or OpenAI (explicit opt-in)
+- [x] Heading-aware markdown chunking with stable content-anchored identity
+- [x] MMR diversity retrieval with anchor heading boost
+- [x] Structural reserve for domain identity chunks
+- [x] Automatic indexing on domain switch / KB file changes
+- [x] In-memory embedding cache with 15-min TTL
+- [x] Graceful fallback to tier-based KB context
+
+### File Attachments & Email Extraction
+- [x] Drag-and-drop files from Finder into chat (text files up to 100KB, binary docs up to 2MB)
+- [x] Automatic text extraction from PDF, Excel, Word attachments in Gmail emails
+- [x] Budget enforcement (500KB total, 200K chars, 20 files, hash-based dedup)
+- [x] Privacy-first storage (contents sent inline, only metadata persisted)
+
+### Skill Library
+- [x] Reusable analytical procedures with per-message activation and domain-scoped selection
+- [x] Freeform or structured JSON output with schema enforcement and tool hints
+- [x] Import/export as `.skill.md` files with frontmatter + fenced outputSchema
+- [x] Full CRUD management dialog with search, filter, toggle, inline editing
+
+### UI & Experience
+- [x] Collapsible UI panels — header bar, left sidebar, right KB sidebar with localStorage persistence
+- [x] Toggle-all-panels button in window titlebar
+- [x] Smart prompt context window — token-aware history slicing, conversation summaries, recall intent detection
+- [x] Response style setting (concise/detailed) injected into system prompt
+- [x] Dark/light theme toggle
+
+### Platform
+- [x] Auto-update mechanism — checks GitHub Releases on launch + every 4 hours, hardened manual installer for unsigned macOS apps
+
 ---
 
 ## Next Up
@@ -113,6 +156,13 @@ This roadmap reflects current priorities and may shift as the project evolves. I
 - [ ] Webhook trigger — fire automations from external HTTP requests (beyond Chrome extension intake)
 - [ ] Conditional actions — branch on LLM response content (e.g., create task only if response contains action items)
 
+### Plugin System — Phase 2
+- [ ] MCP adapter — thin HTTP adapter for plugin connectors, per-connector `auth_type` tracking, disabled by default
+- [ ] Command autocomplete in chat — popover on `/` with display_slug, plugin subtitle, argument hint
+- [ ] Plugin update with three-way diff dialog for customized skills/commands
+- [ ] Plugin integrity check on startup (manifest hash verification, auto-disable corrupted plugins)
+- [ ] Command diagnostics panel in PluginDetailPanel
+
 ### Account Mapping Tool
 - [ ] Visual mapping of domain accounts, entities, and relationships
 - [ ] Interactive graph view of cross-domain dependencies
@@ -121,12 +171,10 @@ This roadmap reflects current priorities and may shift as the project evolves. I
 - [ ] Onboarding wizard improvements
 - [ ] Keyboard shortcuts for common actions
 - [ ] Search across all domains (global search)
-- [x] Dark/light theme toggle
 
 ### Platform
 - [ ] Protocol marketplace / sharing
 - [ ] Windows and Linux builds
-- [ ] Auto-update mechanism
 - [ ] Performance profiling and optimization for large KBs
 
 ---
@@ -138,10 +186,10 @@ These are ideas under consideration, not commitments:
 - **Calendar integration** — connect to Google Calendar or Outlook for deadline/event awareness
 - **Document generation** — export domain knowledge as structured reports or memos
 - **Collaborative domains** — shared domain access across multiple users (requires auth layer)
-- **Plugin system** — third-party integrations beyond Gmail/GTasks
+- **Full MCP client** — SSE transport, OAuth flows, connection health monitoring for plugin connectors
 - **Mobile companion** — lightweight read-only view of domain state
-- **Vector search** — semantic KB search for large knowledge bases
 - **Webhook intake** — programmatic ingestion beyond the Chrome extension
+- **Three-way merge** — intelligent merge for customized skill/command updates (beyond current keep/overwrite)
 
 ---
 

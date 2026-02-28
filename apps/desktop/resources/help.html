@@ -122,7 +122,7 @@
 <body>
 
 <h1>DomainOS User Guide</h1>
-<p class="subtitle">Version 0.1.4 &mdash; Your domain-scoped AI workspace</p>
+<p class="subtitle">Version 0.1.15 &mdash; Your domain-scoped AI workspace</p>
 
 <nav class="toc">
 <ul>
@@ -188,8 +188,15 @@
       <li><a href="#mission-history">Run History</a></li>
     </ul>
   </li>
-  <li><a href="#intake">10. Intake Pipeline</a></li>
-  <li><a href="#settings">11. Settings</a>
+  <li><a href="#plugins">10. Plugin System</a>
+    <ul>
+      <li><a href="#installing-plugins">Installing Plugins</a></li>
+      <li><a href="#plugin-management">Managing Plugins</a></li>
+      <li><a href="#plugin-marketplace">Marketplace</a></li>
+    </ul>
+  </li>
+  <li><a href="#intake">11. Intake Pipeline</a></li>
+  <li><a href="#settings">12. Settings</a>
     <ul>
       <li><a href="#api-keys">API Keys</a></li>
       <li><a href="#model-defaults">Model Defaults</a></li>
@@ -197,11 +204,11 @@
       <li><a href="#google-oauth">Google OAuth</a></li>
     </ul>
   </li>
-  <li><a href="#vector-search-setup">12. Setting Up Vector Search</a></li>
-  <li><a href="#chrome-extension">13. Chrome Extension</a></li>
-  <li><a href="#auto-updates">14. Auto-Updates</a></li>
-  <li><a href="#keyboard-shortcuts">15. Keyboard Shortcuts</a></li>
-  <li><a href="#troubleshooting">16. Troubleshooting</a></li>
+  <li><a href="#vector-search-setup">13. Setting Up Vector Search</a></li>
+  <li><a href="#chrome-extension">14. Chrome Extension</a></li>
+  <li><a href="#auto-updates">15. Auto-Updates</a></li>
+  <li><a href="#keyboard-shortcuts">16. Keyboard Shortcuts</a></li>
+  <li><a href="#troubleshooting">17. Troubleshooting</a></li>
 </ul>
 </nav>
 
@@ -224,8 +231,11 @@
   <li><strong>Strategic brainstorming</strong> &mdash; AI-facilitated brainstorming with 106 techniques</li>
   <li><strong>File &amp; email attachments</strong> &mdash; drag files or Gmail emails directly into chat</li>
   <li><strong>KB update proposals</strong> &mdash; AI suggests edits to your knowledge base; you approve/reject</li>
+  <li><strong>Plugin system</strong> &mdash; install Anthropic plugins (18 plugins across knowledge-work and financial-services) with skills and commands</li>
   <li><strong>Gmail &amp; Google Tasks integration</strong> &mdash; read-only email access + task management via AI tools</li>
   <li><strong>Browser ingestion</strong> &mdash; send web content from Chrome to DomainOS for AI classification</li>
+  <li><strong>Collapsible UI panels</strong> &mdash; collapse header, sidebar, and KB panel independently or all at once</li>
+  <li><strong>Smart context window</strong> &mdash; token-aware history slicing with conversation summaries for long conversations</li>
 </ul>
 
 <!-- ─── 2. GETTING STARTED ──────────────────────────────────── -->
@@ -264,17 +274,20 @@
 
 <h3 id="sidebar">Sidebar</h3>
 
-<p>The left sidebar has four main navigation views, accessible via icons at the top:</p>
+<p>The left sidebar has five main navigation views, accessible via icons at the top:</p>
 
 <table>
   <tr><th>Icon</th><th>View</th><th>Purpose</th></tr>
   <tr><td>Layers</td><td>Domains</td><td>Your domain list &mdash; click a domain to open its chat</td></tr>
   <tr><td>Shield</td><td>Briefing</td><td>Portfolio health dashboard and cross-domain analysis</td></tr>
   <tr><td>Target</td><td>Missions</td><td>Mission Control &mdash; run structured analytical workflows</td></tr>
+  <tr><td>Puzzle</td><td>Plugins</td><td>Plugin library &mdash; install and manage Anthropic plugins</td></tr>
   <tr><td>Inbox</td><td>Intake</td><td>Pending web content for AI classification (badge shows count)</td></tr>
 </table>
 
-<p>The sidebar can be <strong>collapsed</strong> to a narrow rail showing only icons and domain initials. Click the collapse button or drag the sidebar edge.</p>
+<p>The sidebar can be <strong>collapsed</strong> to a narrow rail showing only icons and domain initials. Click the collapse chevron at the top of the sidebar.</p>
+
+<p>DomainOS has three collapsible panels &mdash; the header bar, left sidebar, and right KB sidebar. Each collapses independently and remembers its state. A <strong>toggle-all button</strong> in the window titlebar collapses or expands all three at once.</p>
 
 <p>At the bottom of the sidebar: a <strong>theme toggle</strong> (light/dark mode).</p>
 
@@ -557,9 +570,53 @@
 
 <p>Past runs are listed at the bottom of the Mission Control page with status, timestamp, and duration. Click any run to view its full output and provenance (definition hash, model, KB digests).</p>
 
-<!-- ─── 10. INTAKE PIPELINE ─────────────────────────────────── -->
+<!-- ─── 10. PLUGIN SYSTEM ──────────────────────────────────── -->
 
-<h2 id="intake">10. Intake Pipeline</h2>
+<h2 id="plugins">10. Plugin System</h2>
+
+<p>Access via the <strong>Plugins</strong> icon in the sidebar. DomainOS supports plugins from Anthropic's official repositories, providing pre-built skills and commands for various professional domains.</p>
+
+<h3 id="installing-plugins">Installing Plugins</h3>
+
+<p>Two ways to install plugins:</p>
+<ul>
+  <li><strong>From folder</strong> &mdash; click "Install from Folder" and select a local plugin directory containing a <code>plugin.json</code> manifest</li>
+  <li><strong>From marketplace</strong> (coming soon) &mdash; browse and install directly from the Marketplace tab</li>
+</ul>
+
+<p>The installer performs safety checks (path traversal, symlinks, file size limits) and installs atomically &mdash; either everything succeeds or nothing changes.</p>
+
+<h3 id="plugin-management">Managing Plugins</h3>
+
+<p>The <strong>Installed</strong> tab shows all installed plugins. Click any plugin card to open the detail panel showing:</p>
+<ul>
+  <li>Version, author, and trust badge (Anthropic Official / Community / Local)</li>
+  <li>Skills provided by the plugin (with enable/disable status)</li>
+  <li>Commands provided by the plugin (with canonical slug)</li>
+  <li>License and notice information</li>
+  <li>Install path and source provenance</li>
+</ul>
+
+<p>Plugin skills automatically appear in the <strong>Skill Selector</strong> on the chat page. Select a plugin skill before sending a message, just like any other skill.</p>
+
+<p>Use the <strong>Enable/Disable</strong> toggle to globally enable or disable a plugin. The <strong>Uninstall</strong> button removes the plugin and all its skills and commands (with confirmation).</p>
+
+<h3 id="plugin-marketplace">Marketplace</h3>
+
+<p>The <strong>Marketplace</strong> tab shows available plugins from Anthropic's plugin repositories:</p>
+<ul>
+  <li><strong>knowledge-work-plugins</strong> &mdash; 11 general-purpose plugins (sales, legal, finance, data, product management, marketing, productivity, customer support, engineering, bio-research, enterprise search)</li>
+  <li><strong>financial-services-plugins</strong> &mdash; 7 financial plugins (financial-analysis core, investment banking, equity research, private equity, wealth management, LSEG, S&amp;P Global)</li>
+</ul>
+
+<div class="callout info">
+  <strong>Dependencies</strong>
+  Some financial-services plugins require the <code>financial-analysis</code> core plugin. DomainOS enforces this &mdash; you can install add-on plugins, but enabling them for a domain requires the core plugin to be installed and enabled first.
+</div>
+
+<!-- ─── 11. INTAKE PIPELINE ─────────────────────────────────── -->
+
+<h2 id="intake">11. Intake Pipeline</h2>
 
 <p>Access via the <strong>Intake</strong> icon in the sidebar (badge shows pending item count).</p>
 
@@ -572,9 +629,9 @@
   <li><strong>Dismissed</strong> &mdash; content discarded.</li>
 </ol>
 
-<!-- ─── 11. SETTINGS ────────────────────────────────────────── -->
+<!-- ─── 12. SETTINGS ────────────────────────────────────────── -->
 
-<h2 id="settings">11. Settings</h2>
+<h2 id="settings">12. Settings</h2>
 
 <p>Open Settings from the <strong>gear icon</strong> in the top-right corner of any page.</p>
 
@@ -640,9 +697,9 @@
   <li>Required scopes: <code>gmail.readonly</code>, <code>gmail.compose</code>, <code>tasks</code></li>
 </ol>
 
-<!-- ─── 12. VECTOR SEARCH SETUP ─────────────────────────────── -->
+<!-- ─── 13. VECTOR SEARCH SETUP ─────────────────────────────── -->
 
-<h2 id="vector-search-setup">12. Setting Up Vector Search</h2>
+<h2 id="vector-search-setup">13. Setting Up Vector Search</h2>
 
 <p>Vector search enables semantic retrieval from your knowledge bases. Follow these steps based on your setup:</p>
 
@@ -683,9 +740,9 @@
 
 <p>If you don't install an embedding model, DomainOS falls back to its existing tier-based KB loading. Everything still works &mdash; vector search is an optional enhancement.</p>
 
-<!-- ─── 13. CHROME EXTENSION ────────────────────────────────── -->
+<!-- ─── 14. CHROME EXTENSION ────────────────────────────────── -->
 
-<h2 id="chrome-extension">13. Chrome Extension</h2>
+<h2 id="chrome-extension">14. Chrome Extension</h2>
 
 <p>The DomainOS Chrome extension enables two features:</p>
 
@@ -702,9 +759,9 @@
   <li>Click the extension icon &gt; Options &gt; paste the auth token</li>
 </ol>
 
-<!-- ─── 14. AUTO-UPDATES ────────────────────────────────────── -->
+<!-- ─── 15. AUTO-UPDATES ────────────────────────────────────── -->
 
-<h2 id="auto-updates">14. Auto-Updates</h2>
+<h2 id="auto-updates">15. Auto-Updates</h2>
 
 <p>DomainOS checks for updates automatically:</p>
 <ul>
@@ -714,9 +771,9 @@
 
 <p>When an update is available, you'll be prompted to download it. After download, you'll be prompted to restart.</p>
 
-<!-- ─── 15. KEYBOARD SHORTCUTS ──────────────────────────────── -->
+<!-- ─── 16. KEYBOARD SHORTCUTS ──────────────────────────────── -->
 
-<h2 id="keyboard-shortcuts">15. Keyboard Shortcuts</h2>
+<h2 id="keyboard-shortcuts">16. Keyboard Shortcuts</h2>
 
 <table>
   <tr><th>Shortcut</th><th>Action</th></tr>
@@ -727,9 +784,9 @@
   <tr><td><kbd>Esc</kbd></td><td>Close dialog/modal</td></tr>
 </table>
 
-<!-- ─── 16. TROUBLESHOOTING ─────────────────────────────────── -->
+<!-- ─── 17. TROUBLESHOOTING ─────────────────────────────────── -->
 
-<h2 id="troubleshooting">16. Troubleshooting</h2>
+<h2 id="troubleshooting">17. Troubleshooting</h2>
 
 <h3>"App is damaged" on first launch</h3>
 <p>Run in Terminal:</p>
@@ -764,6 +821,14 @@
   <li>Not all Ollama models support tools &mdash; try <code>llama3.2</code> or <code>mistral</code>.</li>
 </ul>
 
+<h3>Plugin skills don't appear in chat</h3>
+<ul>
+  <li>Verify the plugin is enabled (green toggle in Plugins &gt; Installed)</li>
+  <li>Check that the plugin has skills — open the plugin detail panel to see the skills list</li>
+  <li>Switch to a different domain and back to refresh the skill selector</li>
+  <li>Ensure the plugin was installed successfully (no error in the Plugins page)</li>
+</ul>
+
 <h3>KB files not syncing</h3>
 <ul>
   <li>Verify the KB path is correct in domain settings (Edit domain)</li>
@@ -777,7 +842,7 @@
 
 <hr>
 <p style="color: var(--text-secondary); font-size: 0.88em; text-align: center; margin-top: 40px;">
-  DomainOS v0.1.4 &bull; Built with Electron + React &bull; <a href="https://github.com/quiet-coder-io/DomainOS">GitHub</a>
+  DomainOS v0.1.15 &bull; Built with Electron + React &bull; <a href="https://github.com/quiet-coder-io/DomainOS">GitHub</a>
 </p>
 
 </body>

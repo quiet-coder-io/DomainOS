@@ -194,6 +194,31 @@ DomainOS gives each area of your professional life its own AI-powered operating 
 - **Skill library management** — full CRUD dialog with search, filter by enabled/disabled, toggle on/off, inline editing, and per-skill export
 - **Protocol precedence** — skills are treated as procedures within the domain's existing protocol constraints; domain and shared protocols always take priority
 
+### Plugin System
+
+- **Install Anthropic plugins** — supports both [knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins) (11 plugins: sales, legal, finance, data, product-mgmt, marketing, productivity, customer-support, engineering, bio-research, enterprise-search) and [financial-services-plugins](https://github.com/anthropics/financial-services-plugins) (7 plugins: financial-analysis core, investment-banking, equity-research, private-equity, wealth-management, LSEG, S&P Global)
+- **Atomic installer** — staging, extraction safety checks (path traversal, symlinks, file count/size limits, file type allowlist), manifest validation, SHA-256 hashes, single DB transaction with rollback on failure
+- **Plugin skills & commands** — plugin skills automatically appear in the skill selector for immediate use in chat; commands use dual slug namespacing (canonical for persistence, display for UX)
+- **Trust & provenance** — source allowlist, commit SHA tracking, per-file content hashes, manifest integrity checks; Anthropic Official / Community / Local trust badges in the UI
+- **Dependency enforcement** — source-aware hard dependencies (financial-services add-ons require the core `financial-analysis` plugin); enforced at domain-enable and command invocation time
+- **Three-way content model** — original/customized/updated content tracking with modification detection via hash comparison; update workflow preserves local edits with diff dialog
+- **Marketplace browser** — browse available plugins from Anthropic repos with ETag caching, rate-limit resilience, and offline fallback; installed/available tabs with search
+- **Plugin detail panel** — version, author, source, description, skills list, commands list, license/notice, install path, enable/uninstall controls
+- **Per-domain plugin association** — enable or disable plugins per domain with lazy row creation
+
+### Collapsible UI Panels
+
+- **Three-panel collapse** — header bar, left sidebar, and right KB sidebar can each be collapsed independently with localStorage persistence
+- **Toggle all panels** — a single button in the window titlebar collapses or expands all three panels simultaneously
+- **Collapsed sidebar rail** — shows only icons and domain initials when collapsed
+
+### Smart Prompt Context Window
+
+- **Token-aware history slicing** — configurable window (default 50 messages) with automatic trimming of oldest messages to stay within LLM context limits
+- **Conversation summaries** — heuristic summarization of trimmed messages stored in DB, injected as lowest-priority prompt section
+- **Recall intent detection** — phrases like "as we discussed" after a 30-minute gap expand the context window to 2.4x for better recall
+- **Response style setting** — configurable concise or detailed response mode (Settings), injected into the system prompt
+
 ## Architecture
 
 ```mermaid
@@ -205,7 +230,7 @@ graph TB
     subgraph Electron["Desktop App (Electron)"]
         subgraph Renderer["Renderer Process — React 19 + Tailwind CSS 4"]
             CHAT["Chat Panel"]
-            SIDEBAR["Sidebar Panels<br/><small>Gap Flags · Decisions · Strategic History · Audit Log</small>"]
+            SIDEBAR["Sidebar Panels<br/><small>Gap Flags · Decisions · Strategic History · Plugins · Audit Log</small>"]
             BRIEFING["Portfolio Briefing<br/><small>Health · Alerts · Analysis</small>"]
             INTAKE["Intake Panel"]
             SETTINGS["Domain Settings<br/><small>Protocols · Dependencies · KB</small>"]
@@ -223,6 +248,7 @@ graph TB
                 BRAINSTORM["Brainstorm<br/><small>Techniques · Synthesis</small>"]
                 SKILLS["Skills<br/><small>Library · Import/Export</small>"]
                 MISSIONS["Missions<br/><small>Runner · Gates · Actions</small>"]
+                PLUGINS["Plugins<br/><small>Installer · Marketplace · Commands</small>"]
                 VECTORSEARCH["Vector Search<br/><small>Embeddings · RAG</small>"]
                 BRIEFMOD["Briefing<br/><small>Health · Alerts</small>"]
                 AUTOMATIONS["Automations<br/><small>Cron · Events · Dedupe</small>"]
@@ -361,14 +387,16 @@ domain-os/
 │   │       ├── advisory/     # Advisory parser, artifact repository, task extractor, schemas
 │   │       ├── brainstorm/  # BMAD technique library, session repository, deterministic synthesizer
 │   │       ├── skills/       # Skill library: schemas, repository, import/export serialization
+│   │       ├── plugins/      # Plugin system: installer, marketplace, commands, dependencies
 │   │       ├── missions/     # Mission system: definitions, runner, gates, actions, output parsers
 │   │       ├── loan-review/  # Loan Document Review: CMBS prompt builder, output parser
 │   │       ├── automations/  # Automation schemas, cron parser, dedupe, templates, repository
 │   │       ├── briefing/     # Portfolio health computation, LLM analysis, output parsing
+│   │       ├── chat/         # Chat message repository, conversation summaries
 │   │       ├── sessions/     # Session lifecycle management
 │   │       ├── audit/        # Event audit trail
 │   │       ├── intake/       # Browser intake classification
-│   │       ├── storage/      # SQLite schema and migrations (v1–v22)
+│   │       ├── storage/      # SQLite schema and migrations (v1–v24)
 │   │       └── common/       # Result type, shared schemas
 │   └── integrations/         # External service integrations (Gmail, Google Tasks)
 ├── apps/

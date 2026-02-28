@@ -82,23 +82,31 @@ Squirrel.Mac (electron-updater's default macOS installer) requires code-signed a
 |------|---------|
 | `apps/desktop/electron-builder.yml` | Packaging config (targets, asar, publish, `appId`) |
 | `apps/desktop/scripts/package.mjs` | Workspace-aware packaging wrapper |
+| `apps/desktop/scripts/check-docs-version.mjs` | Pre-package gate: verifies help.html + ROADMAP versions match package.json |
 | `apps/desktop/src/main/updater.ts` | Auto-update: preflight, script generation, admin path, next-launch check |
 | `apps/desktop/build/entitlements.mac.plist` | macOS entitlements (scaffolded for Phase 2) |
 
 **Release workflow:**
 ```bash
-# 1. Bump version in apps/desktop/package.json
-# 2. Build both architectures
+# 1. Update documentation FIRST (prevents doc drift):
+#    - help.html: update version in header (<p class="subtitle">) and footer
+#    - README.md: add any new features to the Features section
+#    - ROADMAP.md: move completed items, update "Last updated" month
+#    - CLAUDE.md: document new modules/IPC channels/migrations
+# 2. Bump version in apps/desktop/package.json
+# 3. Run docs version gate (also runs automatically before packaging):
+npm run check-docs --workspace=@domain-os/desktop
+# 4. Build both architectures
 npm run package:mac:arm64
 mkdir -p apps/desktop/dist-arm64 && mv apps/desktop/dist/* apps/desktop/dist-arm64/
 npm run package:mac:x64
 mkdir -p apps/desktop/dist-x64 && mv apps/desktop/dist/* apps/desktop/dist-x64/
-# 3. Generate combined latest-mac.yml (electron-updater needs all architectures in one manifest)
+# 5. Generate combined latest-mac.yml (electron-updater needs all architectures in one manifest)
 #    Merge files[] arrays from dist-arm64/latest-mac.yml and dist-x64/latest-mac.yml
 #    Set top-level path/sha512 to arm64 zip; keep single releaseDate
 #    Save to /tmp/latest-mac.yml
-# 4. Create GitHub Release with all artifacts + combined manifest + blockmaps
-gh release create v0.2.0 \
+# 6. Create GitHub Release with all artifacts + combined manifest + blockmaps
+gh release create vX.Y.Z \
   apps/desktop/dist-arm64/DomainOS-*-arm64-mac.zip \
   apps/desktop/dist-arm64/DomainOS-*-arm64.dmg \
   apps/desktop/dist-arm64/*.blockmap \
@@ -106,8 +114,10 @@ gh release create v0.2.0 \
   apps/desktop/dist-x64/DomainOS-*.dmg \
   apps/desktop/dist-x64/*.blockmap \
   /tmp/latest-mac.yml \
-  --title "DomainOS v0.2.0"
+  --title "DomainOS vX.Y.Z"
 ```
+
+**Documentation version gate:** `scripts/check-docs-version.mjs` runs automatically before every `package:mac:*` build. It verifies help.html header+footer version matches `package.json`, and ROADMAP.md "Last updated" month is current. Packaging will fail if docs are stale.
 
 ## v0.1 Core Loop
 
