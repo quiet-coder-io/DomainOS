@@ -22,7 +22,12 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
       title: 'Update Ready',
       message: `DomainOS ${info.version} has been downloaded. Restart now to install?`,
       buttons: ['Restart', 'Later'],
-    }).then((r) => { if (r.response === 0) autoUpdater.quitAndInstall(false, true) })
+    }).then((r) => {
+      if (r.response === 0) {
+        // Defer to next tick — quitAndInstall blocks if called while dialog is still dismissing
+        setImmediate(() => autoUpdater.quitAndInstall(false, true))
+      }
+    })
   })
 
   autoUpdater.on('error', (err) => {
