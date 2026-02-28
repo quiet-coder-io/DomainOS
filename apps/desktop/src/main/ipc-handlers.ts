@@ -540,6 +540,13 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
   // Seed default shared protocols (STOP + Gap Detection) — idempotent
   seedDefaultProtocols(sharedProtocolRepo)
 
+  /** Emit skills:changed to renderer so UI caches can invalidate immediately. */
+  function emitSkillsChanged(): void {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('skills:changed')
+    }
+  }
+
   // ── Deadline snooze wake — unsnooze on startup + hourly ──
   {
     const wakeResult = deadlineRepo.unsnoozeDue()
@@ -999,15 +1006,15 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
         // Fetch domain tags for prompt injection
         const domainTags = tagRepo.getByDomain(payload.domainId)
 
-        // Fetch active skill (if selected for this message)
+        // Fetch active skill (if selected for this message) — checks plugin enabled state
         let activeSkill: {
           name: string; description: string; content: string
           outputFormat: 'freeform' | 'structured'; outputSchema?: string | null; toolHints: string[]
         } | undefined
         if (payload.activeSkillId) {
-          const skillResult = skillRepo.getById(payload.activeSkillId)
-          if (skillResult.ok && skillResult.value.isEnabled) {
-            const s = skillResult.value
+          const skillResult = skillRepo.getEffectiveEnabled(payload.activeSkillId, payload.domainId)
+          if (skillResult.ok && skillResult.value.effectiveEnabled) {
+            const s = skillResult.value.skill
             activeSkill = {
               name: s.name,
               description: s.description,
@@ -3044,6 +3051,11 @@ Rules:
     return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
   })
 
+  ipcMain.handle('skill:list-enabled-for-domain', async (_e: IpcMainInvokeEvent, domainId: string) => {
+    const result = skillRepo.listEnabledForDomain(domainId)
+    return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
+  })
+
   ipcMain.handle('skill:get', async (_e: IpcMainInvokeEvent, id: string) => {
     const result = skillRepo.getById(id)
     return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
@@ -3051,21 +3063,25 @@ Rules:
 
   ipcMain.handle('skill:create', async (_e: IpcMainInvokeEvent, input: CreateSkillInput) => {
     const result = skillRepo.create(input)
+    if (result.ok) emitSkillsChanged()
     return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
   })
 
   ipcMain.handle('skill:update', async (_e: IpcMainInvokeEvent, id: string, input: UpdateSkillInput) => {
     const result = skillRepo.update(id, input)
+    if (result.ok) emitSkillsChanged()
     return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
   })
 
   ipcMain.handle('skill:delete', async (_e: IpcMainInvokeEvent, id: string) => {
     const result = skillRepo.delete(id)
+    if (result.ok) emitSkillsChanged()
     return result.ok ? { ok: true } : { ok: false, error: result.error.message }
   })
 
   ipcMain.handle('skill:toggle', async (_e: IpcMainInvokeEvent, id: string) => {
     const result = skillRepo.toggleEnabled(id)
+    if (result.ok) emitSkillsChanged()
     return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
   })
 
@@ -3094,6 +3110,7 @@ Rules:
       const content = await readFile(dialogResult.filePaths[0], 'utf-8')
       const input = markdownToSkillInput(content)
       const result = skillRepo.create(input)
+      if (result.ok) emitSkillsChanged()
       return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
     } catch (e) {
       return { ok: false, error: (e as Error).message }
@@ -3724,6 +3741,7 @@ Rules:
     })
     if (result.ok) {
       console.log('[plugin:install] Success:', result.value.plugin.name, '— skills:', result.value.skillsImported, 'commands:', result.value.commandsImported)
+      emitSkillsChanged()
       return { ok: true, value: result.value }
     } else {
       console.error('[plugin:install] Failed:', result.error.message)
@@ -3741,11 +3759,13 @@ Rules:
 
     // Remove from disk
     try { await rm(plugin.value.installPath, { recursive: true, force: true }) } catch { /* ok */ }
+    emitSkillsChanged()
     return { ok: true }
   })
 
   ipcMain.handle('plugin:toggle', (_event, id: string) => {
     const result = pluginRepo.toggle(id)
+    if (result.ok) emitSkillsChanged()
     return result.ok
       ? { ok: true, value: result.value }
       : { ok: false, error: result.error.message }
@@ -3768,6 +3788,7 @@ Rules:
     }
 
     const result = pluginRepo.enableForDomain(pluginId, domainId)
+    if (result.ok) emitSkillsChanged()
     return result.ok
       ? { ok: true, value: result.value }
       : { ok: false, error: result.error.message }
@@ -3775,6 +3796,7 @@ Rules:
 
   ipcMain.handle('plugin:disable-for-domain', (_event, pluginId: string, domainId: string) => {
     const result = pluginRepo.disableForDomain(pluginId, domainId)
+    if (result.ok) emitSkillsChanged()
     return result.ok
       ? { ok: true, value: result.value }
       : { ok: false, error: result.error.message }

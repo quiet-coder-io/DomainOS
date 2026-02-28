@@ -143,6 +143,7 @@ export const SkillSchema = z.object({
   toolHints: z.array(z.string()),
   isEnabled: z.boolean(),
   sortOrder: z.number(),
+  pluginId: z.string().nullable().default(null),
   createdAt: TimestampSchema,
   updatedAt: TimestampSchema,
 })

@@ -13,6 +13,7 @@ function makeSkill(overrides: Partial<Skill> = {}): Skill {
     toolHints: [],
     isEnabled: true,
     sortOrder: 0,
+    pluginId: null,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     ...overrides,

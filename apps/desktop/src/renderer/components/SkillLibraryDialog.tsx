@@ -14,7 +14,7 @@ type Filter = 'all' | 'enabled' | 'disabled'
 export function SkillLibraryDialog({ onClose }: Props) {
   const allSkills = useSkillStore((s) => s.allSkills)
   const loading = useSkillStore((s) => s.loading)
-  const { fetchAllSkills, createSkill, updateSkill, deleteSkill, toggleSkill, fetchSkills } = useSkillStore.getState()
+  const { fetchAllSkills, createSkill, updateSkill, deleteSkill, toggleSkill } = useSkillStore.getState()
 
   const [view, setView] = useState<View>('list')
   const [editingSkill, setEditingSkill] = useState<Skill | null>(null)
@@ -92,7 +92,7 @@ export function SkillLibraryDialog({ onClose }: Props) {
   }
 
   function handleClose() {
-    if (hasEdits) fetchSkills(true)
+    // skills:changed event (emitted by IPC handlers) auto-refreshes SkillSelector
     onClose()
   }
 

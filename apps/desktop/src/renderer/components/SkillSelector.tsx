@@ -1,19 +1,28 @@
 import { useEffect } from 'react'
 import { useSkillStore } from '../stores'
+import type { Skill } from '../../preload/api'
+
+const EMPTY_SKILLS: Skill[] = []
 
 interface Props {
   domainId: string
 }
 
 export function SkillSelector({ domainId }: Props) {
-  const skills = useSkillStore((s) => s.skills)
+  const skills = useSkillStore((s) => s.skillsByDomain[domainId] ?? EMPTY_SKILLS)
   const fetchSkills = useSkillStore((s) => s.fetchSkills)
   const activeSkillId = useSkillStore((s) => s.activeSkillIdByDomain[domainId] ?? null)
   const setActiveSkill = useSkillStore((s) => s.setActiveSkill)
 
   useEffect(() => {
-    fetchSkills(false)
-  }, [fetchSkills])
+    fetchSkills(domainId, false)
+  }, [domainId, fetchSkills])
+
+  // Listen for skills:changed events (plugin toggle, install, uninstall, etc.)
+  useEffect(() => {
+    const off = window.domainOS.skill.onChanged(() => fetchSkills(domainId, true))
+    return off
+  }, [domainId, fetchSkills])
 
   if (skills.length === 0) return null
 

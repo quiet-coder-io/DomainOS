@@ -28,8 +28,22 @@ interface SkillRow {
   tool_hints: string
   is_enabled: number
   sort_order: number
+  plugin_id: string | null
   created_at: string
   updated_at: string
+}
+
+export type EffectiveSkillReason =
+  | 'OK'
+  | 'SKILL_DISABLED'
+  | 'PLUGIN_MISSING'
+  | 'PLUGIN_DISABLED_GLOBAL'
+  | 'PLUGIN_DISABLED_DOMAIN'
+
+export interface EffectiveSkillResult {
+  skill: Skill
+  effectiveEnabled: boolean
+  reason: EffectiveSkillReason
 }
 
 function rowToSkill(row: SkillRow): Skill {
@@ -50,6 +64,7 @@ function rowToSkill(row: SkillRow): Skill {
     toolHints,
     isEnabled: row.is_enabled === 1,
     sortOrder: row.sort_order,
+    pluginId: row.plugin_id ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -114,6 +129,7 @@ export class SkillRepository {
         toolHints,
         isEnabled: parsed.data.isEnabled,
         sortOrder: parsed.data.sortOrder,
+        pluginId: null,
         createdAt: now,
         updatedAt: now,
       })
@@ -136,8 +152,36 @@ export class SkillRepository {
   listEnabled(): Result<Skill[], DomainOSError> {
     try {
       const rows = this.db
-        .prepare('SELECT * FROM skills WHERE is_enabled = 1 ORDER BY sort_order ASC, name ASC')
+        .prepare(
+          `SELECT s.* FROM skills s
+           LEFT JOIN plugins p ON s.plugin_id = p.id
+           WHERE s.is_enabled = 1
+             AND (s.plugin_id IS NULL OR (p.id IS NOT NULL AND p.is_enabled = 1))
+           ORDER BY s.sort_order ASC, s.name ASC`,
+        )
         .all() as SkillRow[]
+      return Ok(rows.map(rowToSkill))
+    } catch (e) {
+      return Err(DomainOSError.db((e as Error).message))
+    }
+  }
+
+  listEnabledForDomain(domainId: string): Result<Skill[], DomainOSError> {
+    try {
+      const rows = this.db
+        .prepare(
+          `SELECT s.* FROM skills s
+           LEFT JOIN plugins p ON s.plugin_id = p.id
+           LEFT JOIN plugin_domain_assoc pda
+             ON pda.plugin_id = s.plugin_id AND pda.domain_id = ?
+           WHERE s.is_enabled = 1
+             AND (
+               s.plugin_id IS NULL
+               OR (p.id IS NOT NULL AND p.is_enabled = 1 AND COALESCE(pda.is_enabled, 1) = 1)
+             )
+           ORDER BY s.sort_order ASC, s.name ASC`,
+        )
+        .all(domainId) as SkillRow[]
       return Ok(rows.map(rowToSkill))
     } catch (e) {
       return Err(DomainOSError.db((e as Error).message))
@@ -254,6 +298,41 @@ export class SkillRepository {
       return Err(DomainOSError.db((e as Error).message))
     }
   }
+
+  getEffectiveEnabled(skillId: string, domainId: string): Result<EffectiveSkillResult, DomainOSError> {
+    try {
+      const row = this.db
+        .prepare(
+          `SELECT s.*,
+             CASE
+               WHEN s.is_enabled != 1 THEN 'SKILL_DISABLED'
+               WHEN s.plugin_id IS NULL THEN 'OK'
+               WHEN p.id IS NULL THEN 'PLUGIN_MISSING'
+               WHEN p.is_enabled != 1 THEN 'PLUGIN_DISABLED_GLOBAL'
+               WHEN COALESCE(pda.is_enabled, 1) != 1 THEN 'PLUGIN_DISABLED_DOMAIN'
+               ELSE 'OK'
+             END AS effective_reason
+           FROM skills s
+           LEFT JOIN plugins p ON p.id = s.plugin_id
+           LEFT JOIN plugin_domain_assoc pda
+             ON pda.plugin_id = s.plugin_id AND pda.domain_id = ?
+           WHERE s.id = ?
+           LIMIT 1`,
+        )
+        .get(domainId, skillId) as (SkillRow & { effective_reason: EffectiveSkillReason }) | undefined
+
+      if (!row) return Err(DomainOSError.notFound('Skill', skillId))
+
+      const reason = row.effective_reason
+      return Ok({
+        skill: rowToSkill(row),
+        effectiveEnabled: reason === 'OK',
+        reason,
+      })
+    } catch (e) {
+      return Err(DomainOSError.db((e as Error).message))
+    }
+  }
 }
 
 /** Apply a partial patch to an existing skill, respecting undefined/null/value semantics. */
@@ -275,6 +354,7 @@ function applyPatch(
     toolHints: patch.toolHints ?? existing.toolHints,
     isEnabled: patch.isEnabled ?? existing.isEnabled,
     sortOrder: patch.sortOrder ?? existing.sortOrder,
+    pluginId: existing.pluginId,
     createdAt: existing.createdAt,
     updatedAt: existing.updatedAt,
   }

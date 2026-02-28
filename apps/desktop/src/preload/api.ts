@@ -249,6 +249,7 @@ export interface DomainOSAPI {
   skill: {
     list(): Promise<IPCResult<Skill[]>>
     listEnabled(): Promise<IPCResult<Skill[]>>
+    listEnabledForDomain(domainId: string): Promise<IPCResult<Skill[]>>
     get(id: string): Promise<IPCResult<Skill>>
     create(input: {
       name: string; description?: string; content: string; outputFormat?: string
@@ -262,6 +263,7 @@ export interface DomainOSAPI {
     toggle(id: string): Promise<IPCResult<Skill>>
     export(id: string): Promise<IPCResult<{ path: string }>>
     import(): Promise<IPCResult<Skill>>
+    onChanged(callback: () => void): () => void
   }
 
   file: {
@@ -863,6 +865,7 @@ export interface Skill {
   toolHints: string[]
   isEnabled: boolean
   sortOrder: number
+  pluginId: string | null
   createdAt: string
   updatedAt: string
 }

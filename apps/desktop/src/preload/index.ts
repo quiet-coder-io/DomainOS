@@ -249,6 +249,7 @@ const api: DomainOSAPI = {
   skill: {
     list: () => ipcRenderer.invoke('skill:list'),
     listEnabled: () => ipcRenderer.invoke('skill:list-enabled'),
+    listEnabledForDomain: (domainId: string) => ipcRenderer.invoke('skill:list-enabled-for-domain', domainId),
     get: (id: string) => ipcRenderer.invoke('skill:get', id),
     create: (input) => ipcRenderer.invoke('skill:create', input),
     update: (id: string, input) => ipcRenderer.invoke('skill:update', id, input),
@@ -256,6 +257,11 @@ const api: DomainOSAPI = {
     toggle: (id: string) => ipcRenderer.invoke('skill:toggle', id),
     export: (id: string) => ipcRenderer.invoke('skill:export', id),
     import: () => ipcRenderer.invoke('skill:import'),
+    onChanged(callback: () => void) {
+      const handler = () => callback()
+      ipcRenderer.on('skills:changed', handler)
+      return () => { ipcRenderer.removeListener('skills:changed', handler) }
+    },
   },
 
   file: {

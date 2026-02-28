@@ -1,14 +1,16 @@
 import { create } from 'zustand'
 import type { Skill } from '../../preload/api'
 
-interface SkillState {
-  skills: Skill[]                                         // enabled skills for selector
-  allSkills: Skill[]                                      // all skills for library management
-  loading: boolean
-  skillsLoadedAt: number | null                           // timestamp for cache staleness
-  activeSkillIdByDomain: Record<string, string | null>    // domain-scoped activation
+const EMPTY_SKILLS: Skill[] = []
 
-  fetchSkills(force?: boolean): Promise<void>
+interface SkillState {
+  skillsByDomain: Record<string, Skill[]>              // per-domain enabled skills for selector
+  skillsLoadedAtByDomain: Record<string, number>       // per-domain cache timestamps
+  allSkills: Skill[]                                    // all skills for library management
+  loading: boolean
+  activeSkillIdByDomain: Record<string, string | null>  // domain-scoped activation
+
+  fetchSkills(domainId: string, force?: boolean): Promise<void>
   fetchAllSkills(): Promise<void>
   createSkill(input: Parameters<typeof window.domainOS.skill.create>[0]): Promise<Skill | null>
   updateSkill(id: string, input: Parameters<typeof window.domainOS.skill.update>[1]): Promise<boolean>
@@ -17,42 +19,43 @@ interface SkillState {
   setActiveSkill(domainId: string, skillId: string | null): void
   getActiveSkillId(domainId: string): string | null
   clearActiveSkill(domainId: string): void
+  getSkillsForDomain(domainId: string): Skill[]
 }
 
 const CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
 
 export const useSkillStore = create<SkillState>((set, get) => ({
-  skills: [],
+  skillsByDomain: {},
+  skillsLoadedAtByDomain: {},
   allSkills: [],
   loading: false,
-  skillsLoadedAt: null,
   activeSkillIdByDomain: {},
 
-  async fetchSkills(force = false) {
+  async fetchSkills(domainId: string, force = false) {
     const state = get()
+    const loadedAt = state.skillsLoadedAtByDomain[domainId]
     // Skip if loaded recently (unless forced)
-    if (!force && state.skillsLoadedAt && Date.now() - state.skillsLoadedAt < CACHE_TTL_MS) {
+    if (!force && loadedAt && Date.now() - loadedAt < CACHE_TTL_MS) {
       return
     }
 
     set({ loading: true })
-    const result = await window.domainOS.skill.listEnabled()
+    const result = await window.domainOS.skill.listEnabledForDomain(domainId)
     if (result.ok && result.value) {
       const enabledSkills = result.value
       const enabledIds = new Set(enabledSkills.map((s) => s.id))
 
-      // Auto-clear stale selections: if activeSkillId not in enabled list, clear it
-      const newActiveMap = { ...state.activeSkillIdByDomain }
-      for (const [domainId, skillId] of Object.entries(newActiveMap)) {
-        if (skillId && !enabledIds.has(skillId)) {
-          newActiveMap[domainId] = null
-        }
+      // Auto-clear stale selection: if activeSkillId not in enabled list, clear it
+      const currentActive = get().activeSkillIdByDomain[domainId]
+      const newActiveMap = { ...get().activeSkillIdByDomain }
+      if (currentActive && !enabledIds.has(currentActive)) {
+        newActiveMap[domainId] = null
       }
 
       set({
-        skills: enabledSkills,
+        skillsByDomain: { ...get().skillsByDomain, [domainId]: enabledSkills },
+        skillsLoadedAtByDomain: { ...get().skillsLoadedAtByDomain, [domainId]: Date.now() },
         loading: false,
-        skillsLoadedAt: Date.now(),
         activeSkillIdByDomain: newActiveMap,
       })
     } else {
@@ -93,10 +96,15 @@ export const useSkillStore = create<SkillState>((set, get) => ({
   async deleteSkill(id) {
     const result = await window.domainOS.skill.delete(id)
     if (result.ok) {
-      set({
-        allSkills: get().allSkills.filter((s) => s.id !== id),
-        skills: get().skills.filter((s) => s.id !== id),
-      })
+      const state = get()
+      // Remove from allSkills
+      const allSkills = state.allSkills.filter((s) => s.id !== id)
+      // Remove from all per-domain caches
+      const skillsByDomain: Record<string, Skill[]> = {}
+      for (const [did, skills] of Object.entries(state.skillsByDomain)) {
+        skillsByDomain[did] = skills.filter((s) => s.id !== id)
+      }
+      set({ allSkills, skillsByDomain })
       return true
     }
     return false
@@ -128,4 +136,16 @@ export const useSkillStore = create<SkillState>((set, get) => ({
       activeSkillIdByDomain: { ...s.activeSkillIdByDomain, [domainId]: null },
     }))
   },
+
+  getSkillsForDomain(domainId) {
+    return get().skillsByDomain[domainId] ?? EMPTY_SKILLS
+  },
 }))
+
+// Store-level listener: invalidate all per-domain caches when skills change.
+// This runs once at module load, survives component unmount/remount cycles.
+// When SkillSelector mounts and calls fetchSkills(domainId, false), it will
+// see the expired cache and refetch from the main process.
+window.domainOS.skill.onChanged(() => {
+  useSkillStore.setState({ skillsLoadedAtByDomain: {} })
+})
