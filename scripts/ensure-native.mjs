@@ -4,6 +4,7 @@
 
 import { createRequire } from 'node:module'
 import { execFileSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 
@@ -72,14 +73,33 @@ if (target === 'node') {
     process.exit(1)
   }
 } else if (target === 'electron') {
-  // If binary loads in system Node → it's compiled for system Node → wrong for Electron
-  if (loadedInSystemNode) {
-    const electronVersion = getElectronVersion()
-    if (!electronVersion) {
-      console.error('[ensure-native] Cannot find Electron version — is electron installed?')
-      process.exit(1)
+  const electronVersion = getElectronVersion()
+  if (!electronVersion) {
+    console.error('[ensure-native] Cannot find Electron version — is electron installed?')
+    process.exit(1)
+  }
+
+  // Check binary architecture matches process.arch (arm64/x64).
+  // Prevents false "OK for Electron" when binary is wrong arch but also fails in system Node.
+  const binaryPath = resolve(repoRoot, 'node_modules/better-sqlite3/build/Release/better_sqlite3.node')
+  let archOk = false
+  try {
+    if (existsSync(binaryPath)) {
+      const result = execFileSync('file', [binaryPath], { encoding: 'utf8' })
+      const expectedArch = process.arch === 'arm64' ? 'arm64' : 'x86_64'
+      archOk = result.includes(expectedArch)
+      if (!archOk) {
+        console.log(`[ensure-native] Architecture mismatch — binary is not ${expectedArch}, rebuilding for Electron ${electronVersion}...`)
+      }
     }
-    console.log(`[ensure-native] System Node ABI detected — rebuilding for Electron ${electronVersion}...`)
+  } catch { /* file command failed — proceed to other checks */ }
+
+  // If binary loads in system Node → it's compiled for system Node → wrong for Electron
+  // Also rebuild if architecture doesn't match
+  if (loadedInSystemNode || !archOk) {
+    if (loadedInSystemNode) {
+      console.log(`[ensure-native] System Node ABI detected — rebuilding for Electron ${electronVersion}...`)
+    }
     // Use node-gyp directly with Electron headers. electron-rebuild silently
     // produces system-Node binaries when system Node ABI > Electron's ABI.
     const sqliteDir = resolve(repoRoot, 'node_modules/better-sqlite3')
@@ -102,7 +122,7 @@ if (target === 'node') {
       process.exit(1)
     }
   } else if (isAbiMismatch(loadError)) {
-    // Fails with ABI error under system Node → likely already Electron ABI
+    // Fails with ABI error under system Node + arch matches → already Electron ABI
     console.log('[ensure-native] better-sqlite3 OK for Electron (ABI differs from system Node)')
   } else {
     console.error('[ensure-native] better-sqlite3 failed to load (not an ABI issue):', loadError?.message)
