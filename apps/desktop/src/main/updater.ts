@@ -26,22 +26,30 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
     }).then(async (r) => {
       if (r.response === 0) {
         // Clear quarantine on update cache — unsigned app updates get quarantined by macOS
-        const cachePath = `${app.getPath('home')}/Library/Caches/${app.name}-updater`
+        // Package name @domain-os/desktop → cache dir @domain-osdesktop-updater
+        const cachePath = `${app.getPath('home')}/Library/Caches/@domain-osdesktop-updater`
         try {
           await new Promise<void>((resolve) => {
             execFile('xattr', ['-cr', cachePath], () => resolve())
           })
         } catch { /* non-fatal */ }
 
-        // Destroy all windows first to bypass close-event handlers that can block quit
+        // Strip close-event handlers so nothing blocks app.quit()
+        // Do NOT destroy windows — destroying keeps the process alive on macOS
+        // and the detached installer waits for the PID to exit forever
         for (const win of BrowserWindow.getAllWindows()) {
           win.removeAllListeners('close')
-          win.destroy()
         }
-        // Defer to next tick so window destruction completes before quit
-        setImmediate(() => {
-          autoUpdater.quitAndInstall(false, true)
-        })
+
+        // quitAndInstall spawns a detached installer then calls app.quit()
+        autoUpdater.quitAndInstall(false, true)
+
+        // Hard fallback: if quit is blocked by anything, force-exit after 3s
+        // so the detached installer can replace the app bundle
+        setTimeout(() => {
+          console.error('[updater] Force-exiting — quit was blocked')
+          app.exit(0)
+        }, 3_000)
       }
     })
   })
