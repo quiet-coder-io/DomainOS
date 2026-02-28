@@ -5,7 +5,7 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
   if (!app.isPackaged) return
 
   autoUpdater.autoDownload = false
-  autoUpdater.autoInstallOnAppQuit = false
+  autoUpdater.autoInstallOnAppQuit = true
 
   autoUpdater.on('update-available', (info) => {
     dialog.showMessageBox(mainWindow, {
@@ -22,7 +22,7 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
       title: 'Update Ready',
       message: `DomainOS ${info.version} has been downloaded. Restart now to install?`,
       buttons: ['Restart', 'Later'],
-    }).then((r) => { if (r.response === 0) autoUpdater.quitAndInstall() })
+    }).then((r) => { if (r.response === 0) autoUpdater.quitAndInstall(false, true) })
   })
 
   autoUpdater.on('error', (err) => {
