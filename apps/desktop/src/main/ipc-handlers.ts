@@ -3046,6 +3046,11 @@ Rules:
     return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
   })
 
+  ipcMain.handle('skill:list-with-meta', async (_e: IpcMainInvokeEvent, domainId?: string) => {
+    const result = skillRepo.listWithMeta(domainId)
+    return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }
+  })
+
   ipcMain.handle('skill:list-enabled', async () => {
     const result = skillRepo.listEnabled()
     return result.ok ? { ok: true, value: result.value } : { ok: false, error: result.error.message }

@@ -3,7 +3,7 @@
  */
 
 export { SkillRepository } from './repository.js'
-export type { EffectiveSkillReason, EffectiveSkillResult } from './repository.js'
+export type { EffectiveSkillReason, EffectiveSkillResult, SkillListItem } from './repository.js'
 export {
   CreateSkillInputSchema,
   UpdateSkillInputSchema,

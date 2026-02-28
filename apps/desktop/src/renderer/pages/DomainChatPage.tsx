@@ -647,8 +647,8 @@ export function DomainChatPage(): React.JSX.Element {
       {showAutomations && activeDomainId && (
         <AutomationConfigDialog domainId={activeDomainId} onClose={() => setShowAutomations(false)} />
       )}
-      {showSkillLibrary && (
-        <SkillLibraryDialog onClose={() => setShowSkillLibrary(false)} />
+      {showSkillLibrary && activeDomainId && (
+        <SkillLibraryDialog domainId={activeDomainId} onClose={() => setShowSkillLibrary(false)} />
       )}
     </div>
   )

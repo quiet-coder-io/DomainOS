@@ -33,6 +33,31 @@ interface SkillRow {
   updated_at: string
 }
 
+/** View type for Skill Library — extends Skill with JOIN-derived plugin metadata. */
+export interface SkillListItem extends Skill {
+  pluginName: string | null
+  pluginIsEnabledGlobal: boolean | null
+  pluginIsEnabledForDomain: boolean | null
+  removedUpstreamAt: string | null
+}
+
+interface SkillMetaRow extends SkillRow {
+  plugin_name: string | null
+  plugin_is_enabled_global: number | null
+  plugin_is_enabled_for_domain: number | null
+  removed_upstream_at: string | null
+}
+
+function rowToSkillListItem(row: SkillMetaRow): SkillListItem {
+  return {
+    ...rowToSkill(row),
+    pluginName: row.plugin_name ?? null,
+    pluginIsEnabledGlobal: row.plugin_is_enabled_global != null ? row.plugin_is_enabled_global === 1 : null,
+    pluginIsEnabledForDomain: row.plugin_is_enabled_for_domain != null ? row.plugin_is_enabled_for_domain === 1 : null,
+    removedUpstreamAt: row.removed_upstream_at ?? null,
+  }
+}
+
 export type EffectiveSkillReason =
   | 'OK'
   | 'SKILL_DISABLED'
@@ -144,6 +169,27 @@ export class SkillRepository {
         .prepare('SELECT * FROM skills ORDER BY sort_order ASC, name ASC')
         .all() as SkillRow[]
       return Ok(rows.map(rowToSkill))
+    } catch (e) {
+      return Err(DomainOSError.db((e as Error).message))
+    }
+  }
+
+  /** List all skills with plugin metadata for the Skill Library UI. */
+  listWithMeta(domainId?: string): Result<SkillListItem[], DomainOSError> {
+    try {
+      const rows = this.db
+        .prepare(
+          `SELECT s.*,
+             p.name AS plugin_name,
+             p.is_enabled AS plugin_is_enabled_global,
+             ${domainId ? 'pda.is_enabled AS plugin_is_enabled_for_domain' : 'NULL AS plugin_is_enabled_for_domain'}
+           FROM skills s
+           LEFT JOIN plugins p ON s.plugin_id = p.id
+           ${domainId ? 'LEFT JOIN plugin_domain_assoc pda ON pda.plugin_id = s.plugin_id AND pda.domain_id = ?' : ''}
+           ORDER BY s.sort_order ASC, s.name ASC`,
+        )
+        .all(...(domainId ? [domainId] : [])) as SkillMetaRow[]
+      return Ok(rows.map(rowToSkillListItem))
     } catch (e) {
       return Err(DomainOSError.db((e as Error).message))
     }

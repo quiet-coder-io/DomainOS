@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Skill } from '../../preload/api'
+import type { Skill, SkillListItem } from '../../preload/api'
 
 const EMPTY_SKILLS: Skill[] = []
 
@@ -7,11 +7,13 @@ interface SkillState {
   skillsByDomain: Record<string, Skill[]>              // per-domain enabled skills for selector
   skillsLoadedAtByDomain: Record<string, number>       // per-domain cache timestamps
   allSkills: Skill[]                                    // all skills for library management
+  allSkillItems: SkillListItem[]                        // all skills with plugin metadata for library UI
   loading: boolean
   activeSkillIdByDomain: Record<string, string | null>  // domain-scoped activation
 
   fetchSkills(domainId: string, force?: boolean): Promise<void>
   fetchAllSkills(): Promise<void>
+  fetchAllSkillItems(domainId?: string): Promise<void>
   createSkill(input: Parameters<typeof window.domainOS.skill.create>[0]): Promise<Skill | null>
   updateSkill(id: string, input: Parameters<typeof window.domainOS.skill.update>[1]): Promise<boolean>
   deleteSkill(id: string): Promise<boolean>
@@ -28,6 +30,7 @@ export const useSkillStore = create<SkillState>((set, get) => ({
   skillsByDomain: {},
   skillsLoadedAtByDomain: {},
   allSkills: [],
+  allSkillItems: [],
   loading: false,
   activeSkillIdByDomain: {},
 
@@ -70,6 +73,22 @@ export const useSkillStore = create<SkillState>((set, get) => ({
     if (result.ok && result.value) {
       set({ allSkills: result.value, loading: false })
     } else {
+      set({ loading: false })
+    }
+  },
+
+  async fetchAllSkillItems(domainId?: string) {
+    set({ loading: true })
+    try {
+      const result = await window.domainOS.skill.listWithMeta(domainId)
+      if (result.ok && result.value) {
+        set({ allSkillItems: result.value, loading: false })
+      } else {
+        console.warn('[skill-store] fetchAllSkillItems failed:', result.error)
+        set({ loading: false })
+      }
+    } catch (e) {
+      console.error('[skill-store] fetchAllSkillItems error:', e)
       set({ loading: false })
     }
   },

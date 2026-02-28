@@ -248,6 +248,7 @@ const api: DomainOSAPI = {
 
   skill: {
     list: () => ipcRenderer.invoke('skill:list'),
+    listWithMeta: (domainId?: string) => ipcRenderer.invoke('skill:list-with-meta', domainId),
     listEnabled: () => ipcRenderer.invoke('skill:list-enabled'),
     listEnabledForDomain: (domainId: string) => ipcRenderer.invoke('skill:list-enabled-for-domain', domainId),
     get: (id: string) => ipcRenderer.invoke('skill:get', id),

@@ -3,6 +3,7 @@ import type { Skill, SkillOutputFormat } from '../../preload/api'
 
 interface Props {
   skill?: Skill | null
+  readOnly?: boolean
   onSave(input: {
     name: string; description: string; content: string; outputFormat: SkillOutputFormat
     outputSchema: string | null; toolHints: string[]
@@ -10,7 +11,7 @@ interface Props {
   onCancel(): void
 }
 
-export function SkillEditor({ skill, onSave, onCancel }: Props) {
+export function SkillEditor({ skill, readOnly, onSave, onCancel }: Props) {
   const [name, setName] = useState(skill?.name ?? '')
   const [description, setDescription] = useState(skill?.description ?? '')
   const [content, setContent] = useState(skill?.content ?? '')
@@ -59,7 +60,8 @@ export function SkillEditor({ skill, onSave, onCancel }: Props) {
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="w-full rounded border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-text-primary placeholder-text-tertiary focus:border-accent focus:outline-none"
+          disabled={readOnly}
+          className="w-full rounded border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-text-primary placeholder-text-tertiary focus:border-accent focus:outline-none disabled:opacity-60"
           placeholder="e.g., CMBS Loan Review"
         />
       </div>
@@ -70,7 +72,8 @@ export function SkillEditor({ skill, onSave, onCancel }: Props) {
           type="text"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          className="w-full rounded border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-text-primary placeholder-text-tertiary focus:border-accent focus:outline-none"
+          disabled={readOnly}
+          className="w-full rounded border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-text-primary placeholder-text-tertiary focus:border-accent focus:outline-none disabled:opacity-60"
           placeholder="Short purpose description"
         />
       </div>
@@ -82,7 +85,8 @@ export function SkillEditor({ skill, onSave, onCancel }: Props) {
         <textarea
           value={content}
           onChange={(e) => setContent(e.target.value)}
-          className="w-full min-h-[200px] resize-y rounded border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-text-primary placeholder-text-tertiary focus:border-accent focus:outline-none font-mono"
+          disabled={readOnly}
+          className="w-full min-h-[200px] resize-y rounded border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-text-primary placeholder-text-tertiary focus:border-accent focus:outline-none font-mono disabled:opacity-60"
           placeholder="Step-by-step procedure or instructions (markdown supported)..."
         />
       </div>
@@ -95,6 +99,7 @@ export function SkillEditor({ skill, onSave, onCancel }: Props) {
               type="radio"
               checked={outputFormat === 'freeform'}
               onChange={() => setOutputFormat('freeform')}
+              disabled={readOnly}
               className="accent-accent"
             />
             Freeform
@@ -104,6 +109,7 @@ export function SkillEditor({ skill, onSave, onCancel }: Props) {
               type="radio"
               checked={outputFormat === 'structured'}
               onChange={() => setOutputFormat('structured')}
+              disabled={readOnly}
               className="accent-accent"
             />
             Structured (JSON)
@@ -120,7 +126,8 @@ export function SkillEditor({ skill, onSave, onCancel }: Props) {
             value={outputSchema}
             onChange={(e) => setOutputSchema(e.target.value)}
             onBlur={() => validateSchema(outputSchema)}
-            className={`w-full min-h-[80px] resize-y rounded border bg-surface-2 px-2.5 py-1.5 text-sm text-text-primary placeholder-text-tertiary focus:outline-none font-mono ${
+            disabled={readOnly}
+            className={`w-full min-h-[80px] resize-y rounded border bg-surface-2 px-2.5 py-1.5 text-sm text-text-primary placeholder-text-tertiary focus:outline-none font-mono disabled:opacity-60 ${
               schemaError ? 'border-danger focus:border-danger' : 'border-border focus:border-accent'
             }`}
             placeholder='{"summary": "string", "items": ["string"]}'
@@ -139,25 +146,37 @@ export function SkillEditor({ skill, onSave, onCancel }: Props) {
           type="text"
           value={toolHintsStr}
           onChange={(e) => setToolHintsStr(e.target.value)}
-          className="w-full rounded border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-text-primary placeholder-text-tertiary focus:border-accent focus:outline-none"
+          disabled={readOnly}
+          className="w-full rounded border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-text-primary placeholder-text-tertiary focus:border-accent focus:outline-none disabled:opacity-60"
           placeholder="gmail_search, advisory_search_deadlines"
         />
       </div>
 
       <div className="flex justify-end gap-2 pt-1">
-        <button
-          onClick={onCancel}
-          className="rounded border border-border px-3 py-1.5 text-xs text-text-secondary hover:bg-surface-2"
-        >
-          Cancel
-        </button>
-        <button
-          onClick={handleSave}
-          disabled={!name.trim() || !content.trim() || (outputFormat === 'structured' && (!outputSchema.trim() || !!schemaError))}
-          className="rounded bg-accent px-3 py-1.5 text-xs text-white hover:bg-accent-hover disabled:opacity-50"
-        >
-          {skill ? 'Update' : 'Create'}
-        </button>
+        {readOnly ? (
+          <button
+            onClick={onCancel}
+            className="rounded border border-border px-3 py-1.5 text-xs text-text-secondary hover:bg-surface-2"
+          >
+            Close
+          </button>
+        ) : (
+          <>
+            <button
+              onClick={onCancel}
+              className="rounded border border-border px-3 py-1.5 text-xs text-text-secondary hover:bg-surface-2"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={!name.trim() || !content.trim() || (outputFormat === 'structured' && (!outputSchema.trim() || !!schemaError))}
+              className="rounded bg-accent px-3 py-1.5 text-xs text-white hover:bg-accent-hover disabled:opacity-50"
+            >
+              {skill ? 'Update' : 'Create'}
+            </button>
+          </>
+        )}
       </div>
     </div>
   )

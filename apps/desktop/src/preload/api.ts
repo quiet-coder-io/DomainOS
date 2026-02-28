@@ -248,6 +248,7 @@ export interface DomainOSAPI {
 
   skill: {
     list(): Promise<IPCResult<Skill[]>>
+    listWithMeta(domainId?: string): Promise<IPCResult<SkillListItem[]>>
     listEnabled(): Promise<IPCResult<Skill[]>>
     listEnabledForDomain(domainId: string): Promise<IPCResult<Skill[]>>
     get(id: string): Promise<IPCResult<Skill>>
@@ -868,6 +869,14 @@ export interface Skill {
   pluginId: string | null
   createdAt: string
   updatedAt: string
+}
+
+/** View type for Skill Library — Skill + JOIN-derived plugin metadata. */
+export interface SkillListItem extends Skill {
+  pluginName: string | null
+  pluginIsEnabledGlobal: boolean | null
+  pluginIsEnabledForDomain: boolean | null
+  removedUpstreamAt: string | null
 }
 
 // ── Chat History Persistence types ──
