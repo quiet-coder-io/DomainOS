@@ -17,7 +17,7 @@ import { randomBytes } from 'node:crypto'
 
 // ── Constants ──
 
-const EXPECTED_BUNDLE_ID = 'com.domain-os.desktop'
+const EXPECTED_BUNDLE_ID = 'io.quietcoder.domain-os'
 const REPO_URL = 'https://github.com/quiet-coder-io/DomainOS/releases/tag'
 const MIN_ZIP_BYTES = 10 * 1024 * 1024 // 10 MB
 const MAX_ZIP_AGE_MS = 30 * 60 * 1000 // 30 minutes
