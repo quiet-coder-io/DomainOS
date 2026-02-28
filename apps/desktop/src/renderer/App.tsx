@@ -25,8 +25,17 @@ const PinIcon = ({ pinned }: { pinned: boolean }) => (
   </svg>
 )
 
+function readAllPanelsCollapsed(): boolean {
+  return (
+    localStorage.getItem('domainOS:sidebarCollapsed') === '1' &&
+    localStorage.getItem('domainOS:headerCollapsed') === '1' &&
+    localStorage.getItem('domainOS:rightSidebarCollapsed') === '1'
+  )
+}
+
 function WindowTitlebar(): React.JSX.Element {
   const [isPinned, setIsPinned] = useState(false)
+  const [allCollapsed, setAllCollapsed] = useState(readAllPanelsCollapsed)
 
   useEffect(() => {
     window.domainOS.appWindow.getPinned().then((res) => {
@@ -38,11 +47,28 @@ function WindowTitlebar(): React.JSX.Element {
     return () => { if (typeof unsub === 'function') unsub() }
   }, [])
 
+  // Stay in sync when individual panels are toggled
+  useEffect(() => {
+    const handler = () => setAllCollapsed(readAllPanelsCollapsed())
+    window.addEventListener('domainOS:panelChanged', handler)
+    return () => window.removeEventListener('domainOS:panelChanged', handler)
+  }, [])
+
   async function handleTogglePin(): Promise<void> {
     const next = !isPinned
     setIsPinned(next)
     const res = await window.domainOS.appWindow.setPinned(next)
     if (!res.ok) setIsPinned(!next)
+  }
+
+  function handleToggleAllPanels(): void {
+    const anyExpanded = !readAllPanelsCollapsed()
+    const newCollapsed = anyExpanded
+    localStorage.setItem('domainOS:sidebarCollapsed', newCollapsed ? '1' : '0')
+    localStorage.setItem('domainOS:headerCollapsed', newCollapsed ? '1' : '0')
+    localStorage.setItem('domainOS:rightSidebarCollapsed', newCollapsed ? '1' : '0')
+    setAllCollapsed(newCollapsed)
+    window.dispatchEvent(new CustomEvent('domainOS:panelToggleAll', { detail: { collapsed: newCollapsed } }))
   }
 
   return (
@@ -51,7 +77,25 @@ function WindowTitlebar(): React.JSX.Element {
       style={{ height: TITLEBAR_H, paddingLeft: isMac ? TRAFFIC_LIGHT_SAFE_LEFT : 12, paddingRight: 12 }}
     >
       <div className="flex-1" />
-      <div className="titlebar-no-drag pointer-events-auto">
+      <div className="titlebar-no-drag pointer-events-auto flex items-center gap-1">
+        <button
+          onClick={handleToggleAllPanels}
+          className="titlebar-no-drag pointer-events-auto cursor-pointer flex h-7 w-7 items-center justify-center rounded transition-colors text-text-tertiary hover:bg-surface-2 hover:text-text-secondary"
+          aria-label={allCollapsed ? 'Expand all panels' : 'Collapse all panels'}
+          title={allCollapsed ? 'Expand all panels' : 'Collapse all panels'}
+        >
+          {allCollapsed ? (
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d="M5 2L2 6l3 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M7 2l3 4-3 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          ) : (
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d="M2 2l3 4-3 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M10 2l-3 4 3 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
+        </button>
         <button
           onClick={handleTogglePin}
           className={`titlebar-no-drag pointer-events-auto cursor-pointer flex h-7 w-7 items-center justify-center rounded transition-colors ${

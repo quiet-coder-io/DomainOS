@@ -23,6 +23,7 @@ import {
   buildSystemPrompt,
   buildStartupReport,
   getPromptProfile,
+  estimateTokens,
   estimateChatTokens,
   clamp,
   AnthropicProvider,
@@ -60,6 +61,7 @@ import {
   skillToMarkdown,
   markdownToSkillInput,
   ChatMessageRepository,
+  ConversationSummaryRepository,
   MissionRepository,
   MissionRunRepository,
   MissionRunner,
@@ -270,6 +272,8 @@ interface ProviderConfigFile {
   defaultModel: string
   ollamaBaseUrl: string
   windowPinned?: boolean
+  responseStyle?: 'concise' | 'detailed'
+  historyWindow?: number
   embeddingProvider?: 'auto' | 'ollama' | 'openai' | 'off'
   embeddingModel?: string
 }
@@ -280,10 +284,26 @@ const DEFAULT_PROVIDER_CONFIG: ProviderConfigFile = {
   defaultModel: 'claude-sonnet-4-20250514',
   ollamaBaseUrl: 'http://localhost:11434',
   windowPinned: false,
+  responseStyle: 'concise',
+  historyWindow: 50,
 }
 
 // ── Sender-scoped chat abort controllers ──
 const activeChatControllers = new Map<number, AbortController>()
+
+// ── Conditional advisory protocol state (Change 5) ──
+const advisoryPinMap = new Map<string, number>() // domainId → pinCount (0=off, 1-3=active)
+
+const ADVISORY_TRIGGER = /\b(brainstorm|risk|scenario|review strategy|compare|pros\s*\.?\s*cons|tradeoff|weigh options)\b/i
+const ADVISORY_DEV_FILTER = /\b(stack trace|TypeScript|SQL|npm|pnpm|compile|lint|unit test|migration|exception|traceback)\b/i
+const ADVISORY_DEV_OVERRIDE = /\b(tradeoff|strategy|pros\s*\.?\s*cons|weigh)\b/i
+const ADVISORY_OFF = /\b(stop advising|just answer|normal mode)\b/i
+
+// ── Conditional KB update instructions state (Change 6) ──
+const forceKBMap = new Map<string, { count: number; reason: string }>() // domainId → {count, reason}
+
+const KB_INTENT = /\b(update|edit|change|add to|modify|revise|create|delete|remove|write to|save)\b.*\b(kb|knowledge|file|document|digest|intel)\b/i
+const KB_SELF_HEAL_COMPLAINT = /\b(why didn'?t you update|write to file|save this)\b/i
 
 function isAbortError(err: unknown, controller: AbortController): boolean {
   if (controller.signal.aborted) return true
@@ -311,6 +331,147 @@ async function dispatchKBStrategy(
   }
 }
 
+// ── History slicing + conversation summary helpers ──
+
+const RECALL_PHRASES = /\b(earlier|previous|as we discussed|as we said|you mentioned|remember when)\b/i
+const CONTINUE_PHRASE = /\bcontinue\b/i
+
+/**
+ * Token-aware history slicing: keeps newest messages up to targetCount,
+ * trimming oldest if total exceeds tokenCeiling.
+ */
+function sliceMessagesForLLM<T extends { role: string; content: string }>(
+  messages: T[],
+  targetCount: number,
+  tokenCeiling: number,
+): T[] {
+  if (messages.length <= targetCount) {
+    const est = estimateChatTokens(messages)
+    if (est <= tokenCeiling) return messages
+  }
+
+  // Start from newest, add until budget exceeded or targetCount reached
+  const result: T[] = []
+  let runningTokens = 0
+  const startIdx = Math.max(0, messages.length - targetCount)
+
+  for (let i = messages.length - 1; i >= startIdx; i--) {
+    const msgTokens = estimateTokens(messages[i].content.length) + 4
+    if (runningTokens + msgTokens > tokenCeiling && result.length > 0) break
+    runningTokens += msgTokens
+    result.unshift(messages[i])
+  }
+
+  return result
+}
+
+/**
+ * Detect whether the user is referencing earlier conversation context.
+ */
+function detectRecallIntent(
+  userMessage: string,
+  lastActivityMs: number | null,
+  hasSummaryOrLargeHistory: boolean,
+): { triggered: boolean; reason: string | null } {
+  if (RECALL_PHRASES.test(userMessage)) {
+    return { triggered: true, reason: 'earlier_phrase' }
+  }
+  if (CONTINUE_PHRASE.test(userMessage) && lastActivityMs !== null) {
+    const gapMinutes = (Date.now() - lastActivityMs) / 60_000
+    if (gapMinutes > 30 && hasSummaryOrLargeHistory) {
+      return { triggered: true, reason: 'continue_after_gap' }
+    }
+  }
+  return { triggered: false, reason: null }
+}
+
+/** Strip code blocks, long quoted text, file contents, base64 from message content. */
+function stripNonFactual(content: string): string {
+  return content
+    .replace(/```[\s\S]*?```/g, '')               // code blocks
+    .replace(/> .+(\n> .+)*/g, '')                  // block quotes
+    .replace(/data:[a-z/]+;base64,[A-Za-z0-9+/=]+/g, '') // base64
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+/** Build a heuristic summary from trimmed messages (no LLM). */
+function buildHeuristicSummary(
+  existingSummary: string,
+  trimmedMessages: Array<{ role: string; content: string }>,
+): string {
+  const MAX_SUMMARY_CHARS = 1600
+  const MAX_LINES_PER_FIELD = 3
+
+  // Extract first sentence of each message, cap at 160 chars
+  const facts: string[] = []
+  for (const msg of trimmedMessages) {
+    const clean = stripNonFactual(msg.content)
+    if (!clean) continue
+    const firstSentence = clean.split(/[.!?\n]/)[0]?.trim()
+    if (firstSentence && firstSentence.length > 10) {
+      const prefix = msg.role === 'user' ? 'User: ' : 'AI: '
+      facts.push(prefix + firstSentence.slice(0, 160))
+    }
+  }
+
+  if (facts.length === 0) return existingSummary
+
+  // Parse existing summary into fields
+  const fields: Record<string, string[]> = {
+    'Goals': [],
+    'Decisions': [],
+    'Open questions': [],
+    'Constraints': [],
+    'Current status': [],
+  }
+
+  if (existingSummary) {
+    let currentField = 'Current status'
+    for (const line of existingSummary.split('\n')) {
+      const fieldMatch = line.match(/^- (Goals|Decisions|Open questions|Constraints|Current status):(.*)/)
+      if (fieldMatch) {
+        currentField = fieldMatch[1]
+        const rest = fieldMatch[2].trim()
+        if (rest) fields[currentField].push(rest)
+      } else if (line.startsWith('  ') && currentField) {
+        fields[currentField].push(line.trim())
+      }
+    }
+  }
+
+  // Append new facts to Current status
+  for (const fact of facts) {
+    fields['Current status'].push(fact)
+  }
+
+  // Trim each field to max lines (keep newest)
+  for (const key of Object.keys(fields)) {
+    if (fields[key].length > MAX_LINES_PER_FIELD) {
+      fields[key] = fields[key].slice(-MAX_LINES_PER_FIELD)
+    }
+  }
+
+  // Render
+  const lines = ['Conversation context:']
+  for (const [key, values] of Object.entries(fields)) {
+    if (values.length > 0) {
+      lines.push(`- ${key}: ${values[0]}`)
+      for (let i = 1; i < values.length; i++) {
+        lines.push(`  ${values[i]}`)
+      }
+    } else {
+      lines.push(`- ${key}: (none noted)`)
+    }
+  }
+
+  let result = lines.join('\n')
+  if (result.length > MAX_SUMMARY_CHARS) {
+    result = result.slice(0, MAX_SUMMARY_CHARS - 15) + '\n...[trimmed]'
+  }
+  return result
+}
+
 // ── In-memory key cache (avoids repeated safeStorage calls) ──
 const keyCache: Map<string, string> = new Map()
 
@@ -330,6 +491,7 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
   const tagRepo = new DomainTagRepository(db)
   const skillRepo = new SkillRepository(db)
   const chatMessageRepo = new ChatMessageRepository(db)
+  const summaryRepo = new ConversationSummaryRepository(db)
   const chunkRepo = new KBChunkRepository(db)
   const embeddingCache = new EmbeddingCache()
   const embeddingManager = new EmbeddingManager({
@@ -527,6 +689,8 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
       },
     ) => {
       const { requestId } = payload
+      const t0 = Date.now()
+      let tFirstChunk: number | null = null
 
       // ── Sender-scoped cancellation ──
       const senderId = event.sender.id
@@ -608,11 +772,47 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
         const lastUserMsgEarly = payload.messages.filter((m) => m.role === 'user').at(-1)
         const isStatusBriefingEarly = lastUserMsgEarly && detectStatusIntent(lastUserMsgEarly.content)
 
-        // ── Prompt profile selection + end-to-end budget computation ──
+        // ── Prompt profile selection ──
         const promptProfile = getPromptProfile(
           resolvedProvider === 'ollama' ? 'ollama_fast' : 'cloud_full',
         )
-        const historyTokens = estimateChatTokens(payload.messages)
+
+        // ── History window: slice messages + fetch conversation summary ──
+        const historyWindow = globalConfig.historyWindow ?? 50
+        const totalMessageCount = payload.messages.length
+
+        // Fetch conversation summary
+        let conversationSummary: string | undefined
+        const existingSummary = summaryRepo.getSummary(payload.domainId)
+        if (existingSummary.ok && existingSummary.value) {
+          conversationSummary = existingSummary.value.summaryText || undefined
+        }
+
+        // Detect recall intent (expand window if user references earlier context)
+        let recallTriggered = false
+        let recallReason: string | null = null
+        if (lastUserMsgEarly) {
+          const lastActivityMs = payload.messages.length > 1
+            ? new Date(payload.messages[payload.messages.length - 2]?.content ? Date.now() : Date.now()).getTime()
+            : null
+          const hasSummaryOrLarge = !!conversationSummary || totalMessageCount > historyWindow
+          const recall = detectRecallIntent(lastUserMsgEarly.content, lastActivityMs, hasSummaryOrLarge)
+          recallTriggered = recall.triggered
+          recallReason = recall.reason
+        }
+
+        const targetCount = recallTriggered
+          ? Math.min(120, Math.floor(historyWindow * 2.4))
+          : historyWindow
+
+        // Token ceiling for history: 70% of (contextLimit - estimated system - outputReserve)
+        const tokenCeiling = Math.floor(
+          0.7 * (promptProfile.modelContextLimit - promptProfile.maxSystemBudget * 0.3 - promptProfile.outputReserve),
+        )
+        const slicedMessages = sliceMessagesForLLM(payload.messages, targetCount, tokenCeiling)
+
+        // ── End-to-end budget computation (uses sliced messages) ──
+        const historyTokens = estimateChatTokens(slicedMessages)
         const rawBudget = Math.floor(
           (promptProfile.modelContextLimit - historyTokens - promptProfile.outputReserve)
           / promptProfile.safetyFactor,
@@ -811,6 +1011,73 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           }
         }
 
+        // ── Conditional advisory protocol (Change 5) ──
+        const userMsg = lastUserMsgEarly?.content ?? ''
+        let advisoryPinCount = advisoryPinMap.get(payload.domainId) ?? 0
+
+        if (ADVISORY_OFF.test(userMsg)) {
+          advisoryPinCount = 0
+        } else if (
+          ADVISORY_TRIGGER.test(userMsg) ||
+          !!brainstormContext ||
+          /^\/(advisory|brainstorm)\b/.test(userMsg)
+        ) {
+          // Check dev filter: don't trigger for dev tasks unless overridden
+          const isDevTask = ADVISORY_DEV_FILTER.test(userMsg) && !ADVISORY_DEV_OVERRIDE.test(userMsg)
+          if (!isDevTask) {
+            advisoryPinCount = Math.max(advisoryPinCount, 3)
+          }
+        }
+
+        // Initialize on restart: scan last 5 assistant messages for advisory marker
+        if (advisoryPinCount === 0 && !advisoryPinMap.has(payload.domainId)) {
+          const recentAssistant = slicedMessages
+            .filter(m => m.role === 'assistant')
+            .slice(-5)
+          for (const m of recentAssistant) {
+            if (/<!-- advisory_mode:/.test(m.content)) {
+              advisoryPinCount = 2
+              break
+            }
+          }
+          if (/^\/(advisory)\b/.test(userMsg)) advisoryPinCount = 3
+        }
+
+        const advisoryIncluded = advisoryPinCount > 0
+        advisoryPinMap.set(payload.domainId, advisoryIncluded
+          ? advisoryPinCount  // will decay after response
+          : 0)
+
+        // ── Conditional KB update instructions (Change 6) ──
+        const kbState = forceKBMap.get(payload.domainId) ?? { count: 0, reason: '' }
+        let forceKbCount = kbState.count
+        let forceKbReason = kbState.reason
+
+        const kbIntentDetected = KB_INTENT.test(userMsg) ||
+          /^\/kb\b/.test(userMsg) ||
+          /\bKB:/.test(userMsg) ||
+          !!payload.activeSkillId
+
+        if (kbIntentDetected) {
+          forceKbCount = Math.max(forceKbCount, 3)
+          forceKbReason = 'intent'
+        } else if (KB_SELF_HEAL_COMPLAINT.test(userMsg)) {
+          forceKbCount = Math.max(forceKbCount, 1)
+          forceKbReason = 'user_complaint'
+        }
+
+        const kbInstructionsIncluded = forceKbCount > 0
+
+        // Build effective profile (override advisory + kbInstructions based on gates)
+        const effectiveProfile = {
+          ...promptProfile,
+          sections: {
+            ...promptProfile.sections,
+            advisory: advisoryIncluded ? promptProfile.sections.advisory : false as const,
+            kbInstructions: kbInstructionsIncluded ? promptProfile.sections.kbInstructions : false,
+          },
+        }
+
         const promptResult = buildSystemPrompt({
           domain: {
             name: domain.value.name,
@@ -828,7 +1095,9 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           brainstormContext,
           activeSkill,
           currentDate,
-        }, promptProfile, systemBudget)
+          responseStyle: globalConfig.responseStyle ?? 'concise',
+          conversationSummary,
+        }, effectiveProfile, systemBudget)
         const systemPrompt = promptResult.prompt
 
         // Performance logging for prompt profile budgeting
@@ -869,8 +1138,8 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
             }
 
             tools.push(...GMAIL_TOOLS)
-            integrationNames.push('Gmail (gmail_search, gmail_read)')
-            toolsHint += '\n\n## Gmail Access\nIMPORTANT: You have a live, authenticated Gmail connection. You CAN and SHOULD use the gmail_search and gmail_read tools to retrieve real emails. When the user asks about emails, correspondence, or contacts — USE YOUR TOOLS. Do not tell the user to copy-paste emails or claim you lack email access. If you are unsure whether an email exists, search for it first.\nIf the request does not involve email, respond normally without using tools.'
+            integrationNames.push('Gmail')
+            toolsHint += '\nGmail: use gmail_search/gmail_read for any email request. If unsure whether an email exists, search first. Don\'t claim no access.'
           }
 
           if (gtasksEnabled) {
@@ -888,26 +1157,27 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
               gtasksClient = undefined
             } else {
               tools.push(...GTASKS_TOOLS)
-              integrationNames.push('Google Tasks (gtasks_search, gtasks_read, gtasks_complete, gtasks_update, gtasks_delete)')
-              toolsHint += '\n\n## Google Tasks Access\nIMPORTANT: You have a live, authenticated Google Tasks connection. You CAN and SHOULD use the gtasks_* tools to search, read, complete, update, and delete the user\'s tasks. When the user asks about tasks or to-do items — USE YOUR TOOLS. Do not claim you lack task access.\nIf the request does not involve tasks, respond normally without using tools.'
+              integrationNames.push('Google Tasks')
+              toolsHint += '\nGoogle Tasks: use gtasks_* to search, read, complete, update, delete tasks. Don\'t claim no access.'
             }
           }
 
           // Advisory tools are always available (read-only, no external credentials)
           tools.push(...ADVISORY_TOOLS)
-          toolsHint += '\n\n## Advisory Tools\nYou have tools to search decisions, deadlines, cross-domain context, and risk snapshots. Use them when providing strategic advice, assessing risk, or referencing prior decisions. When quoting cross-domain data, always attribute the source domain name.'
+          toolsHint += '\nAdvisory: use advisory_search_decisions/deadlines/cross_domain_context/risk_snapshot for strategic advice. Attribute cross-domain sources. Don\'t invent citations; if no tool data, say so.'
 
           // Brainstorm tools are always available (DB-only, sync)
           tools.push(...BRAINSTORM_TOOLS)
-          toolsHint += '\n\n## Brainstorm Tools\nYou have tools for deep brainstorming sessions: start sessions, browse techniques, capture ideas, check status, synthesize results, and control session lifecycle. Use these for extensive creative exploration with 10+ ideas and technique-guided facilitation.'
+          toolsHint += '\nBrainstorm: use brainstorm_* tools for deep facilitated sessions with technique-guided idea capture.'
 
           if (isStatusBriefing) {
-            toolsHint += '\n\n## Status Briefing Mode\nThis is a status update request. You SHOULD use available tools to enrich the briefing. Use the search hints provided in the DOMAIN STATUS BRIEFING section for Gmail/GTasks queries.'
+            toolsHint += '\nStatus Briefing: use available tools to enrich the briefing. Use search hints from DOMAIN STATUS BRIEFING section.'
           }
 
           // Prepend a prominent capability preamble when external integrations are connected
           if (integrationNames.length > 0) {
-            const preamble = '\n\n=== TOOL CAPABILITIES ===\nYou have LIVE, AUTHENTICATED access to the following external integrations: ' + integrationNames.join('; ') + '.\nThese are real connections — not hypothetical. Use them when the user\'s request is relevant. NEVER claim you lack access to these integrations or tell the user to manually copy-paste data.'
+            const sortedNames = [...integrationNames].sort()
+            const preamble = '\n\n=== TOOL CAPABILITIES ===\nLive authenticated access: ' + sortedNames.join(', ') + '.\nIf a tool is relevant, use it before answering from memory.\nIf a tool fails or is unavailable, say so and fall back.'
             toolsHint = preamble + toolsHint
           }
 
@@ -918,26 +1188,26 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
           }
 
           // --- Capability-reset injection: counter stale tool claims in history ---
-          let messagesForLlm: ChatMessage[] = payload.messages
+          let messagesForLlm: ChatMessage[] = slicedMessages
           if (integrationNames.length > 0) {
             try {
-              if (detectStaleToolClaims(payload.messages)) {
+              if (detectStaleToolClaims(slicedMessages)) {
                 const resetMsg: ChatMessage = {
                   role: 'user',
                   content: `[System note: Your tool capabilities have changed since earlier messages in this conversation. You now have LIVE, AUTHENTICATED access to: ${integrationNames.join('; ')}. Any earlier assistant messages claiming you lack email, task, or tool access are OUTDATED and INCORRECT. Use your tools when relevant.]`,
                 }
-                const lastUserIdx = payload.messages.map((m) => m.role).lastIndexOf('user')
+                const lastUserIdx = slicedMessages.map((m) => m.role).lastIndexOf('user')
                 if (lastUserIdx >= 0) {
                   messagesForLlm = [
-                    ...payload.messages.slice(0, lastUserIdx),
+                    ...slicedMessages.slice(0, lastUserIdx),
                     resetMsg,
-                    ...payload.messages.slice(lastUserIdx),
+                    ...slicedMessages.slice(lastUserIdx),
                   ]
                 }
               }
             } catch {
               // Safety fallback: if detection throws (e.g. malformed content), use original messages
-              messagesForLlm = payload.messages
+              messagesForLlm = slicedMessages
             }
           }
 
@@ -972,13 +1242,16 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
         if (!fullResponse) {
           // --- Streaming path (all providers) ---
           const streamStart = Date.now()
-          console.log(`[streaming] start provider=${resolvedProvider} model=${resolvedModel} systemPromptLen=${systemPrompt.length} messagesCount=${payload.messages.length}`)
+          console.log(`[streaming] start provider=${resolvedProvider} model=${resolvedModel} systemPromptLen=${systemPrompt.length} messagesCount=${slicedMessages.length}`)
           let chunkCount = 0
           try {
-            for await (const chunk of provider.chat(payload.messages, systemPrompt, { signal: controller.signal })) {
+            for await (const chunk of provider.chat(slicedMessages, systemPrompt, { signal: controller.signal })) {
               if (controller.signal.aborted) break
               chunkCount++
-              if (chunkCount === 1) console.log(`[streaming] first_chunk latency=${Date.now() - streamStart}ms chunk=${JSON.stringify(chunk.slice(0, 50))}`)
+              if (chunkCount === 1) {
+                tFirstChunk = Date.now()
+                console.log(`[streaming] first_chunk latency=${tFirstChunk - streamStart}ms chunk=${JSON.stringify(chunk.slice(0, 50))}`)
+              }
               fullResponse += chunk
               sendChatChunk(event.sender, requestId, chunk)
             }
@@ -1065,6 +1338,89 @@ export function registerIPCHandlers(db: Database.Database, mainWindow: BrowserWi
 
         // Parse stop blocks from LLM response
         const stopBlocks = parseStopBlocks(fullResponse)
+
+        // ── Advisory pinCount decay (Change 5) ──
+        if (advisoryPinCount > 0 && !ADVISORY_TRIGGER.test(userMsg) && !brainstormContext) {
+          advisoryPinMap.set(payload.domainId, Math.max(0, advisoryPinCount - 1))
+        }
+
+        // ── KB forceKb decay (Change 6) ──
+        if (kbIntentDetected) {
+          // KB intent present: keep or reset to 3
+          forceKBMap.set(payload.domainId, { count: Math.max(forceKbCount, 3), reason: forceKbReason })
+        } else {
+          // Decay
+          const newCount = Math.max(0, forceKbCount - 1)
+          forceKBMap.set(payload.domainId, { count: newCount, reason: newCount > 0 ? forceKbReason : '' })
+        }
+
+        // KB self-heal: check if assistant emitted kb-update or decision blocks
+        if (fullResponse) {
+          if (/```kb-update|```decision|```advisory-/.test(fullResponse)) {
+            forceKBMap.set(payload.domainId, { count: Math.max(forceKBMap.get(payload.domainId)?.count ?? 0, 3), reason: 'assistant_emitted' })
+          }
+          if (proposals.length > 0) {
+            forceKBMap.set(payload.domainId, { count: Math.max(forceKBMap.get(payload.domainId)?.count ?? 0, 3), reason: 'proposals' })
+          }
+        }
+
+        // Update conversation summary if messages were trimmed
+        try {
+          if (slicedMessages.length < totalMessageCount) {
+            const sentWindowStart = slicedMessages[0]
+            // Get the created_at of oldest sliced message to determine trim boundary
+            // Use payload.messages index since slicedMessages is a subset
+            const sliceStartIdx = totalMessageCount - slicedMessages.length
+            const trimmedForSummary = payload.messages.slice(
+              0,
+              sliceStartIdx,
+            )
+
+            const lastSummarized = existingSummary.ok && existingSummary.value
+              ? existingSummary.value.lastSummarizedCreatedAt
+              : null
+
+            // Only update if we have >= 10 trimmed messages since last summary
+            const unsummarizedTrimmed = lastSummarized
+              ? trimmedForSummary.filter(() => true) // all trimmed are new since we don't track created_at in ChatMessage
+              : trimmedForSummary
+
+            if (unsummarizedTrimmed.length >= 10) {
+              const prevText = conversationSummary ?? ''
+              const newSummary = buildHeuristicSummary(prevText, unsummarizedTrimmed)
+              const now = new Date().toISOString()
+              summaryRepo.setSummary(payload.domainId, newSummary, now)
+            }
+          }
+        } catch (summaryErr) {
+          console.warn('[chat:send] Summary update failed:', summaryErr)
+        }
+
+        // Structured perf log (Change 7: full gate diagnostics)
+        const tDone = Date.now()
+        console.log('[chat:perf]', JSON.stringify({
+          historyCountTotal: totalMessageCount,
+          historyCountSent: slicedMessages.length,
+          summaryChars: conversationSummary?.length ?? 0,
+          summaryTokensEstimate: conversationSummary ? estimateTokens(conversationSummary.length) : 0,
+          promptTokensBudget: systemBudget,
+          promptTokensActual: promptResult.manifest.totalTokenEstimate,
+          systemPromptChars: systemPrompt.length,
+          responseChars: fullResponse.length,
+          responseStyle: globalConfig.responseStyle ?? 'concise',
+          streaming: !fullResponse || tFirstChunk !== null,
+          kbInstructionsIncluded,
+          forceKb: forceKbCount,
+          forceKbReason,
+          advisoryIncluded,
+          advisoryPinCount,
+          recallTriggered,
+          recallReason,
+          provider: resolvedProvider,
+          model: resolvedModel,
+          firstChunkMs: tFirstChunk ? tFirstChunk - t0 : null,
+          totalMs: tDone - t0,
+        }))
 
         return {
           ok: true,

@@ -34,6 +34,7 @@ export type KBStrategy = 'full' | 'digest_only' | 'digest_plus_structural'
 
 export interface PromptProfileSections {
   identity: boolean
+  responseStyle: boolean
   domain: boolean
   tags: boolean
   kb: boolean
@@ -44,6 +45,7 @@ export interface PromptProfileSections {
   escalation: boolean
   statusBriefing: boolean | 'capsule'
   session: boolean
+  conversationSummary: boolean
   kbInstructions: boolean
   brainstorm: boolean
   advisory: boolean | 'micro'
@@ -80,6 +82,7 @@ const CLOUD_FULL: PromptProfile = {
   kbStrategy: 'full',
   sections: {
     identity: true,
+    responseStyle: true,
     domain: true,
     tags: true,
     kb: true,
@@ -90,6 +93,7 @@ const CLOUD_FULL: PromptProfile = {
     escalation: true,
     statusBriefing: true,
     session: true,
+    conversationSummary: true,
     kbInstructions: true,
     brainstorm: true,
     advisory: true,
@@ -106,6 +110,7 @@ const OLLAMA_FAST: PromptProfile = {
   kbStrategy: 'digest_only',
   sections: {
     identity: true,
+    responseStyle: true,
     domain: true,
     tags: true,
     kb: true,
@@ -116,6 +121,7 @@ const OLLAMA_FAST: PromptProfile = {
     escalation: true,
     statusBriefing: 'capsule',
     session: false,
+    conversationSummary: false,
     kbInstructions: false,
     brainstorm: false,
     advisory: 'micro',
@@ -134,6 +140,7 @@ const OLLAMA_BALANCED: PromptProfile = {
   kbStrategy: 'digest_plus_structural',
   sections: {
     identity: true,
+    responseStyle: true,
     domain: true,
     tags: true,
     kb: true,
@@ -144,6 +151,7 @@ const OLLAMA_BALANCED: PromptProfile = {
     escalation: true,
     statusBriefing: 'capsule',
     session: false,
+    conversationSummary: false,
     kbInstructions: false,
     brainstorm: false,
     advisory: 'micro',

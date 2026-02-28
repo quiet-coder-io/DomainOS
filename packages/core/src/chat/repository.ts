@@ -1,9 +1,11 @@
 /**
  * Chat message repository — persists chat messages per domain.
  * Supports append (INSERT OR IGNORE), keyset pagination, and bulk clear.
+ * Also manages conversation summaries (sticky context across history window).
  */
 
 import type Database from 'better-sqlite3'
+import { createHash } from 'node:crypto'
 import type { Result } from '../common/index.js'
 import { Ok, Err, DomainOSError } from '../common/index.js'
 
@@ -154,6 +156,94 @@ export class ChatMessageRepository {
         .prepare('DELETE FROM chat_messages WHERE domain_id = ?')
         .run(domainId)
       return Ok({ deleted: info.changes })
+    } catch (e) {
+      return Err(DomainOSError.db((e as Error).message))
+    }
+  }
+
+  /** Count total messages for a domain. */
+  countByDomain(domainId: string): number {
+    try {
+      const row = this.db
+        .prepare('SELECT COUNT(*) as cnt FROM chat_messages WHERE domain_id = ?')
+        .get(domainId) as { cnt: number } | undefined
+      return row?.cnt ?? 0
+    } catch {
+      return 0
+    }
+  }
+}
+
+// --- Conversation Summary ---
+
+export interface ConversationSummary {
+  domainId: string
+  summaryText: string
+  summaryVersion: number
+  lastSummarizedCreatedAt: string | null
+  summaryHash: string
+  updatedAt: string
+}
+
+interface SummaryRow {
+  domain_id: string
+  summary_text: string
+  summary_version: number
+  last_summarized_created_at: string | null
+  summary_hash: string
+  updated_at: string
+}
+
+export class ConversationSummaryRepository {
+  constructor(private db: Database.Database) {}
+
+  getSummary(domainId: string): Result<ConversationSummary | null, DomainOSError> {
+    try {
+      const row = this.db
+        .prepare('SELECT * FROM conversation_summaries WHERE domain_id = ?')
+        .get(domainId) as SummaryRow | undefined
+      if (!row) return Ok(null)
+      return Ok({
+        domainId: row.domain_id,
+        summaryText: row.summary_text,
+        summaryVersion: row.summary_version,
+        lastSummarizedCreatedAt: row.last_summarized_created_at,
+        summaryHash: row.summary_hash,
+        updatedAt: row.updated_at,
+      })
+    } catch (e) {
+      return Err(DomainOSError.db((e as Error).message))
+    }
+  }
+
+  setSummary(
+    domainId: string,
+    summaryText: string,
+    lastSummarizedCreatedAt: string,
+  ): Result<void, DomainOSError> {
+    try {
+      const hash = createHash('sha256').update(summaryText).digest('hex').slice(0, 16)
+
+      // Check if hash unchanged — skip write
+      const existing = this.db
+        .prepare('SELECT summary_hash FROM conversation_summaries WHERE domain_id = ?')
+        .get(domainId) as { summary_hash: string } | undefined
+      if (existing && existing.summary_hash === hash) return Ok(undefined)
+
+      const now = new Date().toISOString()
+      this.db
+        .prepare(`
+          INSERT INTO conversation_summaries (domain_id, summary_text, summary_version, last_summarized_created_at, summary_hash, updated_at)
+          VALUES (?, ?, 1, ?, ?, ?)
+          ON CONFLICT(domain_id) DO UPDATE SET
+            summary_text = excluded.summary_text,
+            summary_version = summary_version + 1,
+            last_summarized_created_at = excluded.last_summarized_created_at,
+            summary_hash = excluded.summary_hash,
+            updated_at = excluded.updated_at
+        `)
+        .run(domainId, summaryText, lastSummarizedCreatedAt, hash, now)
+      return Ok(undefined)
     } catch (e) {
       return Err(DomainOSError.db((e as Error).message))
     }

@@ -87,13 +87,39 @@ export function DomainChatPage(): React.JSX.Element {
   const sidebarWidthRef = useRef(sidebarWidth)
   useEffect(() => { sidebarWidthRef.current = sidebarWidth }, [sidebarWidth])
 
+  // --- Collapsible header bar state ---
+  const [headerCollapsed, _setHeaderCollapsed] = useState(() => {
+    return localStorage.getItem('domainOS:headerCollapsed') === '1'
+  })
+  const setHeaderCollapsed = useCallback((val: boolean) => {
+    localStorage.setItem('domainOS:headerCollapsed', val ? '1' : '0')
+    _setHeaderCollapsed(val)
+    window.dispatchEvent(new Event('domainOS:panelChanged'))
+  }, [])
+
   // --- Collapsible right sidebar state ---
-  const [rightCollapsed, setRightCollapsed] = useState(() => {
+  const [rightCollapsed, _setRightCollapsed] = useState(() => {
     return localStorage.getItem('domainOS:rightSidebarCollapsed') === '1'
   })
+  const setRightCollapsed = useCallback((val: boolean) => {
+    localStorage.setItem('domainOS:rightSidebarCollapsed', val ? '1' : '0')
+    _setRightCollapsed(val)
+    window.dispatchEvent(new Event('domainOS:panelChanged'))
+  }, [])
+
+  // Listen for "toggle all panels" from the titlebar
   useEffect(() => {
-    localStorage.setItem('domainOS:rightSidebarCollapsed', rightCollapsed ? '1' : '0')
-  }, [rightCollapsed])
+    const handler = (e: Event) => {
+      const { collapsed: newVal } = (e as CustomEvent).detail
+      if (newVal && rightPanelRef.current) {
+        rightScrollRef.current = rightPanelRef.current.scrollTop
+      }
+      setHeaderCollapsed(newVal)
+      setRightCollapsed(newVal)
+    }
+    window.addEventListener('domainOS:panelToggleAll', handler)
+    return () => window.removeEventListener('domainOS:panelToggleAll', handler)
+  }, [setHeaderCollapsed, setRightCollapsed])
 
   const rightPanelRef = useRef<HTMLDivElement>(null)
   const rightScrollRef = useRef(0)
@@ -106,9 +132,9 @@ export function DomainChatPage(): React.JSX.Element {
     document.body.style.cursor = ''
     document.body.style.userSelect = ''
     setRightCollapsed(true)
-  }, [])
+  }, [setRightCollapsed])
 
-  const expandRight = useCallback(() => setRightCollapsed(false), [])
+  const expandRight = useCallback(() => setRightCollapsed(false), [setRightCollapsed])
 
   // Restore scroll on expand
   useEffect(() => {
@@ -327,156 +353,185 @@ export function DomainChatPage(): React.JSX.Element {
     <div className="flex h-full">
       {/* Main chat area */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {/* Header bar */}
-        <div className="flex items-center gap-2 border-b border-border-subtle px-4 py-2">
-          {/* Settings gear */}
-          <button
-            onClick={() => setShowSettings(true)}
-            className="flex h-7 w-7 items-center justify-center rounded text-text-tertiary hover:bg-surface-2 hover:text-text-secondary"
-            title="Settings"
-          >
-            <GearIcon />
-          </button>
-
-          {/* Automations */}
-          <button
-            onClick={() => setShowAutomations(true)}
-            className="rounded border border-border-subtle px-2 py-0.5 text-[11px] text-text-tertiary hover:border-accent hover:text-accent transition-colors"
-            title="Automations"
-          >
-            Automations
-          </button>
-
-          {/* Skills */}
-          <button
-            onClick={() => setShowSkillLibrary(true)}
-            className="rounded border border-border-subtle px-2 py-0.5 text-[11px] text-text-tertiary hover:border-accent hover:text-accent transition-colors"
-            title="Skill Library"
-          >
-            Skills
-          </button>
-
-          {/* Effective model display */}
-          <span className="text-xs text-text-tertiary">
-            {PROVIDER_LABELS[effectiveProvider]} / {effectiveModel}
-          </span>
-          {domain.modelProvider && (
-            <span className="text-[10px] text-accent" title="This domain uses a model override">
-              override
-            </span>
-          )}
-
-          {/* Gmail connection + per-domain toggle */}
-          <div className="ml-3 flex items-center gap-2 border-l border-border-subtle pl-3">
-            {gmailStatus.blocked ? (
-              <span className="text-xs text-text-tertiary">Gmail unavailable</span>
-            ) : gmailStatus.connected ? (
-              <>
-                <span className="text-xs text-success">Gmail: {gmailStatus.email || 'connected'}</span>
-                <button
-                  onClick={handleGmailDisconnect}
-                  disabled={gmailLoading}
-                  className="text-xs text-text-tertiary hover:text-danger disabled:opacity-50"
-                >
-                  Disconnect
-                </button>
-                <label className="flex items-center gap-1 text-xs text-text-tertiary cursor-pointer" title="When enabled, this domain's agent can search and read your Gmail during conversations.">
-                  <input
-                    type="checkbox"
-                    checked={domain.allowGmail}
-                    onChange={handleToggleAllowGmail}
-                    className="h-3 w-3 rounded border-border accent-accent"
-                  />
-                  Gmail tools
-                </label>
-              </>
-            ) : (
-              <button
-                onClick={handleGmailConnect}
-                disabled={gmailLoading}
-                className="text-xs text-accent hover:text-accent-hover disabled:opacity-50"
-              >
-                {gmailLoading ? 'Connecting...' : 'Connect Gmail'}
-              </button>
-            )}
-          </div>
-
-          <div className="flex-1" />
-
-          {/* Domain name + model override toggle */}
-          <div className="flex items-center gap-2">
+        {/* Header bar — collapsed or expanded */}
+        {headerCollapsed ? (
+          <div className="flex items-center gap-2 border-b border-border-subtle px-4 py-1">
+            <div className="flex-1" />
             <span className="text-sm font-medium text-text-secondary">{domain.name}</span>
             <button
-              onClick={handleToggleOverride}
-              className={`text-[10px] px-1.5 py-0.5 rounded border ${
-                overrideExpanded
-                  ? 'border-accent text-accent'
-                  : 'border-border text-text-tertiary hover:text-text-secondary'
-              }`}
-              title={overrideExpanded ? 'Clear model override (use global default)' : 'Set model override for this domain'}
+              onClick={() => setHeaderCollapsed(false)}
+              className="flex h-6 w-6 items-center justify-center rounded text-text-tertiary hover:bg-surface-2 hover:text-text-secondary"
+              title="Expand header"
             >
-              {overrideExpanded ? 'Clear Override' : 'Model Override'}
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
             </button>
           </div>
-        </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-2 border-b border-border-subtle px-4 py-2">
+              {/* Settings gear */}
+              <button
+                onClick={() => setShowSettings(true)}
+                className="flex h-7 w-7 items-center justify-center rounded text-text-tertiary hover:bg-surface-2 hover:text-text-secondary"
+                title="Settings"
+              >
+                <GearIcon />
+              </button>
 
-        {/* Per-domain model override panel (collapsible) */}
-        {overrideExpanded && (
-          <div className="flex items-center gap-2 border-b border-border-subtle bg-surface-0 px-4 py-2">
-            <span className="text-xs text-text-tertiary">Override:</span>
-            <select
-              value={overrideProvider}
-              onChange={(e) => handleOverrideProviderChange(e.target.value)}
-              className="rounded border border-border bg-surface-2 px-2 py-1 text-xs text-text-primary"
-            >
-              <option value="anthropic">Anthropic</option>
-              <option value="openai">OpenAI</option>
-              <option value="ollama">Ollama</option>
-            </select>
-            <select
-              value={useCustomOverride ? '__custom__' : overrideModel}
-              onChange={(e) => handleOverrideModelChange(e.target.value)}
-              className="rounded border border-border bg-surface-2 px-2 py-1 text-xs text-text-primary"
-            >
-              {(overrideProvider === 'ollama'
-                ? ollamaModels.length > 0
-                  ? ollamaModels  // Show only installed models when available
-                  : KNOWN_MODELS.ollama
-                : KNOWN_MODELS[overrideProvider as ProviderName] ?? []
-              ).map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-              <option value="__custom__">Custom...</option>
-            </select>
-            {useCustomOverride && (
-              <input
-                type="text"
-                value={overrideCustom}
-                onChange={(e) => setOverrideCustom(e.target.value)}
-                className="w-40 rounded border border-border bg-surface-2 px-2 py-1 text-xs text-text-primary"
-                placeholder="model-id"
-                maxLength={128}
-              />
+              {/* Automations */}
+              <button
+                onClick={() => setShowAutomations(true)}
+                className="rounded border border-border-subtle px-2 py-0.5 text-[11px] text-text-tertiary hover:border-accent hover:text-accent transition-colors"
+                title="Automations"
+              >
+                Automations
+              </button>
+
+              {/* Skills */}
+              <button
+                onClick={() => setShowSkillLibrary(true)}
+                className="rounded border border-border-subtle px-2 py-0.5 text-[11px] text-text-tertiary hover:border-accent hover:text-accent transition-colors"
+                title="Skill Library"
+              >
+                Skills
+              </button>
+
+              {/* Effective model display */}
+              <span className="text-xs text-text-tertiary">
+                {PROVIDER_LABELS[effectiveProvider]} / {effectiveModel}
+              </span>
+              {domain.modelProvider && (
+                <span className="text-[10px] text-accent" title="This domain uses a model override">
+                  override
+                </span>
+              )}
+
+              {/* Gmail connection + per-domain toggle */}
+              <div className="ml-3 flex items-center gap-2 border-l border-border-subtle pl-3">
+                {gmailStatus.blocked ? (
+                  <span className="text-xs text-text-tertiary">Gmail unavailable</span>
+                ) : gmailStatus.connected ? (
+                  <>
+                    <span className="text-xs text-success">Gmail: {gmailStatus.email || 'connected'}</span>
+                    <button
+                      onClick={handleGmailDisconnect}
+                      disabled={gmailLoading}
+                      className="text-xs text-text-tertiary hover:text-danger disabled:opacity-50"
+                    >
+                      Disconnect
+                    </button>
+                    <label className="flex items-center gap-1 text-xs text-text-tertiary cursor-pointer" title="When enabled, this domain's agent can search and read your Gmail during conversations.">
+                      <input
+                        type="checkbox"
+                        checked={domain.allowGmail}
+                        onChange={handleToggleAllowGmail}
+                        className="h-3 w-3 rounded border-border accent-accent"
+                      />
+                      Gmail tools
+                    </label>
+                  </>
+                ) : (
+                  <button
+                    onClick={handleGmailConnect}
+                    disabled={gmailLoading}
+                    className="text-xs text-accent hover:text-accent-hover disabled:opacity-50"
+                  >
+                    {gmailLoading ? 'Connecting...' : 'Connect Gmail'}
+                  </button>
+                )}
+              </div>
+
+              <div className="flex-1" />
+
+              {/* Domain name + model override toggle */}
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-text-secondary">{domain.name}</span>
+                <button
+                  onClick={handleToggleOverride}
+                  className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                    overrideExpanded
+                      ? 'border-accent text-accent'
+                      : 'border-border text-text-tertiary hover:text-text-secondary'
+                  }`}
+                  title={overrideExpanded ? 'Clear model override (use global default)' : 'Set model override for this domain'}
+                >
+                  {overrideExpanded ? 'Clear Override' : 'Model Override'}
+                </button>
+              </div>
+
+              {/* Collapse header chevron */}
+              <button
+                onClick={() => setHeaderCollapsed(true)}
+                className="flex h-6 w-6 items-center justify-center rounded text-text-tertiary hover:bg-surface-2 hover:text-text-secondary ml-1"
+                title="Collapse header"
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <path d="M2 8l4-4 4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Per-domain model override panel (collapsible) */}
+            {overrideExpanded && (
+              <div className="flex items-center gap-2 border-b border-border-subtle bg-surface-0 px-4 py-2">
+                <span className="text-xs text-text-tertiary">Override:</span>
+                <select
+                  value={overrideProvider}
+                  onChange={(e) => handleOverrideProviderChange(e.target.value)}
+                  className="rounded border border-border bg-surface-2 px-2 py-1 text-xs text-text-primary"
+                >
+                  <option value="anthropic">Anthropic</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="ollama">Ollama</option>
+                </select>
+                <select
+                  value={useCustomOverride ? '__custom__' : overrideModel}
+                  onChange={(e) => handleOverrideModelChange(e.target.value)}
+                  className="rounded border border-border bg-surface-2 px-2 py-1 text-xs text-text-primary"
+                >
+                  {(overrideProvider === 'ollama'
+                    ? ollamaModels.length > 0
+                      ? ollamaModels  // Show only installed models when available
+                      : KNOWN_MODELS.ollama
+                    : KNOWN_MODELS[overrideProvider as ProviderName] ?? []
+                  ).map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                  <option value="__custom__">Custom...</option>
+                </select>
+                {useCustomOverride && (
+                  <input
+                    type="text"
+                    value={overrideCustom}
+                    onChange={(e) => setOverrideCustom(e.target.value)}
+                    className="w-40 rounded border border-border bg-surface-2 px-2 py-1 text-xs text-text-primary"
+                    placeholder="model-id"
+                    maxLength={128}
+                  />
+                )}
+                <button
+                  onClick={handleSaveOverride}
+                  disabled={!overrideProvider || (!useCustomOverride && !overrideModel) || (useCustomOverride && !overrideCustom.trim())}
+                  className="rounded bg-accent px-2.5 py-1 text-xs text-white hover:bg-accent-hover disabled:opacity-50"
+                >
+                  Save
+                </button>
+                <label className="flex items-center gap-1 text-xs text-text-tertiary cursor-pointer ml-2" title="Force tool use attempt even when model capability is uncertain">
+                  <input
+                    type="checkbox"
+                    checked={domain.forceToolAttempt}
+                    onChange={async () => {
+                      await updateDomain(activeDomainId, { forceToolAttempt: !domain.forceToolAttempt })
+                    }}
+                    className="h-3 w-3 rounded border-border accent-accent"
+                  />
+                  Force tools
+                </label>
+              </div>
             )}
-            <button
-              onClick={handleSaveOverride}
-              disabled={!overrideProvider || (!useCustomOverride && !overrideModel) || (useCustomOverride && !overrideCustom.trim())}
-              className="rounded bg-accent px-2.5 py-1 text-xs text-white hover:bg-accent-hover disabled:opacity-50"
-            >
-              Save
-            </button>
-            <label className="flex items-center gap-1 text-xs text-text-tertiary cursor-pointer ml-2" title="Force tool use attempt even when model capability is uncertain">
-              <input
-                type="checkbox"
-                checked={domain.forceToolAttempt}
-                onChange={async () => {
-                  await updateDomain(activeDomainId, { forceToolAttempt: !domain.forceToolAttempt })
-                }}
-                className="h-3 w-3 rounded border-border accent-accent"
-              />
-              Force tools
-            </label>
-          </div>
+          </>
         )}
 
         <ChatPanel domainId={activeDomainId} />

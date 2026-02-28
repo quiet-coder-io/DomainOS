@@ -158,7 +158,21 @@ export function Sidebar({ activeView, onViewChange, theme, onToggleTheme }: Side
 
   useEffect(() => {
     localStorage.setItem('domainOS:sidebarCollapsed', collapsed ? '1' : '0')
+    window.dispatchEvent(new Event('domainOS:panelChanged'))
   }, [collapsed])
+
+  // Listen for "toggle all panels" from the titlebar
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { collapsed: newVal } = (e as CustomEvent).detail
+      if (newVal && navRef.current) {
+        scrollTopRef.current = navRef.current.scrollTop
+      }
+      setCollapsed(newVal)
+    }
+    window.addEventListener('domainOS:panelToggleAll', handler)
+    return () => window.removeEventListener('domainOS:panelToggleAll', handler)
+  }, [])
 
   const toggleCollapsed = useCallback(() => setCollapsed((prev) => !prev), [])
 
@@ -235,7 +249,9 @@ export function Sidebar({ activeView, onViewChange, theme, onToggleTheme }: Side
             aria-label="Expand sidebar"
             className="flex h-10 w-10 items-center justify-center text-text-tertiary hover:text-text-secondary focus:outline-none focus:ring-2 focus:ring-accent rounded mt-1"
           >
-            <span className="text-sm font-bold">&raquo;</span>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d="M4 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </button>
 
           {/* Intake icon button */}
@@ -310,7 +326,6 @@ export function Sidebar({ activeView, onViewChange, theme, onToggleTheme }: Side
                   key={domain.id}
                   onClick={() => {
                     setActiveDomain(domain.id)
-                    setCollapsed(false)
                   }}
                   aria-label={`Open ${domain.name}`}
                   title={domain.name}
@@ -399,7 +414,9 @@ export function Sidebar({ activeView, onViewChange, theme, onToggleTheme }: Side
               aria-label="Collapse sidebar"
               className="flex items-center justify-center px-2 text-text-tertiary hover:text-text-secondary focus:outline-none focus:ring-2 focus:ring-accent rounded"
             >
-              <span className="text-xs font-bold">&laquo;</span>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M8 2L4 6l4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
             </button>
           </div>
 

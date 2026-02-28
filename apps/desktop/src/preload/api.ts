@@ -670,6 +670,8 @@ export interface ProviderConfig {
   defaultProvider: string
   defaultModel: string
   ollamaBaseUrl: string
+  responseStyle?: 'concise' | 'detailed'
+  historyWindow?: number
   embeddingProvider?: 'auto' | 'ollama' | 'openai' | 'off'
   embeddingModel?: string
 }

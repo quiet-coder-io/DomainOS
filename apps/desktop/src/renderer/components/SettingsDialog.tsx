@@ -85,6 +85,9 @@ export function SettingsDialog({ onClose }: Props): React.JSX.Element {
   const [toolTestResult, setToolTestResult] = useState<ToolTestResult | null>(null)
   const [toolTesting, setToolTesting] = useState(false)
 
+  // Response style
+  const [responseStyle, setResponseStyle] = useState<'concise' | 'detailed'>('concise')
+
   // KB search / embedding state
   const [embeddingProvider, setEmbeddingProvider] = useState<EmbeddingProviderOption>('auto')
   const [embeddingModel, setEmbeddingModel] = useState('')
@@ -115,7 +118,8 @@ export function SettingsDialog({ onClose }: Props): React.JSX.Element {
       setCustomModel(providerConfig.defaultModel)
     }
 
-    // Embedding config
+    // Response style + Embedding config
+    setResponseStyle(providerConfig.responseStyle ?? 'concise')
     setEmbeddingProvider(providerConfig.embeddingProvider ?? 'auto')
     setEmbeddingModel(providerConfig.embeddingModel ?? '')
   }, [providerConfig])
@@ -177,12 +181,13 @@ export function SettingsDialog({ onClose }: Props): React.JSX.Element {
       defaultProvider,
       defaultModel: model,
       ollamaBaseUrl: ollamaUrl.trim() || 'http://localhost:11434',
+      responseStyle,
       embeddingProvider,
       embeddingModel: embeddingModel.trim() || undefined,
     }
     await setProviderConfig(config)
     onClose()
-  }, [defaultProvider, defaultModel, customModel, useCustomModel, ollamaUrl, embeddingProvider, embeddingModel, setProviderConfig, onClose])
+  }, [defaultProvider, defaultModel, customModel, useCustomModel, ollamaUrl, responseStyle, embeddingProvider, embeddingModel, setProviderConfig, onClose])
 
   const handleProviderChange = useCallback((p: ProviderName) => {
     setDefaultProvider(p)
@@ -534,6 +539,19 @@ export function SettingsDialog({ onClose }: Props): React.JSX.Element {
                   />
                 </label>
               )}
+
+              {/* Response Style */}
+              <label className="mb-3 block">
+                <span className="mb-1 block text-sm text-text-secondary">Response Style</span>
+                <select
+                  value={responseStyle}
+                  onChange={(e) => setResponseStyle(e.target.value as 'concise' | 'detailed')}
+                  className={inputClass}
+                >
+                  <option value="concise">Concise (faster, bullets)</option>
+                  <option value="detailed">Detailed (thorough, with context)</option>
+                </select>
+              </label>
 
               {/* Test tools */}
               <div className="mb-4 flex items-center gap-2">

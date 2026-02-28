@@ -933,6 +933,22 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    version: 23,
+    description: 'Conversation summaries for sticky context across history window',
+    up(db) {
+      runSQL(db, `
+        CREATE TABLE IF NOT EXISTS conversation_summaries (
+          domain_id TEXT PRIMARY KEY REFERENCES domains(id) ON DELETE CASCADE,
+          summary_text TEXT NOT NULL DEFAULT '',
+          summary_version INTEGER NOT NULL DEFAULT 1,
+          last_summarized_created_at TEXT,
+          summary_hash TEXT NOT NULL DEFAULT '',
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+      `)
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

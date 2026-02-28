@@ -78,6 +78,8 @@ export interface PromptContext {
   brainstormContext?: PromptBrainstormContext
   activeSkill?: PromptActiveSkill
   currentDate?: string
+  responseStyle?: 'concise' | 'detailed'
+  conversationSummary?: string
   debug?: boolean
 }
 
@@ -188,6 +190,15 @@ export function buildSystemPrompt(
   if (context.domain.identity && p.sections.identity) {
     const identitySection = `=== AGENT IDENTITY ===\n${context.domain.identity}`
     addSection('Agent Identity', identitySection, true)
+  }
+
+  // === RESPONSE STYLE ===
+  if (p.sections.responseStyle) {
+    const style = context.responseStyle ?? 'concise'
+    const styleContent = style === 'concise'
+      ? `=== RESPONSE STYLE ===\nBe concise and direct. Prefer bullet points, but a short paragraph is fine when clearer.\nNo preambles, no restating the question. Give the answer first, then only essential details.\nMax 7 bullets per section unless asked. For step-by-step procedures, use numbered steps (max 10).\nUse a small table when comparing ≤5 items.\nIf uncertain, ask 1 short question or state assumption in 1 line.\nIf asked for detail or explanation, be thorough.`
+      : `=== RESPONSE STYLE ===\nProvide thorough, well-structured responses with context and reasoning. Be thorough but avoid repetition.`
+    addSection('Response Style', styleContent, false)
   }
 
   // === DOMAIN === (required core)
@@ -359,6 +370,12 @@ export function buildSystemPrompt(
     addSection('Session', sessionLines.join('\n'), false)
   } else if (!p.sections.session && context.sessionContext) {
     excludedSections.push({ name: 'Session', reason: 'profile-excluded' })
+  }
+
+  // === CONVERSATION SUMMARY === (lowest priority optional — dropped before KB if budget tight)
+  if (p.sections.conversationSummary && context.conversationSummary) {
+    const summaryContent = `=== CONVERSATION SUMMARY ===\n${context.conversationSummary}`
+    addSection('Conversation Summary', summaryContent, false)
   }
 
   // === KB UPDATE INSTRUCTIONS ===
