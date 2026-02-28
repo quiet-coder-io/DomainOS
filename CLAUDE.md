@@ -133,6 +133,8 @@ This loop validates the core value prop: domain-scoped AI that reads and writes 
 - **Skill library** — reusable analytical procedures (e.g., "CMBS loan review") with per-message activation, freeform/structured output, tool hints, import/export as `.skill.md` files, and full CRUD management dialog. Skills inject into the system prompt between shared protocols and domain protocols with protocol precedence enforcement.
 - **Mission system** — reusable mission definitions with a 10-step lifecycle runner (validate → context → prompt → LLM → parse → persist → gate → actions → audit → finalize). Generalized runner with optional dep hooks (`buildContext`, `buildPrompts`, `shouldGate`, `buildEmailBody`, `buildEmailSubject`) — mission-specific logic injected at IPC layer. Data-driven mission metadata (`methodology`, `outputLabels`) for self-describing missions. Two seeded missions: Portfolio Briefing and Loan Document Review (CMBS methodology, attorney memo + risk heatmap). Dynamic parameter form from definition, mission selector, cancel-by-requestId, real Gmail draft creation. Per-run provenance (definition hash, prompt hash, context hash, model, KB digest timestamps). Per-domain enable/disable, run history, gate modal.
 - **Knowledge Base vector search (RAG)** — semantic search over domain KBs via local Ollama embeddings (nomic-embed-text, 768d) or OpenAI (explicit opt-in). Heading-aware markdown chunking with stable content-anchored identity, cosine similarity + MMR diversity retrieval, structural-tier reserve for domain identity, in-memory embedding cache with 15-min TTL. Auto-indexes on domain switch/KB file changes. Falls back to existing tier-based context when embeddings unavailable.
+- **Collapsible UI panels** — collapsible header bar, left sidebar, and right sidebar with localStorage persistence. "Toggle all panels" button in window titlebar for simultaneous collapse/expand. Cross-component coordination via custom DOM events. Consistent 12x12 SVG chevron icons across all panels.
+- **Smart prompt context window** — token-aware history slicing (configurable window, default 50 messages), conversation summaries (heuristic summarization of trimmed messages, stored in DB), recall intent detection (expands window for "as we discussed" phrases), conditional advisory/KB protocol injection (pin/decay pattern), response style setting (concise/detailed).
 
 ### Out of scope (future)
 - Protocol marketplace/sharing
@@ -196,6 +198,38 @@ Semantic search over domain knowledge bases so the LLM receives the most relevan
 
 **User setup**: Install Ollama (`brew install ollama`), pull `nomic-embed-text` (`ollama pull nomic-embed-text`), start Ollama (`ollama serve`). DomainOS auto-detects and indexes on next domain switch.
 
+### Collapsible UI Panels (Completed)
+Three-panel collapse system: header bar (top), left sidebar, and right KB sidebar. All persist to localStorage. A "toggle all panels" button in the window titlebar collapses or expands all three simultaneously.
+
+**Panel coordination**: Cross-component state coordination via two custom DOM events: `domainOS:panelToggleAll` (titlebar → panels) and `domainOS:panelChanged` (panels → titlebar). Each panel uses synchronous localStorage writes in its setter callback to prevent state loss on fast remount.
+
+**localStorage keys**: `domainOS:sidebarCollapsed`, `domainOS:headerCollapsed`, `domainOS:rightSidebarCollapsed`.
+
+**Collapsed header bar**: Shows only domain name + expand chevron. Model override panel hidden when header collapsed.
+
+**Toggle-all logic**: If any panel is expanded → collapse all. If all collapsed → expand all. Icon: outward chevrons (`<>`) when all collapsed, inward chevrons (`><`) when any expanded.
+
+**Chevron consistency**: All expand/collapse chevrons use 12x12 SVG with `strokeWidth="1.5"` and `strokeLinecap="round"`. Sidebar replaced `»`/`«` text characters with matching SVG chevrons.
+
+### Smart Prompt Context Window (Completed)
+Token-aware history slicing and conversation summaries to keep long conversations within LLM context limits while preserving important context.
+
+**History slicing** (`sliceMessagesForLLM()`): Keeps newest `historyWindow` messages (default 50, configurable in Settings). Token ceiling: 70% of (contextLimit - systemBudget×0.3 - outputReserve). Oldest messages trimmed first; always keeps at least 1 message.
+
+**Recall intent detection** (`detectRecallIntent()`): When user says "as we discussed" or "continue" after a 30+ minute gap with existing summary, window expands to 2.4× (max 120). Ensures recall-heavy queries get more context.
+
+**Conversation summaries**: Heuristic (no LLM) — extracts first sentence per trimmed message, categorizes into Goals/Decisions/Open questions/Constraints/Current status. Stored in `conversation_summaries` table (migration v23). Hash-based dedup skips writes when summary unchanged. Injected as lowest-priority prompt section (dropped before KB under budget pressure).
+
+**Conditional advisory protocol**: Pin/decay pattern. Triggered by keywords (brainstorm, risk, scenario, etc.), decays by 1 each turn without trigger. Dev-task filter prevents false activation on code discussions. User can say "stop advising" to disable. On restart, scans last 5 assistant messages for `<!-- advisory_mode:` marker.
+
+**Conditional KB update instructions**: Triggered by KB-intent keywords (update, edit, change + kb, knowledge, file, document). Self-heal detection for "why didn't you update" complaints. Same pin/decay pattern (count 3, decays by 1 each turn).
+
+**Response style**: Two modes — `concise` (bullet-oriented, no preambles, max 7 bullets) and `detailed` (thorough with context). Configurable in Settings. Injected as early prompt section.
+
+**DB migration v23**: `conversation_summaries` table with `domain_id` PK, `summary_text`, `summary_version`, `last_summarized_created_at`, `summary_hash` (SHA-256 prefix for dedup), `updated_at`.
+
+**Perf logging**: Structured JSON `[chat:perf]` log after each chat:send with history counts, summary stats, prompt budget, gate states, timing (first chunk latency, total ms).
+
 ## Key Files Reference
 
 ### Core Library (`packages/core/`)
@@ -245,7 +279,8 @@ Semantic search over domain knowledge bases so the LLM receives the most relevan
 | `src/loan-review/prompt-builder.ts` | `buildLoanReviewPrompt(ctx, inputs)` — CMBS methodology system prompt with `<doc_inventory>` + `<kb_context>` blocks, review depth modes (triage/attorney-prep/full-review) |
 | `src/loan-review/output-parser.ts` | `parseLoanReview(rawText)` — deterministic fence extraction for `loan_review_memo` + `loan_review_heatmap_json` blocks with single-occurrence enforcement and diagnostics |
 | `src/loan-review/index.ts` | Barrel export: `LoanReviewContext` type, `buildLoanReviewPrompt`, `parseLoanReview` |
-| `src/storage/` | SQLite schema, migrations (v1–v22). v8: per-domain model override. v9: directed relationships. v11: decision quality columns. v12: advisory_artifacts table. v14: brainstorm_sessions table. v16: skills table. v18: missions (6 tables + audit_log CHECK drop + seed data). v19: Loan Document Review mission seed. v20: methodology/outputLabels patch. v21: status_intent flag + briefing context. v22: kb_chunks + kb_chunk_embeddings + kb_embedding_jobs tables |
+| `src/storage/` | SQLite schema, migrations (v1–v23). v8: per-domain model override. v9: directed relationships. v11: decision quality columns. v12: advisory_artifacts table. v14: brainstorm_sessions table. v16: skills table. v18: missions (6 tables + audit_log CHECK drop + seed data). v19: Loan Document Review mission seed. v20: methodology/outputLabels patch. v21: status_intent flag + briefing context. v22: kb_chunks + kb_chunk_embeddings + kb_embedding_jobs tables. v23: conversation_summaries table |
+| `src/chat/repository.ts` | `ChatMessageRepository` (append, paginate, clear) + `ConversationSummaryRepository` (heuristic summaries for history slicing, hash-based dedup) |
 | `src/common/` | Result type, shared Zod schemas |
 
 ### Integrations (`packages/integrations/`)
@@ -287,9 +322,10 @@ Semantic search over domain knowledge bases so the LLM receives the most relevan
 | `src/main/embedding-manager.ts` | `EmbeddingManager` — per-domain job coalescing with dirty-flag, AbortController, `indexDomain()`, `cancel()`, `cancelAll()` |
 | `src/main/embedding-cache.ts` | In-memory embedding cache (`Map<domainId:modelName, StoredEmbedding[]>`) with explicit invalidation hooks + 15-min TTL |
 | `src/main/app-menu.ts` | Application menu with Edit, View, Window, Help (User Guide + GitHub link) |
-| `src/preload/api.ts` | IPC type contract: `DomainOSAPI`, `ProviderConfig`, `ProviderKeysStatus`, `ToolTestResult`, `PortfolioHealth`, `BriefingAnalysis`, `MissionRunDetailData`, `MissionProgressEventData`, `EmbeddingStatus` |
-| `src/renderer/components/SettingsDialog.tsx` | Multi-provider settings modal (API keys, Google OAuth config, Ollama connection, model defaults, tool test, KB search toggle/provider/model/re-index) |
-| `src/renderer/pages/DomainChatPage.tsx` | Chat page with per-domain model override UI (tri-state: global default / override / clear) |
+| `src/preload/api.ts` | IPC type contract: `DomainOSAPI`, `ProviderConfig` (incl. `responseStyle`, `historyWindow`), `ProviderKeysStatus`, `ToolTestResult`, `PortfolioHealth`, `BriefingAnalysis`, `MissionRunDetailData`, `MissionProgressEventData`, `EmbeddingStatus` |
+| `src/renderer/components/SettingsDialog.tsx` | Multi-provider settings modal (API keys, Google OAuth config, Ollama connection, model defaults, response style, tool test, KB search toggle/provider/model/re-index) |
+| `src/renderer/App.tsx` | Root app component with `WindowTitlebar` (pin window + toggle-all-panels), layout (Sidebar + main content), toast container, intake/automation listeners |
+| `src/renderer/pages/DomainChatPage.tsx` | Chat page with collapsible header bar, per-domain model override, right KB sidebar with resize/collapse, panelToggleAll listener |
 | `src/renderer/pages/BriefingPage.tsx` | Portfolio health dashboard + LLM analysis streaming UI with alerts, actions, monitors + GTasks connect/disconnect + overdue badge |
 | `src/renderer/stores/settings-store.ts` | Zustand store for provider keys (boolean+last4), global config, Ollama state, embedding status + re-index |
 | `src/renderer/stores/domain-store.ts` | Zustand store for domains including `modelProvider`, `modelName`, `forceToolAttempt` |
