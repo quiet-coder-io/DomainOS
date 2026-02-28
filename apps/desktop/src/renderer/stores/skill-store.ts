@@ -59,6 +59,7 @@ export const useSkillStore = create<SkillState>((set, get) => ({
         activeSkillIdByDomain: newActiveMap,
       })
     } else {
+      console.warn('[skill-store] fetchSkills failed for domain', domainId, result)
       set({ loading: false })
     }
   },
@@ -147,5 +148,5 @@ export const useSkillStore = create<SkillState>((set, get) => ({
 // When SkillSelector mounts and calls fetchSkills(domainId, false), it will
 // see the expired cache and refetch from the main process.
 window.domainOS.skill.onChanged(() => {
-  useSkillStore.setState({ skillsLoadedAtByDomain: {} })
+  useSkillStore.setState({ skillsLoadedAtByDomain: {}, skillsByDomain: {} })
 })
