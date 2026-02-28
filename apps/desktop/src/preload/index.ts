@@ -300,6 +300,28 @@ const api: DomainOSAPI = {
     clearGCPOAuth: () => ipcRenderer.invoke('settings:clear-gcp-oauth'),
   },
 
+  plugin: {
+    list: () => ipcRenderer.invoke('plugin:list'),
+    get: (id: string) => ipcRenderer.invoke('plugin:get', id),
+    installFromDirectory: (path: string) => ipcRenderer.invoke('plugin:install-from-directory', path),
+    uninstall: (id: string) => ipcRenderer.invoke('plugin:uninstall', id),
+    toggle: (id: string) => ipcRenderer.invoke('plugin:toggle', id),
+    enableForDomain: (pluginId: string, domainId: string) =>
+      ipcRenderer.invoke('plugin:enable-for-domain', pluginId, domainId),
+    disableForDomain: (pluginId: string, domainId: string) =>
+      ipcRenderer.invoke('plugin:disable-for-domain', pluginId, domainId),
+    listForDomain: (domainId: string) => ipcRenderer.invoke('plugin:list-for-domain', domainId),
+    checkUpdates: (id: string) => ipcRenderer.invoke('plugin:check-updates', id),
+    marketplaceList: () => ipcRenderer.invoke('plugin:marketplace-list'),
+  },
+
+  command: {
+    listForDomain: (domainId: string) => ipcRenderer.invoke('command:list-for-domain', domainId),
+    get: (id: string) => ipcRenderer.invoke('command:get', id),
+    displaySlugs: (domainId: string) => ipcRenderer.invoke('command:display-slugs', domainId),
+    logInvocation: (input) => ipcRenderer.invoke('command:invoke-log', input),
+  },
+
   mission: {
     list: () => ipcRenderer.invoke('mission:list'),
     listForDomain: (domainId: string) => ipcRenderer.invoke('mission:list-for-domain', domainId),

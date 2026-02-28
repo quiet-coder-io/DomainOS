@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { ipcMain, dialog, safeStorage, app, BrowserWindow } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 import type Database from 'better-sqlite3'
@@ -70,6 +71,13 @@ import {
   buildLoanReviewPrompt,
   KBChunkRepository,
   buildVectorKBContext,
+  PluginRepository,
+  CommandRepository,
+  installPlugin,
+  cleanupStaging,
+  listMarketplace,
+  checkDependencies,
+  checkCommandDependencies,
 } from '@domain-os/core'
 import type {
   CreateDomainInput,
@@ -3646,4 +3654,199 @@ Rules:
     if (!result.ok) return { ok: false, error: result.error.message }
     return { ok: true, value: result.value }
   })
+
+  // ── Plugin handlers ──
+  try {
+  const pluginRepo = new PluginRepository(db)
+  const commandRepo = new CommandRepository(db)
+  const pluginsDir = join(app.getPath('userData'), 'plugins')
+
+  // Startup: clean up interrupted installs
+  cleanupStaging(pluginsDir).catch(() => {})
+
+  ipcMain.handle('plugin:list', () => {
+    const result = pluginRepo.list()
+    return result.ok
+      ? { ok: true, value: result.value }
+      : { ok: false, error: result.error.message }
+  })
+
+  ipcMain.handle('plugin:get', (_event, id: string) => {
+    const result = pluginRepo.getById(id)
+    if (!result.ok) return { ok: false, error: result.error.message }
+
+    // Fetch associated skills and commands
+    const skillRows = db
+      .prepare(
+        `SELECT id, name, description, is_enabled, plugin_skill_key, source_hash,
+                removed_upstream_at, has_assets
+         FROM skills WHERE plugin_id = ? ORDER BY sort_order ASC, name ASC`,
+      )
+      .all(id) as Array<{
+      id: string; name: string; description: string; is_enabled: number
+      plugin_skill_key: string | null; source_hash: string | null
+      removed_upstream_at: string | null; has_assets: number
+    }>
+
+    const cmdsResult = commandRepo.listByPlugin(id)
+    const commands = cmdsResult.ok ? cmdsResult.value : []
+
+    return {
+      ok: true,
+      value: {
+        ...result.value,
+        skills: skillRows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          description: r.description,
+          isEnabled: r.is_enabled === 1,
+          pluginSkillKey: r.plugin_skill_key,
+          removedUpstreamAt: r.removed_upstream_at,
+          hasAssets: r.has_assets === 1,
+        })),
+        commands: commands.map((c) => ({
+          id: c.id,
+          name: c.name,
+          canonicalSlug: c.canonicalSlug,
+          description: c.description,
+          argumentHint: c.argumentHint,
+          isEnabled: c.isEnabled,
+          removedUpstreamAt: c.removedUpstreamAt,
+        })),
+      },
+    }
+  })
+
+  ipcMain.handle('plugin:install-from-directory', async (_event, path: string) => {
+    console.log('[plugin:install] Starting install from:', path)
+    const result = await installPlugin(path, db, pluginsDir, {
+      sourceType: 'local_directory',
+    })
+    if (result.ok) {
+      console.log('[plugin:install] Success:', result.value.plugin.name, '— skills:', result.value.skillsImported, 'commands:', result.value.commandsImported)
+      return { ok: true, value: result.value }
+    } else {
+      console.error('[plugin:install] Failed:', result.error.message)
+      return { ok: false, error: result.error.message }
+    }
+  })
+
+  ipcMain.handle('plugin:uninstall', async (_event, id: string) => {
+    const { rm } = await import('node:fs/promises')
+    const plugin = pluginRepo.getById(id)
+    if (!plugin.ok) return { ok: false, error: plugin.error.message }
+
+    const result = pluginRepo.delete(id)
+    if (!result.ok) return { ok: false, error: result.error.message }
+
+    // Remove from disk
+    try { await rm(plugin.value.installPath, { recursive: true, force: true }) } catch { /* ok */ }
+    return { ok: true }
+  })
+
+  ipcMain.handle('plugin:toggle', (_event, id: string) => {
+    const result = pluginRepo.toggle(id)
+    return result.ok
+      ? { ok: true, value: result.value }
+      : { ok: false, error: result.error.message }
+  })
+
+  ipcMain.handle('plugin:enable-for-domain', (_event, pluginId: string, domainId: string) => {
+    // Check hard deps before enabling
+    const plugin = pluginRepo.getById(pluginId)
+    if (!plugin.ok) return { ok: false, error: plugin.error.message }
+
+    if (plugin.value.sourceRepo) {
+      const deps = checkDependencies(plugin.value.name, plugin.value.sourceRepo, db, domainId)
+      if (deps.hard.length > 0) {
+        const missing = deps.hard[0]!
+        const msg = missing.installedGlobally
+          ? `Requires "${missing.name}" enabled for this domain`
+          : `Requires "${missing.name}" to be installed`
+        return { ok: false, error: msg }
+      }
+    }
+
+    const result = pluginRepo.enableForDomain(pluginId, domainId)
+    return result.ok
+      ? { ok: true, value: result.value }
+      : { ok: false, error: result.error.message }
+  })
+
+  ipcMain.handle('plugin:disable-for-domain', (_event, pluginId: string, domainId: string) => {
+    const result = pluginRepo.disableForDomain(pluginId, domainId)
+    return result.ok
+      ? { ok: true, value: result.value }
+      : { ok: false, error: result.error.message }
+  })
+
+  ipcMain.handle('plugin:list-for-domain', (_event, domainId: string) => {
+    const result = pluginRepo.listForDomain(domainId)
+    return result.ok
+      ? { ok: true, value: result.value }
+      : { ok: false, error: result.error.message }
+  })
+
+  ipcMain.handle('plugin:check-updates', async (_event, id: string) => {
+    const plugin = pluginRepo.getById(id)
+    if (!plugin.ok) return { ok: false, error: plugin.error.message }
+    // For MVP: no actual remote version check — just return no update
+    return { ok: true, value: { hasUpdate: false } }
+  })
+
+  ipcMain.handle('plugin:marketplace-list', async () => {
+    const result = await listMarketplace(db)
+    return result.ok
+      ? { ok: true, value: result.value }
+      : { ok: false, error: result.error.message }
+  })
+
+  // ── Command handlers ──
+
+  ipcMain.handle('command:list-for-domain', (_event, domainId: string) => {
+    const cmdsResult = commandRepo.listForDomain(domainId)
+    if (!cmdsResult.ok) return { ok: false, error: cmdsResult.error.message }
+
+    const slugsResult = commandRepo.computeDisplaySlugs(domainId)
+    const slugMap = slugsResult.ok ? slugsResult.value : new Map()
+
+    const enriched = cmdsResult.value.map((cmd) => ({
+      ...cmd,
+      displaySlug: slugMap.get(cmd.canonicalSlug) ?? cmd.canonicalSlug,
+      isModified: cmd.sourceHash !== createHash('sha256').update(cmd.content).digest('hex'),
+    }))
+
+    return { ok: true, value: enriched }
+  })
+
+  ipcMain.handle('command:get', (_event, id: string) => {
+    const result = commandRepo.getById(id)
+    return result.ok
+      ? { ok: true, value: result.value }
+      : { ok: false, error: result.error.message }
+  })
+
+  ipcMain.handle('command:display-slugs', (_event, domainId: string) => {
+    const result = commandRepo.computeDisplaySlugs(domainId)
+    if (!result.ok) return { ok: false, error: result.error.message }
+    // Convert Map to plain object for IPC
+    const obj: Record<string, string> = {}
+    for (const [k, v] of result.value) obj[k] = v
+    return { ok: true, value: obj }
+  })
+
+  ipcMain.handle('command:invoke-log', (_event, input: {
+    commandId: string; domainId: string; canonicalSlug: string
+    pluginVersion?: string | null; argsHash?: string | null; resultHash?: string | null
+    durationMs?: number | null; status: 'success' | 'blocked' | 'error'; errorCode?: string | null
+  }) => {
+    const result = commandRepo.logInvocation(input)
+    return result.ok
+      ? { ok: true, value: result.value }
+      : { ok: false, error: result.error.message }
+  })
+
+  } catch (err) {
+    console.error('[plugin-handlers] FATAL: Failed to register plugin/command IPC handlers:', err)
+  }
 }

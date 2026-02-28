@@ -9,8 +9,8 @@ import type { DomainTag } from '../../preload/api'
 const PREDEFINED_TAG_KEYS = ['property', 'contact', 'type'] as const
 
 interface SidebarProps {
-  activeView: 'domains' | 'intake' | 'briefing' | 'missions'
-  onViewChange: (view: 'domains' | 'intake' | 'briefing' | 'missions') => void
+  activeView: 'domains' | 'intake' | 'briefing' | 'missions' | 'plugins'
+  onViewChange: (view: 'domains' | 'intake' | 'briefing' | 'missions' | 'plugins') => void
   theme: 'dark' | 'light'
   onToggleTheme: () => void
 }
@@ -314,6 +314,21 @@ export function Sidebar({ activeView, onViewChange, theme, onToggleTheme }: Side
             </svg>
           </button>
 
+          {/* Plugins icon button */}
+          <button
+            onClick={() => {
+              onViewChange('plugins')
+              setCollapsed(false)
+            }}
+            aria-label="Open Plugins"
+            title="Plugins"
+            className="flex h-10 w-10 items-center justify-center text-text-tertiary hover:text-text-secondary focus:outline-none focus:ring-2 focus:ring-accent rounded"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+              <path d="M12 4.467c0-.405.262-.75.559-1.027.276-.257.441-.584.441-.94 0-.828-.895-1.5-2-1.5s-2 .672-2 1.5c0 .362.171.694.456.953.29.265.544.6.544.994V6H8a4 4 0 0 0-4 4v1h-.5A1.5 1.5 0 0 0 2 12.5v1A1.5 1.5 0 0 0 3.5 15H4v1a4 4 0 0 0 4 4h4a4 4 0 0 0 4-4v-1h.5a1.5 1.5 0 0 0 1.5-1.5v-1a1.5 1.5 0 0 0-1.5-1.5H16v-1a4 4 0 0 0-4-4V4.467Z" />
+            </svg>
+          </button>
+
           {/* Divider */}
           <div className="mx-2 my-1 w-6 border-b border-border" />
 
@@ -362,50 +377,87 @@ export function Sidebar({ activeView, onViewChange, theme, onToggleTheme }: Side
       ) : (
         /* --- Expanded view --- */
         <>
-          {/* View tabs + collapse button */}
+          {/* View tabs (icon-based) + collapse button */}
           <div className="flex border-b border-border">
+            {/* Domains */}
             <button
               onClick={() => onViewChange('domains')}
-              className={`flex-1 px-1.5 py-2 text-xs font-medium ${
+              title="Domains"
+              aria-label="Domains"
+              className={`flex-1 flex items-center justify-center py-2.5 ${
                 activeView === 'domains'
                   ? 'border-b-2 border-accent text-accent-text'
                   : 'text-text-tertiary hover:text-text-secondary'
               }`}
             >
-              Domains
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                <path d="M10 9.25a.75.75 0 0 0-.75.75v.01c0 .414.336.75.75.75h.01a.75.75 0 0 0 .75-.75V10a.75.75 0 0 0-.75-.75H10ZM6 13.25a.75.75 0 0 0-.75.75v.01c0 .414.336.75.75.75h.01a.75.75 0 0 0 .75-.75V14a.75.75 0 0 0-.75-.75H6ZM10 13.25a.75.75 0 0 0-.75.75v.01c0 .414.336.75.75.75h.01a.75.75 0 0 0 .75-.75V14a.75.75 0 0 0-.75-.75H10ZM14 13.25a.75.75 0 0 0-.75.75v.01c0 .414.336.75.75.75h.01a.75.75 0 0 0 .75-.75V14a.75.75 0 0 0-.75-.75H14ZM6 9.25a.75.75 0 0 0-.75.75v.01c0 .414.336.75.75.75h.01a.75.75 0 0 0 .75-.75V10a.75.75 0 0 0-.75-.75H6ZM14 9.25a.75.75 0 0 0-.75.75v.01c0 .414.336.75.75.75h.01a.75.75 0 0 0 .75-.75V10a.75.75 0 0 0-.75-.75H14Z" />
+                <path fillRule="evenodd" d="M2 5.5A3.5 3.5 0 0 1 5.5 2h9A3.5 3.5 0 0 1 18 5.5v9a3.5 3.5 0 0 1-3.5 3.5h-9A3.5 3.5 0 0 1 2 14.5v-9ZM5.5 3.5A2 2 0 0 0 3.5 5.5v9A2 2 0 0 0 5.5 16h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2h-9Z" clipRule="evenodd" />
+              </svg>
             </button>
+            {/* Briefing */}
             <button
               onClick={() => onViewChange('briefing')}
-              className={`flex-1 px-1.5 py-2 text-xs font-medium ${
+              title="Portfolio Briefing"
+              aria-label="Portfolio Briefing"
+              className={`flex-1 flex items-center justify-center py-2.5 ${
                 activeView === 'briefing'
                   ? 'border-b-2 border-accent text-accent-text'
                   : 'text-text-tertiary hover:text-text-secondary'
               }`}
             >
-              Briefing
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                <path fillRule="evenodd" d="M1 2.75A.75.75 0 0 1 1.75 2h16.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 2.75ZM1 8.75A.75.75 0 0 1 1.75 8h16.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 8.75ZM1 14.75a.75.75 0 0 1 .75-.75h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1-.75-.75Z" clipRule="evenodd" />
+              </svg>
             </button>
+            {/* Missions */}
             <button
               onClick={() => onViewChange('missions')}
-              className={`flex-1 px-1.5 py-2 text-xs font-medium ${
+              title="Mission Control"
+              aria-label="Mission Control"
+              className={`flex-1 flex items-center justify-center py-2.5 ${
                 activeView === 'missions'
                   ? 'border-b-2 border-accent text-accent-text'
                   : 'text-text-tertiary hover:text-text-secondary'
               }`}
             >
-              Missions
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                <path fillRule="evenodd" d="M4.606 12.97a.75.75 0 0 1-.134 1.051 2.494 2.494 0 0 0-.93 2.437 2.494 2.494 0 0 0 2.437-.93.75.75 0 1 1 1.186.918 3.995 3.995 0 0 1-4.482 1.332.75.75 0 0 1-.461-.461 3.994 3.994 0 0 1 1.332-4.482.75.75 0 0 1 1.052.134Z" clipRule="evenodd" />
+                <path fillRule="evenodd" d="M13.703 4.469a3.25 3.25 0 0 0-4.122.585l-5.317 5.92a.75.75 0 0 0 1.116 1.004l5.318-5.92a1.75 1.75 0 0 1 2.22-.316l.152.094c.268.165.588.252.913.252h.94a.75.75 0 0 0 0-1.5h-.94a.424.424 0 0 1-.168-.046l-.112-.073Z" clipRule="evenodd" />
+              </svg>
             </button>
+            {/* Plugins */}
+            <button
+              onClick={() => onViewChange('plugins')}
+              title="Plugins"
+              aria-label="Plugins"
+              className={`flex-1 flex items-center justify-center py-2.5 ${
+                activeView === 'plugins'
+                  ? 'border-b-2 border-accent text-accent-text'
+                  : 'text-text-tertiary hover:text-text-secondary'
+              }`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                <path d="M12 4.467c0-.405.262-.75.559-1.027.276-.257.441-.584.441-.94 0-.828-.895-1.5-2-1.5s-2 .672-2 1.5c0 .362.171.694.456.953.29.265.544.6.544.994V6H8a4 4 0 0 0-4 4v1h-.5A1.5 1.5 0 0 0 2 12.5v1A1.5 1.5 0 0 0 3.5 15H4v1a4 4 0 0 0 4 4h4a4 4 0 0 0 4-4v-1h.5a1.5 1.5 0 0 0 1.5-1.5v-1a1.5 1.5 0 0 0-1.5-1.5H16v-1a4 4 0 0 0-4-4V4.467Z" />
+              </svg>
+            </button>
+            {/* Intake */}
             <button
               onClick={() => onViewChange('intake')}
-              className={`flex items-center justify-center gap-1.5 flex-1 px-1.5 py-2 text-xs font-medium ${
+              title="Intake"
+              aria-label="Intake"
+              className={`relative flex-1 flex items-center justify-center py-2.5 ${
                 activeView === 'intake'
                   ? 'border-b-2 border-accent text-accent-text'
                   : 'text-text-tertiary hover:text-text-secondary'
               }`}
             >
-              Intake
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                <path fillRule="evenodd" d="M1 11.27c0-.246.033-.492.099-.73l1.523-5.521A2.75 2.75 0 0 1 5.273 3h9.454a2.75 2.75 0 0 1 2.651 2.019l1.523 5.52c.066.239.099.485.099.732V15.25A2.75 2.75 0 0 1 16.25 18H3.75A2.75 2.75 0 0 1 1 15.25V11.27ZM3.75 16.5a1.25 1.25 0 0 1-1.25-1.25v-3h3.214a.75.75 0 0 1 .672.416l.5 1a.75.75 0 0 0 .672.416h3.884a.75.75 0 0 0 .672-.416l.5-1a.75.75 0 0 1 .672-.416H17.5v3A1.25 1.25 0 0 1 16.25 16.5H3.75Z" clipRule="evenodd" />
+              </svg>
               {intakeItems.length > 0 && (
-                <span className="rounded-full bg-accent-muted px-1.5 py-0.5 text-[10px] font-medium text-accent-text">
-                  {intakeItems.length}
+                <span className="absolute -top-0.5 right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-accent px-1 text-[9px] font-bold text-white">
+                  {intakeBadgeText}
                 </span>
               )}
             </button>

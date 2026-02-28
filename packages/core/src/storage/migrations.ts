@@ -949,6 +949,146 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    version: 24,
+    description: 'Plugin system — registry, dependencies, domain assoc, commands, skill extensions, marketplace cache',
+    up(db) {
+      // ── Plugin registry ──
+      runSQL(db, `
+        CREATE TABLE IF NOT EXISTS plugins (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+          version TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          author_name TEXT NOT NULL DEFAULT '',
+          author_json TEXT,
+          source_type TEXT NOT NULL DEFAULT 'local_directory'
+            CHECK(source_type IN ('anthropic_official', 'github_repo', 'local_directory')),
+          source_repo TEXT,
+          source_ref TEXT,
+          source_path TEXT,
+          manifest_json TEXT NOT NULL,
+          manifest_hash TEXT NOT NULL,
+          file_manifest_json TEXT,
+          install_path TEXT NOT NULL,
+          connector_json TEXT,
+          license_text TEXT,
+          notice_text TEXT,
+          discovery_mode TEXT NOT NULL DEFAULT 'scan_fallback'
+            CHECK(discovery_mode IN ('manifest', 'scan_fallback')),
+          strict_mode INTEGER NOT NULL DEFAULT 1,
+          format_version INTEGER NOT NULL DEFAULT 1,
+          is_enabled INTEGER NOT NULL DEFAULT 1,
+          installed_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+      `)
+
+      // ── Dependencies (source-aware) ──
+      runSQL(db, `
+        CREATE TABLE IF NOT EXISTS plugin_dependencies (
+          source_repo TEXT NOT NULL,
+          plugin_name TEXT NOT NULL COLLATE NOCASE,
+          depends_on_name TEXT NOT NULL COLLATE NOCASE,
+          dep_type TEXT NOT NULL DEFAULT 'soft'
+            CHECK(dep_type IN ('soft', 'hard')),
+          PRIMARY KEY (source_repo, plugin_name, depends_on_name)
+        );
+      `)
+
+      // Seed: financial-services add-ons have HARD dep on core
+      const seedDeps = db.prepare(
+        `INSERT OR IGNORE INTO plugin_dependencies (source_repo, plugin_name, depends_on_name, dep_type) VALUES (?, ?, ?, ?)`,
+      )
+      const fsRepo = 'anthropics/financial-services-plugins'
+      seedDeps.run(fsRepo, 'investment-banking', 'financial-analysis', 'hard')
+      seedDeps.run(fsRepo, 'equity-research', 'financial-analysis', 'hard')
+      seedDeps.run(fsRepo, 'private-equity', 'financial-analysis', 'hard')
+      seedDeps.run(fsRepo, 'wealth-management', 'financial-analysis', 'hard')
+
+      // ── Plugin ↔ Domain association ──
+      runSQL(db, `
+        CREATE TABLE IF NOT EXISTS plugin_domain_assoc (
+          plugin_id TEXT NOT NULL,
+          domain_id TEXT NOT NULL,
+          is_enabled INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          PRIMARY KEY (plugin_id, domain_id),
+          FOREIGN KEY (plugin_id) REFERENCES plugins(id) ON DELETE CASCADE,
+          FOREIGN KEY (domain_id) REFERENCES domains(id) ON DELETE CASCADE
+        );
+      `)
+
+      // ── Commands (slash-invocable procedures) ──
+      runSQL(db, `
+        CREATE TABLE IF NOT EXISTS commands (
+          id TEXT PRIMARY KEY,
+          plugin_id TEXT REFERENCES plugins(id) ON DELETE CASCADE,
+          plugin_command_key TEXT,
+          name TEXT NOT NULL,
+          canonical_slug TEXT NOT NULL COLLATE NOCASE,
+          plugin_name TEXT,
+          description TEXT NOT NULL DEFAULT '',
+          argument_hint TEXT,
+          source_content TEXT NOT NULL,
+          content TEXT NOT NULL,
+          source_hash TEXT NOT NULL,
+          source_ref TEXT,
+          source_path TEXT,
+          removed_upstream_at TEXT,
+          is_enabled INTEGER NOT NULL DEFAULT 1,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(plugin_id, plugin_command_key),
+          UNIQUE(canonical_slug)
+        );
+      `)
+
+      // ── Command invocation audit log ──
+      runSQL(db, `
+        CREATE TABLE IF NOT EXISTS command_invocations (
+          id TEXT PRIMARY KEY,
+          command_id TEXT NOT NULL,
+          domain_id TEXT NOT NULL,
+          canonical_slug TEXT NOT NULL,
+          plugin_version TEXT,
+          args_hash TEXT,
+          result_hash TEXT,
+          duration_ms INTEGER,
+          status TEXT NOT NULL DEFAULT 'success'
+            CHECK(status IN ('success', 'blocked', 'error')),
+          error_code TEXT,
+          invoked_at TEXT NOT NULL,
+          FOREIGN KEY (command_id) REFERENCES commands(id) ON DELETE CASCADE
+        );
+      `)
+
+      // ── Extend skills table with plugin columns ──
+      runSQL(db, `ALTER TABLE skills ADD COLUMN plugin_id TEXT REFERENCES plugins(id) ON DELETE CASCADE;`)
+      runSQL(db, `ALTER TABLE skills ADD COLUMN plugin_skill_key TEXT;`)
+      runSQL(db, `ALTER TABLE skills ADD COLUMN source_content TEXT;`)
+      runSQL(db, `ALTER TABLE skills ADD COLUMN source_hash TEXT;`)
+      runSQL(db, `ALTER TABLE skills ADD COLUMN source_ref TEXT;`)
+      runSQL(db, `ALTER TABLE skills ADD COLUMN source_path TEXT;`)
+      runSQL(db, `ALTER TABLE skills ADD COLUMN removed_upstream_at TEXT;`)
+      runSQL(db, `ALTER TABLE skills ADD COLUMN has_assets INTEGER NOT NULL DEFAULT 0;`)
+      runSQL(db, `ALTER TABLE skills ADD COLUMN assets_index_json TEXT;`)
+      runSQL(db, `CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_plugin_key ON skills(plugin_id, plugin_skill_key) WHERE plugin_id IS NOT NULL;`)
+
+      // ── Marketplace cache ──
+      runSQL(db, `
+        CREATE TABLE IF NOT EXISTS marketplace_cache (
+          repo TEXT PRIMARY KEY,
+          ref TEXT NOT NULL DEFAULT 'main',
+          etag TEXT,
+          last_status_code INTEGER,
+          response_json TEXT NOT NULL,
+          fetched_at TEXT NOT NULL
+        );
+      `)
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

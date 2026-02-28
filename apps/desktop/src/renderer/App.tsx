@@ -3,6 +3,7 @@ import { Sidebar, IntakePanel, OnboardingFlow, ToastContainer } from './componen
 import { DomainListPage, DomainChatPage } from './pages'
 import { BriefingPage } from './pages/BriefingPage'
 import { MissionControlPage } from './pages/MissionControlPage'
+import { PluginLibraryPage } from './pages/PluginLibraryPage'
 import { useDomainStore, useIntakeStore, useToastStore } from './stores'
 import { useTheme } from './hooks/useTheme'
 
@@ -113,7 +114,7 @@ function WindowTitlebar(): React.JSX.Element {
   )
 }
 
-export type ActiveView = 'domains' | 'intake' | 'briefing' | 'missions'
+export type ActiveView = 'domains' | 'intake' | 'briefing' | 'missions' | 'plugins'
 
 export function App(): React.JSX.Element {
   const activeDomainId = useDomainStore((s) => s.activeDomainId)
@@ -153,6 +154,7 @@ export function App(): React.JSX.Element {
     if (activeView === 'intake') return <IntakePanel />
     if (activeView === 'briefing') return <BriefingPage onViewChange={setActiveView} />
     if (activeView === 'missions') return <MissionControlPage onViewChange={setActiveView} />
+    if (activeView === 'plugins') return <PluginLibraryPage onViewChange={setActiveView} />
     if (domainsLoading) {
       return (
         <div className="flex h-full items-center justify-center">

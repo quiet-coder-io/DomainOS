@@ -41,6 +41,7 @@ export interface PromptProfileSections {
   siblings: boolean
   sharedProtocols: boolean
   skill: boolean
+  command: boolean
   domainProtocols: boolean | 'micro'
   escalation: boolean
   statusBriefing: boolean | 'capsule'
@@ -89,6 +90,7 @@ const CLOUD_FULL: PromptProfile = {
     siblings: true,
     sharedProtocols: true,
     skill: true,
+    command: true,
     domainProtocols: true,
     escalation: true,
     statusBriefing: true,
@@ -117,6 +119,7 @@ const OLLAMA_FAST: PromptProfile = {
     siblings: false,
     sharedProtocols: false,
     skill: false,
+    command: false,
     domainProtocols: false,
     escalation: true,
     statusBriefing: 'capsule',
@@ -147,6 +150,7 @@ const OLLAMA_BALANCED: PromptProfile = {
     siblings: false,
     sharedProtocols: false,
     skill: false,
+    command: false,
     domainProtocols: 'micro',
     escalation: true,
     statusBriefing: 'capsule',
@@ -197,4 +201,8 @@ export const TOKEN_BUDGETS = {
   statusBriefing: 900,
   /** Active skill procedure — NOTE: this is a character cap, not token count */
   skill: 12_000,
+  /** Active command procedure + arguments — NOTE: this is a character cap, not token count */
+  command: 12_000,
+  /** Maximum characters for command arguments */
+  commandArgs: 8_000,
 } as const

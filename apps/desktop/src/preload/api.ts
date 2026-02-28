@@ -304,6 +304,30 @@ export interface DomainOSAPI {
     clearGCPOAuth(): Promise<IPCResult<void>>
   }
 
+  plugin: {
+    list(): Promise<IPCResult<PluginData[]>>
+    get(id: string): Promise<IPCResult<PluginDetailData>>
+    installFromDirectory(path: string): Promise<IPCResult<PluginInstallResultData>>
+    uninstall(id: string): Promise<IPCResult<void>>
+    toggle(id: string): Promise<IPCResult<PluginData>>
+    enableForDomain(pluginId: string, domainId: string): Promise<IPCResult<PluginDomainAssocData>>
+    disableForDomain(pluginId: string, domainId: string): Promise<IPCResult<PluginDomainAssocData>>
+    listForDomain(domainId: string): Promise<IPCResult<PluginData[]>>
+    checkUpdates(id: string): Promise<IPCResult<{ hasUpdate: boolean; remoteVersion?: string }>>
+    marketplaceList(): Promise<IPCResult<MarketplaceEntryData[]>>
+  }
+
+  command: {
+    listForDomain(domainId: string): Promise<IPCResult<CommandData[]>>
+    get(id: string): Promise<IPCResult<CommandData>>
+    displaySlugs(domainId: string): Promise<IPCResult<Record<string, string>>>
+    logInvocation(input: {
+      commandId: string; domainId: string; canonicalSlug: string
+      pluginVersion?: string | null; argsHash?: string | null; resultHash?: string | null
+      durationMs?: number | null; status: 'success' | 'blocked' | 'error'; errorCode?: string | null
+    }): Promise<IPCResult<CommandInvocationData>>
+  }
+
   mission: {
     list(): Promise<IPCResult<MissionSummary[]>>
     listForDomain(domainId: string): Promise<IPCResult<MissionSummary[]>>
@@ -978,4 +1002,105 @@ export interface MissionProgressEventData {
   gate?: MissionRunGate
   status?: string
   error?: string
+}
+
+// ── Plugin types ──
+
+export type PluginSourceType = 'anthropic_official' | 'github_repo' | 'local_directory'
+
+export interface PluginSkillSummary {
+  id: string
+  name: string
+  description: string
+  isEnabled: boolean
+  pluginSkillKey: string | null
+  removedUpstreamAt: string | null
+  hasAssets: boolean
+}
+
+export interface PluginCommandSummary {
+  id: string
+  name: string
+  canonicalSlug: string
+  description: string
+  argumentHint: string | null
+  isEnabled: boolean
+  removedUpstreamAt: string | null
+}
+
+export interface PluginData {
+  id: string
+  name: string
+  version: string
+  description: string
+  authorName: string
+  sourceType: PluginSourceType
+  sourceRepo: string | null
+  sourceRef: string | null
+  installPath: string
+  licenseText: string | null
+  noticeText: string | null
+  isEnabled: boolean
+  installedAt: string
+  updatedAt: string
+}
+
+export interface PluginDetailData extends PluginData {
+  skills: PluginSkillSummary[]
+  commands: PluginCommandSummary[]
+}
+
+export interface PluginDomainAssocData {
+  pluginId: string
+  domainId: string
+  isEnabled: boolean
+  createdAt: string
+}
+
+export interface PluginInstallResultData {
+  plugin: PluginData
+  skillsImported: number
+  commandsImported: number
+  warnings: string[]
+}
+
+export interface MarketplaceEntryData {
+  name: string
+  source: { repo: string; branch: string; trusted: boolean }
+  description?: string
+  version?: string
+  installed: boolean
+  hasUpdate: boolean
+}
+
+// ── Command types ──
+
+export interface CommandData {
+  id: string
+  pluginId: string | null
+  pluginCommandKey: string | null
+  name: string
+  canonicalSlug: string
+  pluginName: string | null
+  description: string
+  argumentHint: string | null
+  content: string
+  sourceHash: string
+  removedUpstreamAt: string | null
+  isEnabled: boolean
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+  // Computed fields (added at IPC layer)
+  displaySlug?: string
+  isModified?: boolean
+}
+
+export interface CommandInvocationData {
+  id: string
+  commandId: string
+  domainId: string
+  canonicalSlug: string
+  status: 'success' | 'blocked' | 'error'
+  invokedAt: string
 }
