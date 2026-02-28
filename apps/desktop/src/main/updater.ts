@@ -1,5 +1,6 @@
 import { autoUpdater } from 'electron-updater'
 import { app, dialog, BrowserWindow } from 'electron'
+import { execFile } from 'node:child_process'
 
 export function initAutoUpdater(mainWindow: BrowserWindow): void {
   if (!app.isPackaged) return
@@ -22,10 +23,25 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
       title: 'Update Ready',
       message: `DomainOS ${info.version} has been downloaded. Restart now to install?`,
       buttons: ['Restart', 'Later'],
-    }).then((r) => {
+    }).then(async (r) => {
       if (r.response === 0) {
-        // Defer to next tick — quitAndInstall blocks if called while dialog is still dismissing
-        setImmediate(() => autoUpdater.quitAndInstall(false, true))
+        // Clear quarantine on update cache — unsigned app updates get quarantined by macOS
+        const cachePath = `${app.getPath('home')}/Library/Caches/${app.name}-updater`
+        try {
+          await new Promise<void>((resolve) => {
+            execFile('xattr', ['-cr', cachePath], () => resolve())
+          })
+        } catch { /* non-fatal */ }
+
+        // Destroy all windows first to bypass close-event handlers that can block quit
+        for (const win of BrowserWindow.getAllWindows()) {
+          win.removeAllListeners('close')
+          win.destroy()
+        }
+        // Defer to next tick so window destruction completes before quit
+        setImmediate(() => {
+          autoUpdater.quitAndInstall(false, true)
+        })
       }
     })
   })
